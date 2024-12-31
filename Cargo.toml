@@ -7,6 +7,8 @@ license = "MIT"
 repository = "https://github.com/AdamStrojek/rust-agentai"
 description = "AgentAI is a Rust library designed to simplify the creation of AI agents."
 readme = "README.md"
+categories = ["text-processing"]
+keywords = ["generative-ai", "openai", "chatgpt", "gemini", "agent"]
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
