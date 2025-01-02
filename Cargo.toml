@@ -21,13 +21,8 @@ async-trait = "0.1.83"
 log = "0.4.22"
 schemars = "0.8.21"
 serde = "1.0.216"
+reqwest = "0.12.12"
 
 [dev-dependencies]
 tokio = { version = "1.42.0", features = ["full"] }
 simplelog = "0.12.2"
-
-[[example]]
-name = "simple"
-
-[[example]]
-name = "struct_output"
