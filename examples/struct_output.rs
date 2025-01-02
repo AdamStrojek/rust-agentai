@@ -20,10 +20,6 @@ async fn main() -> Result<()> {
     )?;
     info!("Starting AgentAI");
 
-    // Creating empty Context, in this example we don't require to use Context, but object need
-    // to be passed and initialised.
-    let ctx = Ctx {};
-
     // Creating GenAI client
     let client = Client::default();
 
@@ -31,7 +27,7 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(&client, SYSTEM, &ctx);
+    let mut agent = Agent::new(&client, SYSTEM, &());
 
     let answer: Answer = agent.run(MODEL, question).await?;
 
@@ -40,8 +36,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-struct Ctx {}
-
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Debug)]
 struct Answer {
     // It is always good idea to include thinking field for LLM's debugging
