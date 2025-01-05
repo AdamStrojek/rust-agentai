@@ -38,7 +38,10 @@ impl<CTX> AgentTool<CTX> for WebSearchTool {
     }
 
     fn description(&self) -> String {
-        "Use this function to perform websearch. As the result you will receive list of websites with description".to_string()
+        "A tool that performs web searches using a specified query parameter to retrieve relevant \
+        results from a search engine. As the result you will receive list of websites \
+        with description"
+            .to_string()
     }
 
     fn schema(&self) -> Value {
@@ -46,7 +49,7 @@ impl<CTX> AgentTool<CTX> for WebSearchTool {
             "type": "object",
             "properties": {
                 "query": {
-                  "description": "The unique identifier for a product",
+                  "description": "The search terms or keywords to be used by the search engine for retrieving relevant results",
                   "type": "string"
                 },
             },
