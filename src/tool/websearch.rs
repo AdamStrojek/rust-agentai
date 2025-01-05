@@ -8,9 +8,9 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 
 /// # Brave Web Search Tool
 ///
-/// This is simple implementation of [crate::AgentTool] for Web Search using Brave Search engine.
-/// To use it you need to provide API Keys. This requires account creation, fortunetly you can
-/// choose free plan. Go to [https://api.search.brave.com/app/keys] to generate keys.
+/// This is a simple implementation of [crate::AgentTool] for Web Search using Brave Search engine.
+/// To use it you need to provide API Keys. This requires account creation, fortunately you can
+/// choose free plan. Go to [<https://api.search.brave.com/app/keys>] to generate keys.
 ///
 /// API Keys need to be provided when creating tool:
 /// ```rust

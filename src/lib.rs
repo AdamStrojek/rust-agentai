@@ -25,25 +25,23 @@
 //! _TODO: Change installation method after release_
 //!
 //! ## Usage
-//! Here’s a basic example of how to create an AI agent using AgentAI:
+//! Here is a basic example of how to create an AI agent using AgentAI:
 //! ```rust
 //! use agentai::Agent;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let ctx = Ctx {};
 //!     let client = genai::Client::default();
-//!     let mut agent = Agent::new(&client, "You are a useful assistant", &ctx);
+//!     let mut agent = Agent::new(&client, "You are a useful assistant", &());
 //!     let answer: String = agent.run("gpt-4o", "Why sky is blue?").await?;
 //!     println!("Answer: {}", answer);
 //!     Ok(())
 //! }
-//!
-//! struct Ctx {}
 //! ```
 //!
 //!## Examples
 //!
+#![allow(rustdoc::redundant_explicit_links)]
 //! For more examples, check out the [examples](crate::examples) directory. You can build and run them using Cargo with the following command:
 //!
 //! ```bash
@@ -51,7 +49,7 @@
 //! ```
 //!
 //! The <example_name> should match the filename of the example you want to run (without the file extension).
-//! For example, to run the example that includes the essential components required to implement an AI agent, use:
+//! For example, to run the example that includes the essential parts required to implement an AI agent, use:
 //!
 //! ```bash
 //! cargo run --example simple

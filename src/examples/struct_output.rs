@@ -1,12 +1,13 @@
 //! # Structured Output Example
 //!
-//! This example introduces concept of structured output supported by most of LLMs. Structured
-//! outputs may not work on all LLMs!
+//! This example introduces the concept of structured output supported by most of LLMs.
+//! Structured outputs may not work on all LLMs!
 //!
-//! To achieve it you simply need to create new deserializable structure which will be holding
-//! answer. Such structure need to derive from `serde::Deserialize` and `schemars::JsonSchema`.
+//! To achieve it, you need to create a new deserializable structure which will be holding
+//! answer.
+//! Such a structure needs to derive from `serde::Deserialize` and `schemars::JsonSchema`.
 //!
-//! To run this example from terminal just enter:
+//! To run this example from the terminal, enter:
 //! ```bash
 //! cargo run --example struct_output
 //! ```

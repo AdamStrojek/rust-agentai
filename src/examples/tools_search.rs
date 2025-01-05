@@ -4,7 +4,7 @@
 //!
 //! This example expects `BRAVE_API_KEY` env variable to be exported.
 //!
-//! To run this example from terminal just enter:
+//! To run this example from the terminal, enter:
 //! ```bash
 //! cargo run --example tools_search
 //! ```
