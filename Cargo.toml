@@ -9,6 +9,7 @@ description = "AgentAI is a Rust library designed to simplify the creation of AI
 readme = "README.md"
 categories = ["text-processing"]
 keywords = ["generative-ai", "openai", "chatgpt", "gemini", "agent"]
+exclude = ["release-plz.toml", ".github"]
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
