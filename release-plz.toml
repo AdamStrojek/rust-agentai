@@ -1,0 +1,6 @@
+[workspace]
+pr_branch_prefix = "release/v{{ version }}-" # PR branch prefix
+pr_name = "Release {{ package }} v{{ version }}" # template for the PR name
+pr_labels = ["release"] # add the `release` label to the release Pull Request
+pr_draft = true
+git_release_draft = true
