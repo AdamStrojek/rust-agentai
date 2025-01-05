@@ -16,13 +16,15 @@
 //! ```toml
 //! [dependencies]
 //! genai = "0.1.15"
-//! agentai = "0.1.1"
+//! agentai = "0.1.2"
 //!
+// Unfortunately this syntax is not supported by cargo-rdme
+// https://github.com/orium/cargo-rdme/issues/178
+// #![doc = concat!(env!("CARGO_PKG_NAME"), " = \"", env!("CARGO_PKG_VERSION"), "\"")]
 //! # Suggested additional dependencies:
 //! anyhow = "1"
 //! tokio = { version = "1.42.0", features = ["full"] }
 //! ```
-//! _TODO: Change installation method after release_
 //!
 //! ## Usage
 //! Here is a basic example of how to create an AI agent using AgentAI:

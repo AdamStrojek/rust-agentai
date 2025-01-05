@@ -43,6 +43,10 @@ jobs:
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Update the README file.
+        run: |
+          cargo install cargo-rdme
+          cargo rdme
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
