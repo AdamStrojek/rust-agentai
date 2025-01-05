@@ -50,7 +50,7 @@ impl<CTX> AgentTool<CTX> for WebSearchTool {
                   "type": "string"
                 },
             },
-            "required": [ "query", "productName", "price" ]
+            "required": [ "query" ]
         })
     }
 
