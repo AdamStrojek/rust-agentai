@@ -23,7 +23,12 @@ log = "0.4.22"
 schemars = "0.8.21"
 serde = "1.0.216"
 reqwest = "0.12.12"
+mcp_client_rs = {version = "0.1.5", optional = true}
 
 [dev-dependencies]
 tokio = { version = "1.42.0", features = ["full"] }
 simplelog = "0.12.2"
+
+[features]
+default = ["mcp-client"]
+mcp-client = ["dep:mcp_client_rs"]
