@@ -17,9 +17,12 @@ use std::sync::Arc;
 /// `Agent` itself, but it will be passed in unmodified state as reference to any
 /// `AgentTool` trait, that was registered to be used.
 pub struct Agent<'a, CTX> {
+    /// Reference to GenAI Client
     client: &'a Client,
+    /// Dynamic Context
     context: &'a CTX,
-    tools: HashMap<String, Arc<dyn AgentTool<CTX>>>,
+    /// Objects of tools implementations
+    tools_impl: HashMap<String, Arc<dyn AgentTool<CTX>>>,
     tools_defs: Vec<Tool>,
     history: Vec<ChatMessage>,
 }
@@ -40,7 +43,7 @@ impl<'a, CTX> Agent<'a, CTX> {
         Self {
             client,
             context,
-            tools: HashMap::new(),
+            tools_impl: HashMap::new(),
             tools_defs: vec![],
             history: vec![ChatMessage::system(system.trim())],
         }
@@ -57,7 +60,7 @@ impl<'a, CTX> Agent<'a, CTX> {
             .with_schema(agent_tool.schema());
         self.tools_defs.push(tool);
 
-        self.tools.insert(agent_tool.name(), agent_tool);
+        self.tools_impl.insert(agent_tool.name(), agent_tool);
     }
 
     /// Runs the agent with the given model and prompt.
@@ -111,7 +114,7 @@ impl<'a, CTX> Agent<'a, CTX> {
                 // Go through tool use
                 for tool_request in tools_call {
                     trace!("Tool request: {}", tool_request.fn_name);
-                    if let Some(tool) = self.tools.get(&tool_request.fn_name) {
+                    if let Some(tool) = self.tools_impl.get(&tool_request.fn_name) {
                         let result = tool
                             .call(
                                 self.context,

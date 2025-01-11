@@ -32,3 +32,10 @@ simplelog = "0.12.2"
 [features]
 default = ["mcp-client"]
 mcp-client = ["dep:mcp_client_rs"]
+
+[[example]]
+name = "tools_mcp"
+path = "examples/tools_mcp/src/main.rs"
+
+[workspace]
+members = ["examples/tools_mcp"]

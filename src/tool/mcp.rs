@@ -55,7 +55,7 @@ pub struct McpTool {
 }
 
 #[async_trait]
-impl AgentTool<()> for McpTool {
+impl<CTX> AgentTool<CTX> for McpTool {
     fn name(&self) -> String {
         self.name.clone()
     }
@@ -68,7 +68,7 @@ impl AgentTool<()> for McpTool {
         self.schema.clone()
     }
 
-    async fn call(&self, _: &(), params: Value) -> Result<String> {
+    async fn call(&self, _: &CTX, params: Value) -> Result<String> {
         let call_result = self.client.call_tool(&self.name, params).await?;
 
         // TODO: Right now we supports only text response from tool
