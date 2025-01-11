@@ -23,10 +23,12 @@ async fn main() -> Result<()> {
     )?;
     info!("Starting AgentAI");
 
+    let model = env::var("AGENTAI_MODEL").unwrap_or(MODEL.to_owned());
+
     // Creating GenAI client
     let client = Client::default();
 
-    let question = "What is current time for Poland??";
+    let question = "What is current time in Poland??";
 
     info!("Question: {}", question);
 
@@ -37,7 +39,7 @@ async fn main() -> Result<()> {
         agent.add_tool(agent_tool);
     }
 
-    let answer: Answer = agent.run(MODEL, question).await?;
+    let answer: Answer = agent.run(&model, question).await?;
 
     info!("{:#?}", answer);
 
