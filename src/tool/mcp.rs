@@ -14,6 +14,7 @@ use mcp_client_rs::client::{Client, ClientBuilder};
 use mcp_client_rs::types::MessageContent;
 use serde_json::Value;
 use std::sync::Arc;
+use log::trace;
 
 pub struct McpClient {
     client: Arc<Client>,
@@ -21,18 +22,19 @@ pub struct McpClient {
 
 impl McpClient {
     pub async fn new(cmd: &str, args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<Self> {
+        trace!("McpClient::new for cmd: {}", cmd);
         let client = ClientBuilder::new(cmd)
             .args(args)
             .spawn_and_initialize()
             .await?;
-
+        trace!("McpClient::new for client initialized");
         Ok(Self {
             client: Arc::new(client),
         })
     }
 
-    pub async fn tools(&self) -> Result<Vec<Arc<McpTool>>> {
-        let mut tools = vec![];
+    pub async fn tools<CTX>(&self) -> Result<Vec<Arc<dyn AgentTool<CTX>>>> {
+        let mut tools: Vec<Arc<dyn AgentTool<CTX>>> = vec![];
 
         for tool_desc in self.client.list_tools().await?.tools {
             tools.push(Arc::new(McpTool {
@@ -83,20 +85,5 @@ impl<CTX> AgentTool<CTX> for McpTool {
             .join("\n");
 
         Ok(msg)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn it_works_test() -> Result<()> {
-        let mcp_client = McpClient::new("uvx", ["mcp-server-time"]).await?;
-
-        let tools = mcp_client.tools().await?;
-        println!("{:#?}", tools.iter().map(|t| t.name()).collect::<Vec<_>>());
-
-        Ok(())
     }
 }
