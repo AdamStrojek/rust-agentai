@@ -55,12 +55,21 @@ impl<'a, CTX> Agent<'a, CTX> {
     ///
     /// * `agent_tool` - The tool to add.
     pub fn add_tool(&mut self, agent_tool: Arc<dyn AgentTool<CTX>>) {
+        trace!("AgentAI: Adding tool {}", agent_tool.name());
         let tool = Tool::new(agent_tool.name())
             .with_description(agent_tool.description())
             .with_schema(agent_tool.schema());
         self.tools_defs.push(tool);
 
         self.tools_impl.insert(agent_tool.name(), agent_tool);
+    }
+
+    pub fn add_tools(&mut self, agent_tools: Vec<Arc<dyn AgentTool<CTX>>>) {
+        trace!("AgentAI: Adding tools");
+
+        for agent_tool in agent_tools {
+            self.add_tool(agent_tool);
+        }
     }
 
     /// Runs the agent with the given model and prompt.
