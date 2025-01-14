@@ -7,24 +7,27 @@
 //! and maintainable code. Whether you're developing simple or complex AI agents, AgentAI provides
 //! a streamlined and efficient development process.
 //!
+//! ## Features
+//!
+//! - Multi LLM -- we support most of LLM API (OpenAI, Anthropic, Gemini, Ollama and all OpenAI API Compatible)
+//! - Choose correct LLM for the task -- use many smaller specialized LLMs to save costs and choose best of all the worlds
+//! - Support for MCP Server -- no need to write your own Agent Tools, you can leverage, already existing
+//!   solutions, based on Model Context Protocol
+//!
 //! > **Warning**
 //! > This library is under heavy development. The interface can change at any moment without any notice.
 //!
 //! ## Installation
-//! In your project add the following to your Cargo.toml file:
+//! To start using AgentAI crate just enter in root directory for your project this command:
 //!
-//! ```toml
-//! [dependencies]
-//! genai = "0.1.15"
-//! agentai = "0.1.2"
-//!
-// Unfortunately this syntax is not supported by cargo-rdme
-// https://github.com/orium/cargo-rdme/issues/178
-// #![doc = concat!(env!("CARGO_PKG_NAME"), " = \"", env!("CARGO_PKG_VERSION"), "\"")]
-//! # Suggested additional dependencies:
-//! anyhow = "1"
-//! tokio = { version = "1.42.0", features = ["full"] }
+//! ```bash
+//! cargo add agentai genai
 //! ```
+//!
+//! This will install this crate with all required dependencies.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
 //!
 //! ## Usage
 //! Here is a basic example of how to create an AI agent using AgentAI:

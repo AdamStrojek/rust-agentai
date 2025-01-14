@@ -24,6 +24,7 @@ schemars = "0.8.21"
 serde = "1.0.216"
 reqwest = "0.12.12"
 mcp_client_rs = {version = "0.1.5", optional = true}
+document-features = { version = "0.2"}
 
 [dev-dependencies]
 tokio = { version = "1.42.0", features = ["full"] }
@@ -31,11 +32,14 @@ simplelog = "0.12.2"
 
 [features]
 default = ["mcp-client"]
+#! Available features for `agentai` crate.
+#! To enable any of these features, you need to enter this command:
+#!
+#! ```bash
+#! cargo add agentai -F mcp-client
+#! ```
+#!
+#! Features list:
+
+## Enables experimental support for Agent Tools based on MCP Servers
 mcp-client = ["dep:mcp_client_rs"]
-
-[[example]]
-name = "tools_mcp"
-path = "examples/tools_mcp/src/main.rs"
-
-[workspace]
-members = ["examples/tools_mcp"]
