@@ -122,19 +122,35 @@ impl<'a, CTX> Agent<'a, CTX> {
                 self.history.push(ChatMessage::from(tools_call.clone()));
                 // Go through tool use
                 for tool_request in tools_call {
-                    trace!("Tool request: {}", tool_request.fn_name);
+                    trace!("Tool request: {} with params: {}", tool_request.fn_name, tool_request.fn_arguments.to_string());
                     if let Some(tool) = self.tools_impl.get(&tool_request.fn_name) {
-                        let result = tool
+                        match tool
                             .call(
                                 self.context,
                                 serde_json::from_value(tool_request.fn_arguments)?,
                             )
-                            .await?;
-                        trace!("Tool result: {}", result);
-                        self.history.push(ChatMessage::from(ToolResponse::new(
-                            tool_request.call_id.clone(),
-                            result,
-                        )));
+                            .await {
+                            Ok(result) => {
+                                trace!("Tool result: {}", result);
+                                self.history.push(ChatMessage::from(ToolResponse::new(
+                                    tool_request.call_id.clone(),
+                                    result,
+                                )));
+                            },
+                            Err(err) => {
+                                // If MCP Server fails we need to redirect this information to model
+                                // this will allow to react on what happens. Some MCP Servers returns
+                                // important information as error for Agent
+                                // TODO: Allow user to configure this behaviour. Depending on MCP
+                                // server this may contain important information, or this may be
+                                // indication of unrecoverable failure
+                                trace!("Error: {}", err);
+                                self.history.push(ChatMessage::from(ToolResponse::new(
+                                    tool_request.call_id.clone(),
+                                    err.to_string(),
+                                )));
+                            }
+                        }
                     } else {
                         trace!("No tool found for {}", tool_request.fn_name);
                     }
