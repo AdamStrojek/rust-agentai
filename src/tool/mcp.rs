@@ -7,6 +7,7 @@
 //!
 //!
 
+use std::collections::HashMap;
 use crate::AgentTool;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -21,12 +22,18 @@ pub struct McpClient {
 }
 
 impl McpClient {
-    pub async fn new(cmd: &str, args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<Self> {
+    pub async fn new(cmd: &str, args: impl IntoIterator<Item = impl AsRef<str>>, envs: Option<HashMap<String, String>>) -> Result<Self> {
         trace!("McpClient::new for cmd: {}", cmd);
-        let client = ClientBuilder::new(cmd)
-            .args(args)
-            .spawn_and_initialize()
-            .await?;
+        let mut builder = ClientBuilder::new(cmd)
+            .args(args);
+
+        if let Some(envs) = envs {
+            for (k, v) in envs {
+                builder = builder.env(&k, &v);
+            }
+        }
+
+        let client = builder.spawn_and_initialize().await?;
         trace!("McpClient::new for client initialized");
         Ok(Self {
             client: Arc::new(client),
