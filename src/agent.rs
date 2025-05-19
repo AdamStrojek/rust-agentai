@@ -1,5 +1,5 @@
 use crate::AgentTool;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, Tool, ToolResponse};
 use genai::Client;
 use log::{debug, trace};
