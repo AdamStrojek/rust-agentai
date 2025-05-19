@@ -1,4 +1,4 @@
-name: Release-plz
+name: Publish a new release
 
 permissions:
   pull-requests: write
@@ -11,7 +11,7 @@ on:
 
 jobs:
   crate-release:
-    name: crate release
+    name: Publish a new release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
