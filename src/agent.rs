@@ -31,9 +31,10 @@ pub struct Agent<'a, CTX> {
 impl<'a, CTX> Agent<'a, CTX> {
     /// Creates a new `Agent` instance.
     ///
+    /// This creation method will create a new agent instance with a default GenAI client
+    ///
     /// # Arguments
     ///
-    /// * `client` - The client used to interact with the chat model.
     /// * `system` - The system message to initialize the chat history.
     /// * `context` - The context associated with the agent.
     ///
@@ -43,6 +44,21 @@ impl<'a, CTX> Agent<'a, CTX> {
     pub fn new(system: &str, context: &'a CTX) -> Self {
         let client = Client::default();
 
+        Self::new_with_client(client, system, context)
+    }
+
+    /// Creates a new `Agent` instance with provided GenAI Client
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - User provided GenAI Client
+    /// * `system` - The system message to initialize the chat history.
+    /// * `context` - The context associated with the agent.
+    ///
+    /// # Returns
+    ///
+    /// A new `Agent` instance.
+    pub fn new_with_client(client: Client, system: &str, context: &'a CTX) -> Self {
         Self {
             client,
             context,
