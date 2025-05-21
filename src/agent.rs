@@ -83,6 +83,11 @@ impl<'a, CTX> Agent<'a, CTX> {
         self.tools_impl.insert(agent_tool.name(), agent_tool);
     }
 
+    /// Adds a list of tools to the agent
+    ///
+    /// # Arguments
+    ///
+    /// * `agent_tools` - list of tools
     pub fn add_tools(&mut self, agent_tools: Vec<Arc<dyn AgentTool<CTX>>>) {
         trace!("AgentAI: Adding tools");
 
