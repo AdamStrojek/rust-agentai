@@ -15,19 +15,19 @@ exclude = ["release-plz.toml", ".github"]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
-genai = "0.2.4"
-anyhow = "1.0.96"
-serde_json = "1.0.139"
-async-trait = "0.1.86"
-log = "0.4.26"
+genai = "0.3.5"
+anyhow = "1.0.98"
+serde_json = "1.0.140"
+async-trait = "0.1.88"
+log = "0.4.27"
 schemars = "0.8.22"
-serde = "1.0.218"
-reqwest = "0.12.12"
+serde = "1.0.219"
+reqwest = "0.12.18"
 mcp_client_rs = {version = "0.1.7", optional = true}
 document-features = { version = "0.2"}
 
 [dev-dependencies]
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.45.0", features = ["full"] }
 simplelog = "0.12.2"
 
 [features]
