@@ -1,4 +1,4 @@
-use agentai::websearch::WebSearchTool;
+use agentai::websearch::WebSearchToolBox;
 use agentai::Agent;
 use anyhow::Result;
 use log::{info, LevelFilter};
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     info!("Starting AgentAI");
 
     let api_key = env::var("BRAVE_API_KEY")?;
-    let web_search_tool = WebSearchTool::new(&api_key);
+    let web_search_tool = WebSearchToolBox::new(&api_key);
 
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("gemini-2.0-flash".to_string());
 
@@ -31,10 +31,9 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM, &());
-    agent.add_tool(Arc::new(web_search_tool));
+    let mut agent = Agent::new(SYSTEM);
 
-    let answer: Answer = agent.run(&model, question).await?;
+    let answer: Answer = agent.run(&model, question, Some(Arc::new(web_search_tool))).await?;
 
     info!("{:#?}", answer);
 

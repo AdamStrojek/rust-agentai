@@ -1,3 +1,9 @@
+[workspace]
+members = [
+    ".", # Include the current crate (rust-agentai)
+    "agentai-macros", # Add the new macro crate
+]
+
 [package]
 name = "agentai"
 version = "0.1.4"
@@ -20,11 +26,13 @@ anyhow = "1.0.98"
 serde_json = "1.0.140"
 async-trait = "0.1.88"
 log = "0.4.27"
-schemars = "0.8.22"
+schemars = { version = "0.9", features = ["derive"] }
 serde = "1.0.219"
 reqwest = "0.12.18"
 mcp_client_rs = {version = "0.1.7", optional = true}
 document-features = { version = "0.2"}
+agentai-macros = { path = "./agentai-macros" }
+thiserror = "2.0"
 
 [dev-dependencies]
 tokio = { version = "1.45.0", features = ["full"] }

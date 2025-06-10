@@ -1,13 +1,12 @@
-use crate::AgentTool;
+use crate::tool::ToolBox;
 use anyhow::{anyhow, Result};
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, Tool, ToolResponse};
+use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
 use genai::Client;
 use log::{debug, trace};
 use schemars::{schema_for, JsonSchema};
 use serde::de::DeserializeOwned;
 use serde_json::{from_str, json, Value};
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
@@ -17,18 +16,15 @@ use std::sync::Arc;
 /// `Agent` itself, but it will be passed in unmodified state as reference to any
 /// `AgentTool` trait, that was registered to be used.
 #[derive(Clone)]
-pub struct Agent<'a, CTX> {
+pub struct Agent {
     /// Reference to GenAI Client
     client: Client,
-    /// Dynamic Context
-    context: &'a CTX,
-    /// Objects of tools implementations
-    tools_impl: HashMap<String, Arc<dyn AgentTool<CTX>>>,
-    tools_defs: Vec<Tool>,
+
+    // tool_box: impl ToolBox,
     history: Vec<ChatMessage>,
 }
 
-impl<'a, CTX> Agent<'a, CTX> {
+impl Agent {
     /// Creates a new `Agent` instance.
     ///
     /// This creation method will create a new agent instance with a default GenAI client
@@ -36,15 +32,14 @@ impl<'a, CTX> Agent<'a, CTX> {
     /// # Arguments
     ///
     /// * `system` - The system message to initialize the chat history.
-    /// * `context` - The context associated with the agent.
     ///
     /// # Returns
     ///
     /// A new `Agent` instance.
-    pub fn new(system: &str, context: &'a CTX) -> Self {
+    pub fn new(system: &str) -> Self {
         let client = Client::default();
 
-        Self::new_with_client(client, system, context)
+        Self::new_with_client(client, system)
     }
 
     /// Creates a new `Agent` instance with provided GenAI Client
@@ -53,46 +48,14 @@ impl<'a, CTX> Agent<'a, CTX> {
     ///
     /// * `client` - User provided GenAI Client
     /// * `system` - The system message to initialize the chat history.
-    /// * `context` - The context associated with the agent.
     ///
     /// # Returns
     ///
     /// A new `Agent` instance.
-    pub fn new_with_client(client: Client, system: &str, context: &'a CTX) -> Self {
+    pub fn new_with_client(client: Client, system: &str) -> Self {
         Self {
             client,
-            context,
-            tools_impl: HashMap::new(),
-            tools_defs: vec![],
             history: vec![ChatMessage::system(system.trim())],
-        }
-    }
-
-    /// Adds a tool to the agent.
-    ///
-    /// # Arguments
-    ///
-    /// * `agent_tool` - The tool to add.
-    pub fn add_tool(&mut self, agent_tool: Arc<dyn AgentTool<CTX>>) {
-        trace!("AgentAI: Adding tool {}", agent_tool.name());
-        let tool = Tool::new(agent_tool.name())
-            .with_description(agent_tool.description())
-            .with_schema(agent_tool.schema());
-        self.tools_defs.push(tool);
-
-        self.tools_impl.insert(agent_tool.name(), agent_tool);
-    }
-
-    /// Adds a list of tools to the agent
-    ///
-    /// # Arguments
-    ///
-    /// * `agent_tools` - list of tools
-    pub fn add_tools(&mut self, agent_tools: Vec<Arc<dyn AgentTool<CTX>>>) {
-        trace!("AgentAI: Adding tools");
-
-        for agent_tool in agent_tools {
-            self.add_tool(agent_tool);
         }
     }
 
@@ -106,7 +69,7 @@ impl<'a, CTX> Agent<'a, CTX> {
     /// # Returns
     ///
     /// A result containing the deserialized response.
-    pub async fn run<D>(&mut self, model: &str, prompt: &str) -> Result<D>
+    pub async fn run<D>(&mut self, model: &str, prompt: &str, toolbox: Option<Arc<dyn ToolBox>>) -> Result<D>
     where
         D: DeserializeOwned + JsonSchema + 'static,
     {
@@ -144,8 +107,8 @@ impl<'a, CTX> Agent<'a, CTX> {
             debug!("Agent iteration: {}", iteration);
             // Create chat request
             let mut chat_req = ChatRequest::new(self.history.clone());
-            if !self.tools_defs.is_empty() {
-                chat_req = chat_req.with_tools(self.tools_defs.clone());
+            if let Some(ref toolbox) = toolbox {
+                chat_req = chat_req.with_tools(toolbox.tools_definitions()?);
             }
             let chat_resp = self
                 .client
@@ -171,14 +134,9 @@ impl<'a, CTX> Agent<'a, CTX> {
                     self.history.push(ChatMessage::from(tools_call.clone()));
                     // Go through tool use
                     for tool_request in tools_call {
-                        trace!("Tool request: {} with params: {}", tool_request.fn_name, tool_request.fn_arguments.to_string());
-                        if let Some(tool) = self.tools_impl.get(&tool_request.fn_name) {
-                            match tool
-                                .call(
-                                    self.context,
-                                    serde_json::from_value(tool_request.fn_arguments)?,
-                                )
-                                .await {
+                        trace!("Tool request: {} with arguments: {}", tool_request.fn_name, tool_request.fn_arguments.to_string());
+                        if let Some(ref tool) = toolbox {
+                            match tool.call_tool(tool_request.fn_name, tool_request.fn_arguments).await {
                                 Ok(result) => {
                                     trace!("Tool result: {}", result);
                                     self.history.push(ChatMessage::from(ToolResponse::new(
@@ -199,9 +157,9 @@ impl<'a, CTX> Agent<'a, CTX> {
                                         err.to_string(),
                                     )));
                                 }
-                            }
+                            };
                         } else {
-                            trace!("No tool found for {}", tool_request.fn_name);
+                            todo!("No tool found for {}", tool_request.fn_name);
                         }
                     }
                 },
