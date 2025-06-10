@@ -252,7 +252,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     quote! { None }
                 } else {
                     // Use the generated parameter struct name for schemars::schema_for!
-                    quote! { Some(schemars::schema_for!(#params_struct_name)) }
+                    quote! { Some(serde_json::to_value(schemars::schema_for!(#params_struct_name)).expect("Failed to serialize schema")) }
                 };
 
                 tool_definitions.extend(quote! {
@@ -365,4 +365,24 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     final_code.into()
+}
+
+#[proc_macro_attribute]
+/// Attribute to mark a method within a ToolBox implementation as a callable tool.
+///
+/// This macro parses the attribute arguments (like `name = "..."`) and the annotated
+/// function definition but primarily serves to register the `#[tool]` attribute
+/// name with the compiler. The actual tool processing (schema generation,
+/// call dispatch) is handled by the `#[toolbox]` macro applied to the
+/// `impl` block.
+///
+/// Expected arguments:
+/// - `name = "tool_name"`: Specifies the unique name for the tool. This is required.
+pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // The #[toolbox] macro will parse and process the attribute arguments.
+    // This macro only needs to make the attribute name known to the compiler.
+
+    // Pass the annotated item (the function) through unmodified.
+    // The #[toolbox] macro will read and process this function later.
+    item
 }
