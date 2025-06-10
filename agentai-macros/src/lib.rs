@@ -123,33 +123,38 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     Err(e) => return Error::new_spanned(tool_attr.to_token_stream(), format!("Failed to parse tool attribute arguments: {}", e)).to_compile_error().into(),
                 };
 
-                for arg_meta in args { // Iterate over the parsed Meta items
-                    if let Meta::NameValue(name_value) = arg_meta { // Check if it's a NameValue
-                        if name_value.path.is_ident("name") { // Check if the path is "name"
-                            if let Expr::Lit(expr_lit) = &name_value.value { // Access the value field (an Expr)
-                                if let Lit::Str(lit_str) = &expr_lit.lit { // Access the literal within Expr::Lit
+                // Iterate over the parsed Meta items to find 'name'. Allow #[tool] or #[tool(name = "...")].
+                let mut name_arg_found = false;
+                for arg_meta in args {
+                    if let Meta::NameValue(name_value) = arg_meta {
+                        if name_value.path.is_ident("name") {
+                            if name_arg_found {
+                                // Error: Duplicate 'name' argument
+                                return Error::new_spanned(name_value.to_token_stream(), "Duplicate \'name\' argument in tool attribute").to_compile_error().into();
+                            }
+                            if let Expr::Lit(expr_lit) = &name_value.value {
+                                if let Lit::Str(lit_str) = &expr_lit.lit {
                                     tool_name = lit_str.value();
-                                    break; // Found the name, stop looking in this attribute
+                                    name_arg_found = true;
                                 } else {
-                                    // Handle error: expected string literal for name
-                                    return Error::new_spanned(expr_lit, "Expected string literal for tool name").to_compile_error().into();
+                                    // Error: Expected string literal for name
+                                    return Error::new_spanned(expr_lit.to_token_stream(), "Expected string literal for tool name").to_compile_error().into();
                                 }
                             } else {
-                                // Handle error: expected literal for name value
-                                return Error::new_spanned(&name_value.value, "Expected literal value for tool name").to_compile_error().into();
+                                // Error: Expected literal value for name
+                                return Error::new_spanned(name_value.value.to_token_stream(), "Expected literal value for tool name").to_compile_error().into();
                             }
                         } else {
-                             // Handle error: unexpected argument name
-                             return Error::new_spanned(name_value.path.to_token_stream(), "Expected 'name' argument in tool attribute").to_compile_error().into();
+                             // Error: If arguments are present, they must be 'name = "..."'
+                             return Error::new_spanned(name_value.path.to_token_stream(), "Expected only \'name\' argument in tool attribute").to_compile_error().into();
                         }
                     } else {
-                         // Handle error: unexpected item type in tool attribute list
-                         return Error::new_spanned(arg_meta.to_token_stream(), "Expected name = \"...\" in tool attribute").to_compile_error().into();
+                         // Error: If arguments are present, they must be 'name = "..."'
+                         return Error::new_spanned(arg_meta.to_token_stream(), "Expected name = \\\"...\\\" in tool attribute").to_compile_error().into();
                     }
                 }
 
-
-                // Check for duplicate tool names
+                // Check for duplicate tool names AFTER determining the final tool_name
                 if !found_tools.insert(tool_name.clone()) {
                      return Error::new_spanned(tool_attr.to_token_stream(), format!("Duplicate tool name found: {}", tool_name)).to_compile_error().into();
                 }
