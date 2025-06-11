@@ -23,9 +23,9 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM, &());
+    let mut agent = Agent::new(SYSTEM);
 
-    let answer: Answer = agent.run(&model, question).await?;
+    let answer: Answer = agent.run(&model, question, None).await?;
 
     info!("{:#?}", answer);
 

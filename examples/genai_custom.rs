@@ -28,9 +28,9 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new_with_client(client, SYSTEM, &());
+    let mut agent = Agent::new_with_client(client, SYSTEM);
 
-    let answer: String = agent.run(&model, question).await?;
+    let answer: String = agent.run(&model, question, None).await?;
 
     info!("Answer: {}", answer);
 
