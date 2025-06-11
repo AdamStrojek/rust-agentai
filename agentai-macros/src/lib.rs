@@ -12,23 +12,17 @@ use syn::{
     Meta,
     Error,
     Expr,
-    parse::Parser, // Needed for parse_args_with
-    Result as SynResult, // Alias Result to avoid conflict with std::Result
     MetaNameValue,
 };
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use std::collections::HashSet;
-
-// Note: The actual path for Tool and ToolError might differ depending on your crate structure.
-// This example assumes `rust_agentai::tool::{Tool, ToolError}`.
-// You might need to adjust the `use crate::tool` path in the generated code block.
 
 /// Attribute macro applied to an `impl` block to derive the `ToolBox` trait implementation.
 ///
 /// Methods within the `impl` block annotated with `#[tool]` will be exposed as tools.
 /// The `#[tool]` attribute can optionally take a `name` argument to specify the tool name.
 /// Doc comments (`///`) on `#[tool]` methods are used as the tool description.
-/// Doc comments (`#[doc = \"...\\\"]`) on function parameters are moved to the generated parameter struct fields.
+/// Doc comments (`#[doc = "..."]`) on function parameters are moved to the generated parameter struct fields.
 ///
 /// Requires `serde`, `serde_json`, `schemars`, `async-trait`, and `anyhow` as dependencies in your project.
 /// Make sure `schemars` is enabled with the `derive` feature.
@@ -190,7 +184,8 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 };
 
                 // Generate parameter struct
-                let params_struct_name = Ident::new(&format!("{}Params", original_fn_name_str), fn_name.span());
+                use heck::ToUpperCamelCase;
+                let params_struct_name = Ident::new(&format!("{}Params", original_fn_name_str.to_upper_camel_case()), fn_name.span());
                 let mut param_fields = TokenStream2::new();
                 let mut param_names: Vec<Ident> = vec![]; // Use Ident for parameter names
 
@@ -230,6 +225,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                      quote! {
                         // Parameters struct for #original_fn_name_str
                         #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+
                         // Allow dead code if the struct is only used by the generated macro code
                         #[allow(dead_code)]
                          #[allow(clippy::all)] // Allow various lints for generated code
