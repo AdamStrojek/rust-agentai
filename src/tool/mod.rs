@@ -8,6 +8,8 @@ use serde_json::Value;
 
 pub use genai::chat::Tool;
 
+pub use agentai_macros::{toolbox, tool};
+
 /// A container or manager for a collection of `Tool` instances.
 /// This provides a way to group and access multiple tools.
 #[async_trait::async_trait]
@@ -27,5 +29,6 @@ pub enum ToolError {
     NoToolFound(String),
     #[error("This error will be raised if call fails")]
 	ExecutionError,
-    // TODO: add opaque type for errors from tool execution
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
