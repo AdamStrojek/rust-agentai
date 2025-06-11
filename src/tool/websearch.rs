@@ -1,8 +1,7 @@
-use crate::{ToolBox, Tool, ToolError};
-use agentai_macros::toolbox;
+use crate::{ToolError, tool, toolbox};
 use anyhow::Context;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 
@@ -15,7 +14,7 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 /// API Keys need to be provided when creating tool:
 /// ```rust
 ///     let api_key = "<ENTER YOUR KEYS HERE>";
-///     let tool = WebSearchTool::new(api_key);
+///     let tool = WebSearchToolBox::new(api_key);
 /// ```
 pub struct WebSearchToolBox {
     client: Client,
@@ -31,6 +30,7 @@ impl WebSearchToolBox {
         }
     }
 
+    #[tool()]
     /// A tool that performs web searches using a specified query parameter to retrieve relevant
     /// results from a search engine. As the result you will receive list of websites with description
     async fn web_search(
