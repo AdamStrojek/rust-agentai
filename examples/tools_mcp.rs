@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 use std::sync::Arc;
-use agentai::mcp::McpToolBox;
+use agentai::tool::mcp::McpToolBox;
 
 const SYSTEM: &str =
     "You are helpful assistant.";

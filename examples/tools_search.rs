@@ -1,4 +1,4 @@
-use agentai::websearch::WebSearchToolBox;
+use agentai::tool::websearch::WebSearchToolBox;
 use agentai::Agent;
 use anyhow::Result;
 use log::{info, LevelFilter};
