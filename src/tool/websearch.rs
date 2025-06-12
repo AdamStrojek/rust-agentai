@@ -35,10 +35,9 @@ impl WebSearchToolBox {
     /// results from a search engine. As the result you will receive list of websites with description
     async fn web_search(
         &self,
-        // #[doc = "The search terms or keywords to be used by the search engine for retrieving relevant results"]
+        // #[tool_doc = "The search terms or keywords to be used by the search engine for retrieving relevant results"]
         query: String
     ) -> Result<String, ToolError> {
-        // TODO Fix all unwrap();
         let params = [("q", query.as_str()), ("count", "5"), ("result_filter", "web")];
         let response = self
             .client
@@ -46,22 +45,22 @@ impl WebSearchToolBox {
             .query(&params)
             .header("X-Subscription-Token", self.api_key.clone())
             .send()
-            .await.unwrap();
+            .await.map_err(|e| anyhow::Error::new(e))?;
 
-        let json: Value = response.json().await.unwrap();
+        let json: Value = response.json().await.map_err(|e| anyhow::Error::new(e))?;
 
         let mut results: Vec<String> = vec![];
 
-        let response = json["web"]["results"].as_array().unwrap();
+        let response = json["web"]["results"].as_array().ok_or(ToolError::ExecutionError)?;
         for item in response
         {
             let title = item["title"]
                 .as_str()
-                .context("web title is not a string").unwrap();
+                .context("web title is not a string")?;
             let description = item["description"]
                 .as_str()
-                .context("web description is not a string").unwrap();
-            let url = item["url"].as_str().context("web url is not a string").unwrap();
+                .context("web description is not a string")?;
+            let url = item["url"].as_str().context("web url is not a string")?;
             results.push(format!(
                 "Title: {title}\nDescription: {description}\nURL: {url}"
             ));

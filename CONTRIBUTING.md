@@ -15,7 +15,7 @@ right corner of the project’s GitHub page.
 Clone your fork to your local machine using the following command:
 
 ```bash
-git clone https://github.com/<your-username>/AgentAI.git
+git clone https://github.com/<your-username>/rust-agentai.git
 ```
 
 ### 3. Create a New Branch

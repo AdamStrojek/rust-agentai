@@ -1,7 +1,8 @@
 //! # Custom Agent Tool Implementation
 //!
-//! This example is pretty similar to [Tools Search](crate::examples::tools_search), but here we focus
-//! on demonstrating how to create your own tool that can be used later in your AI Agent
+//! This example demonstrates how to create a custom tool using the `#[toolbox]` and `#[tool()]` macros
+//! provided by the `agentai` crate. It sets up an AI agent with a custom tool that can fetch content
+//! from a given URL, showcasing how to define and use your own tools with the `agentai` crate.
 //!
 //! To run this example from the terminal, enter:
 //! ```bash

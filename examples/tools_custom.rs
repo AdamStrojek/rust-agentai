@@ -1,21 +1,20 @@
 //! Custom Agent Tool Implementation Example
 //!
-//! This example is pretty similar to [Tools Search](crate::examples::tools_search), but here we focus
-//! on demonstrating how to create your own tool that can be used later in your AI Agent
+//! This example demonstrates how to create a custom tool using the `#[toolbox]` and `#[tool()]` macros
+//! provided by the `agentai` crate. This tool will be used by the AI agent to fetch content from a URL.
 //!
 
-use agentai::{Agent, AgentTool};
-use anyhow::{Context, Result};
-use async_trait::async_trait;
+use agentai::Agent;
+use agentai::tool::{ToolBox, Tool, ToolError, tool, toolbox};
+use anyhow::Error;
 use log::{info, LevelFilter};
-use serde_json::{json, Value};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 use std::sync::Arc;
 
 const SYSTEM: &str = "You are helpful assistant. You goal is to provide summary for provided site. Limit you answer to 3 sentences.";
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Error> {
     TermLogger::init(
         LevelFilter::Trace,
         Config::default(),
@@ -24,71 +23,53 @@ async fn main() -> Result<()> {
     )?;
     info!("Starting AgentAI");
 
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gemini-2.0-flash".to_string());
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gpt-4o-mini".to_string());
 
     let question =
         "For what I can use this library? https://raw.githubusercontent.com/AdamStrojek/rust-agentai/refs/heads/master/README.md";
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM, &());
+    let mut agent = Agent::new(SYSTEM);
 
-    // Remember to register your tool!
-    agent.add_tool(Arc::new(UrlFetcherTool {}));
-
-    let answer: String = agent.run(&model, question).await?;
+    let answer: String = agent.run(&model, question, Some(Arc::new(UrlFetcherToolBox {}))).await?;
+    // let answer: String = agent.run(&model, question, None).await?;
 
     info!("Answer: {}", answer);
 
     Ok(())
 }
 
-/// This structure provides "base" for trait implementation. For this example, we don't store
-/// any extra information, but if you want, you can store things that differ between two instances
-/// that are Context independent
+/// This structure represents our custom tool set. The `#[toolbox]` macro
+/// is applied to the `impl` block for this struct. It discovers methods
+/// annotated with `#[tool()]` and automatically generates the necessary
+/// `ToolBox` trait implementation, including `name`, `description`,
+/// `schema`, and `call` methods based on the annotated functions.
 ///
-/// Please be aware that even though this tool is provided as Arc to `Agent` you need to ensure
-/// thread safe operations within the tool itself
-struct UrlFetcherTool {}
+/// For this example, `UrlFetcherToolBox` itself doesn't need to store
+/// any state, but it could if your tools required it.
+struct UrlFetcherToolBox {}
 
-/// Here is the main implementation of Agent Tool.All methods are required to be implemented.
-/// This example doesn't focus on providing Context for tool, so skipping it,
-/// Important notice: we use #[async_trait] to be able to use async method within trait without
-/// a need for Boxing and Pinning them.
-#[async_trait]
-impl<CTX> AgentTool<CTX> for UrlFetcherTool {
-    /// All tools require returning name of it. All next three methods are provided to LLM
-    /// to be aware of the capabilities of the tool. If LLM is not triggering your tool,
-    /// then check information provided here
-    /// Most of LLMs require providing tool name in format: `^[a-zA-Z0-9_-]+$`
-    fn name(&self) -> String {
-        "Web_Fetch".to_string()
-    }
-
-    fn description(&self) -> String {
-        "This tool allows you fetching any page for provided URL address".to_string()
-    }
-
-    fn schema(&self) -> Value {
-        // Parameters description is provided in JSON Schema format
-        json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                  "description": "URL for site that should be fetched",
-                  "type": "string"
-                },
-            },
-            "required": [ "url" ]
-        })
-    }
-
-    /// This is the main body of your tool. It will be executed each time LLM thinks it can be used.
-    /// For this example, context parameter can be safely ignored.
-    /// `params` contains parsed JSON structure that match to your description
-    /// from `schema()` method
-    async fn call(&self, _: &CTX, params: Value) -> Result<String> {
-        let url = params["url"].as_str().context("Missing URL argument")?;
-        Ok(reqwest::get(url).await?.text().await?)
+/// The `#[toolbox]` macro is applied to the `impl` block for `UrlFetcherToolBox`.
+/// It processes the methods within this block to create the tool definitions.
+#[toolbox]
+impl UrlFetcherToolBox {
+    /// The `#[tool()]` macro annotates methods that should be exposed as tools
+    /// to the AI agent. The macro automatically generates the necessary metadata
+    /// (name, description, schema) for the tool based on the function signature
+    /// and documentation comments.
+    ///
+    /// The tool name will be derived from the function name (`web_fetch`).
+    /// The description will be taken from this documentation comment.
+    /// The schema will be generated from the function arguments (here, `url: String`).
+    /// The body of this function will be executed when the AI agent decides to use the tool.
+    #[tool()]
+    async fn web_fetch(&self, url: String) -> Result<String, ToolError> {
+        // Use reqwest to fetch the content from the provided URL.
+        // The `?` operator handles potential errors from the get and text methods.
+        Ok(
+            reqwest::get(url).await.map_err(|e| anyhow::Error::new(e))?
+                .text().await.map_err(|e| anyhow::Error::new(e))?
+        )
     }
 }
