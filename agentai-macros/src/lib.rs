@@ -291,9 +291,8 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                          #method_call #await_if_async .map_err(|e| {
                              // Map any error from the tool function to ToolError::ExecutionError
                              // Consider logging the original error `e` here for debugging
-                             #[cfg(feature = "log-errors")] // Use a feature flag for logging
                              eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
-                             crate::tool::ToolError::ExecutionError
+                             ToolError::ExecutionError
                          })
                      }
                 } else {
@@ -303,17 +302,15 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                             .map_err(|e| {
                                 // Map deserialization error to ToolError::ExecutionError
                                 // Consider logging the deserialization error `e` here
-                                #[cfg(feature = "log-errors")] // Use a feature flag for logging
                                 eprintln!("Tool parameter deserialization error for '{}': {:?}", #tool_name, e);
-                                crate::tool::ToolError::ExecutionError
+                                ToolError::ExecutionError
                             })?; // Use ? to propagate deserialization error
 
                         #method_call #await_if_async .map_err(|e| {
                             // Map any error from the tool function to ToolError::ExecutionError
                             // Consider logging the original error `e` here for debugging
-                            #[cfg(feature = "log-errors")] // Use a feature flag for logging
                             eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
-                            crate::tool::ToolError::ExecutionError
+                            ToolError::ExecutionError
                         })
                     }
                 };
@@ -337,19 +334,19 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
         use schemars::{self, JsonSchema};
 
         #[async_trait::async_trait]
-        impl crate::tool::ToolBox for #struct_ident {
+        impl ToolBox for #struct_ident {
 
-            fn tools_definitions(&self) -> Result<Vec<crate::tool::Tool>, crate::tool::ToolError> {
+            fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
                 Ok(vec![
                     #tool_definitions
                 ])
             }
 
-            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> Result<String, crate::tool::ToolError> {
+            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> Result<String, ToolError> {
                  match tool_name.as_str() {
                      #match_arms
                      _ => {
-                         Err(crate::tool::ToolError::NoToolFound(tool_name))
+                         Err(ToolError::NoToolFound(tool_name))
                      }
                  }
             }
