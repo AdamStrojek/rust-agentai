@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
 use syn::{
-    parse::Parser, parse_macro_input, punctuated::Punctuated, Attribute, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
+    parse_macro_input, punctuated::Punctuated, Attribute, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
 };
 use std::collections::HashSet;
 use heck::ToUpperCamelCase;
@@ -54,41 +54,34 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut tool_name = original_fn_name_str.clone();
 
                 // Parse the #[tool] attribute for name = "..." using parse_args_with with Meta
-                let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
-                let args = match tool_attr.parse_args_with(parser) {
-                    Ok(args) => args,
-                    Err(e) => return Error::new_spanned(tool_attr.to_token_stream(), format!("Failed to parse tool attribute arguments: {}", e)).to_compile_error().into(),
-                };
-
-                // Iterate over the parsed Meta items to find 'name'. Allow #[tool] or #[tool(name = "...")] or #[tool()].
                 let mut name_arg_found = false;
-                for arg_meta in args {
-                    if let Meta::NameValue(name_value) = arg_meta {
-                        if name_value.path.is_ident("name") {
-                            if name_arg_found {
-                                // Error: Duplicate 'name' argument
-                                return Error::new_spanned(name_value.to_token_stream(), "Duplicate 'name' argument in tool attribute").to_compile_error().into();
-                            }
-                            if let Expr::Lit(expr_lit) = &name_value.value {
-                                if let Lit::Str(lit_str) = &expr_lit.lit {
-                                    tool_name = lit_str.value();
-                                    name_arg_found = true;
-                                } else {
+                let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+                if let Ok(args) = tool_attr.parse_args_with(parser) {
+                    // Iterate over the parsed Meta items to find 'name'. #[tool(name = "...")]
+                    for arg_meta in args {
+                        match arg_meta {
+                            Meta::NameValue(name_value) if name_value.path.is_ident("name") => {
+                                if name_arg_found {
+                                    // Error: Duplicate 'name' argument
+                                    return Error::new_spanned(name_value.to_token_stream(), "Duplicate 'name' argument in tool attribute").to_compile_error().into();
+                                }
+                                let Expr::Lit(expr_lit) = &name_value.value else {
+                                    // Error: Expected literal value for name
+                                    return Error::new_spanned(name_value.value.to_token_stream(), "Expected literal value for tool name").to_compile_error().into();
+                                };
+                                let Lit::Str(lit_str) = &expr_lit.lit else {
                                     // Error: Expected string literal for name
                                     return Error::new_spanned(expr_lit.to_token_stream(), "Expected string literal for tool name").to_compile_error().into();
-                                }
-                            } else {
-                                // Error: Expected literal value for name
-                                return Error::new_spanned(name_value.value.to_token_stream(), "Expected literal value for tool name").to_compile_error().into();
+                                };
+                                tool_name = lit_str.value();
+                                name_arg_found = true;
+                            },
+                            _ => {
+                                // Error: If arguments are present, they must be 'name = "..."'
+                                return Error::new_spanned(arg_meta.to_token_stream(), "Expected name = \"...\" in tool attribute").to_compile_error().into();
                             }
-                        } else {
-                             // Error: If arguments are present, they must be 'name = "..."'
-                             return Error::new_spanned(name_value.path.to_token_stream(), "Expected only 'name' argument in tool attribute").to_compile_error().into();
-                         }
-                    } else {
-                         // Error: If arguments are present, they must be 'name = "..."'
-                         return Error::new_spanned(arg_meta.to_token_stream(), "Expected name = \"...\" in tool attribute").to_compile_error().into();
-                     }
+                        };
+                    }
                 }
 
                 // Check for duplicate tool names AFTER determining the final tool_name
@@ -96,25 +89,22 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                      return Error::new_spanned(tool_attr.to_token_stream(), format!("Duplicate tool name found: {}", tool_name)).to_compile_error().into();
                 }
 
-
                 // Extract doc comments for description from #[doc = "..."] attributes (handles /// and /* */) from method
                 let description = method.attrs.iter()
-                    .filter_map(|attr| {
-                        if attr.path().is_ident("doc") {
-                             match attr.meta.clone() {
-                                 Meta::NameValue(MetaNameValue { path, value: Expr::Lit(expr_lit), .. }) if path.is_ident("doc") => {
-                                      match expr_lit.lit {
-                                          Lit::Str(lit_str) => {
-                                              // Remove leading slashes, stars, and whitespace
-                                             Some(lit_str.value().trim().trim_start_matches(|c: char| c == '/' || c == '*' || c.is_whitespace()).to_string())
-                                          }
-                                          _ => None, // Not a string literal
-                                      }
-                                  },
-                                  _ => None, // Not a #[doc = ...] attribute or error
-                             }
-                        } else { None }
-                    })
+                    .filter_map(|attr|
+                        match attr.meta.clone() {
+                            Meta::NameValue(MetaNameValue { path, value: Expr::Lit(expr_lit), .. }) if path.is_ident("doc") => {
+                                match expr_lit.lit {
+                                    Lit::Str(lit_str) => {
+                                        // Remove leading slashes, stars, and whitespace
+                                        Some(lit_str.value().trim().trim_start_matches(|c: char| c == '/' || c == '*' || c.is_whitespace()).to_string())
+                                    }
+                                    _ => None, // Not a string literal
+                                }
+                            },
+                            _ => None, // Not a #[doc = ...] attribute or error
+                        }
+                    )
                     .collect::<Vec<String>>()
                     .join("\n");
 
@@ -132,52 +122,46 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 // Skip `&self` or `&mut self` receiver
                 for arg in method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))) {
-                     if let FnArg::Typed(pat_type) = arg {
-                        let pat = &pat_type.pat;
-                        let ty = &pat_type.ty;
+                    // #[doc = "Documentation"]
+                    // attribute: Type,
+                    // ...
+                    let FnArg::Typed(pat_type) = arg else {
+                        return Error::new_spanned(arg.to_token_stream(), "Unexpected function argument type in tool method").to_compile_error().into();
+                    };
 
-                        // Collect doc attributes from the parameter to include in the generated struct
-                        let doc_attrs_for_struct: Vec<Attribute> = pat_type.attrs.iter()
-                            .filter(|attr| attr.path().is_ident("doc"))
-                            .cloned()
-                            .collect();
+                    let pat = &pat_type.pat;
+                    let ty = &pat_type.ty;
 
-                        if let Pat::Ident(pat_ident) = &**pat {
-                            let arg_name = &pat_ident.ident;
-                            param_fields.extend(quote! {
-                               #(#doc_attrs_for_struct)* pub #arg_name: #ty,
-                            });
-                            param_names.push(arg_name.clone());
-                        } else {
-                            // Handle other patterns if necessary, or return an error
-                            return Error::new_spanned(pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
-                        }
-                     } else {
-                          return Error::new_spanned(arg.to_token_stream(), "Unexpected function argument type in tool method").to_compile_error().into();
-                       }
+                    // Collect #[doc] attributes from the parameter to include in the generated struct
+                    let doc_attrs: Vec<Attribute> = pat_type.attrs.iter()
+                        .filter(|attr| attr.path().is_ident("doc")) // TODO: Remove this filter and clone all attributes
+                        .cloned()
+                        .collect();
+
+                    let Pat::Ident(pat_ident) = &**pat else {
+                        // Handle other patterns if necessary, or return an error
+                        return Error::new_spanned(pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
+                    };
+
+                    let arg_name = &pat_ident.ident;
+                    // TODO: Change pub to pub(crate), this structures will be used only inside generated code
+                    param_fields.extend(quote! {
+                        #(#doc_attrs)* pub #arg_name: #ty,
+                    });
+                    param_names.push(arg_name.clone());
                 }
 
-                let params_struct_definition = if param_fields.is_empty() {
-                     quote! {
+                if !param_fields.is_empty() {
+                    generated_code.extend(quote! {
                         // Parameters struct for #original_fn_name_str
                         #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
                         #[allow(dead_code)]
-                         #[allow(clippy::all)]
-                        struct #params_struct_name {}; // Add semicolon for empty struct
-                    }
-                } else {
-                    quote! {
-                        // Parameters struct for #original_fn_name_str
-                        #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-                        #[allow(dead_code)]
-                         #[allow(clippy::all)]
-                         struct #params_struct_name {
-                            #param_fields
-                         }
-                     }
-                 };
-                 // Always generate the struct definition, even if empty, so schemars::schema_for! works consistently.
-                 generated_code.extend(params_struct_definition);
+                        #[allow(clippy::all)]
+                        struct #params_struct_name {
+                        #param_fields
+                        }
+                     });
+                }
 
 
                 // Add to tool definitions
@@ -256,6 +240,9 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+    if found_tools.is_empty() {
+        return Error::new(Span::call_site(), "No #[tool] definition in impl block").to_compile_error().into()
+    }
 
     // Generate the ToolBox implementation
     let toolbox_impl = quote! {
