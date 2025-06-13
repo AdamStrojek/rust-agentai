@@ -2,39 +2,10 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input,
-    punctuated::Punctuated,
-    Attribute,
-    Error,
-    Expr,
-    FnArg,
-    Ident,
-    ImplItem,
-    ItemImpl,
-    Lit,
-    Meta,
-    MetaNameValue,
-    Pat,
+    parse::Parser, parse_macro_input, punctuated::Punctuated, Attribute, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
 };
 use std::collections::HashSet;
 use heck::ToUpperCamelCase;
-
-/// Attribute macro to mark a method in an `impl` block as a tool.
-///
-/// This macro is typically used inside the `#[toolbox]` macro and should not be used directly.
-/// It is used by the `#[toolbox]` macro to identify which methods should be
-/// exposed as tools.
-///
-/// Optional arguments:
-/// * `name = "tool_name"`: Specifies the name of the tool. If not provided,
-///   the method name is used.
-// #[proc_macro_attribute]
-// pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
-//     // This macro doesn't actually generate code itself, it's just a marker
-//     // processed by the `toolbox` macro. So we just return the original item.
-//     item
-// }
-
 
 /// Attribute macro to generate a `ToolBox` implementation for a struct.
 ///
@@ -78,11 +49,6 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let tool_attr_option = method.attrs.iter().find(|attr| attr.path().is_ident("tool"));
 
             if let Some(tool_attr) = tool_attr_option {
-                // Ensure the method is async
-                 if method.sig.asyncness.is_none() {
-                    return Error::new_spanned(method.sig.fn_token, "Tool functions must be async").to_compile_error().into();
-                }
-
                 let fn_name = &method.sig.ident;
                 let original_fn_name_str = fn_name.to_string();
                 let mut tool_name = original_fn_name_str.clone();
@@ -197,7 +163,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
                         #[allow(dead_code)]
                          #[allow(clippy::all)]
-                        struct #params_struct_name {};
+                        struct #params_struct_name {}; // Add semicolon for empty struct
                     }
                 } else {
                     quote! {
@@ -243,13 +209,17 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     quote! { self.#fn_name(#param_assignments) }
                 };
 
-                // Add .await since we already checked the method is async
-                let await_token = quote! {.await};
+                // Add .await if the original function was async
+                let await_if_async = if method.sig.asyncness.is_some() {
+                    quote! {.await}
+                } else {
+                    quote! {}
+                };
 
                 let call_body = if param_fields.is_empty() {
                     // No parameters to deserialize, just call the method
                     quote! {
-                        #method_call #await_token .map_err(|e| {
+                        #method_call #await_if_async .map_err(|e| {
                             eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
                             ToolError::ExecutionError
                         })
@@ -262,7 +232,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 eprintln!("Tool parameter deserialization error for '{}': {:?}", #tool_name, e);
                                 ToolError::ExecutionError
                             })?;
-                        #method_call #await_token .map_err(|e| {
+                        #method_call #await_if_async .map_err(|e| {
                             eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
                             ToolError::ExecutionError
                         })
