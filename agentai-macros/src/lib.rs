@@ -185,7 +185,15 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     quote! { None }
                 } else {
                     // Use the generated parameter struct name for schemars::schema_for!
-                    quote! { Some(serde_json::to_value(schemars::schema_for!(#params_struct_name)).expect("Failed to serialize schema")) }
+                    // quote! { Some(generate_tool_schema::<#params_struct_name>()) }
+                    quote! {
+                        Some({
+                            let generator = ::schemars::generate::SchemaSettings::draft2020_12().with(|s| {
+                                s.meta_schema = None;
+                            }).into_generator();
+                            generator.into_root_schema_for::<#params_struct_name>().into()
+                        })
+                    }
                 };
 
                 tool_definitions.extend(quote! {
