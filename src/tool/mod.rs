@@ -10,7 +10,7 @@ use serde_json::Value;
 pub use genai::chat::Tool;
 
 // Re-export tool and toolbox macros, they are used to generate auto implementation of
-pub use agentai_macros::{toolbox, tool};
+pub use agentai_macros::toolbox;
 
 /// A container or manager for a collection of `Tool` instances.
 /// This provides a way to group and access multiple tools.

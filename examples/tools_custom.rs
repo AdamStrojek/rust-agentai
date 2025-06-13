@@ -5,7 +5,7 @@
 //!
 
 use agentai::Agent;
-use agentai::tool::{ToolBox, Tool, ToolError, tool, toolbox};
+use agentai::tool::{ToolBox, Tool, ToolError, toolbox};
 use anyhow::Error;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -40,31 +40,35 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-/// This structure represents our custom tool set. The `#[toolbox]` macro
-/// is applied to the `impl` block for this struct. It discovers methods
-/// annotated with `#[tool()]` and automatically generates the necessary
-/// `ToolBox` trait implementation, including `name`, `description`,
-/// `schema`, and `call` methods based on the annotated functions.
-///
-/// For this example, `UrlFetcherToolBox` itself doesn't need to store
-/// any state, but it could if your tools required it.
+// This structure represents our custom tool set. The `#[toolbox]` macro
+// is applied to the `impl` block for this struct. It discovers methods
+// annotated with `#[tool()]` and automatically generates the necessary
+// `ToolBox` trait implementation, including `name`, `description`,
+// `schema`, and `call` methods based on the annotated functions.
+//
+// For this example, `UrlFetcherToolBox` itself doesn't need to store
+// any state, but it could if your tools required it.
 struct UrlFetcherToolBox {}
 
-/// The `#[toolbox]` macro is applied to the `impl` block for `UrlFetcherToolBox`.
-/// It processes the methods within this block to create the tool definitions.
+// The `#[toolbox]` macro is applied to the `impl` block for `UrlFetcherToolBox`.
+// It processes the methods within this block to create the tool definitions.
 #[toolbox]
 impl UrlFetcherToolBox {
-    /// The `#[tool()]` macro annotates methods that should be exposed as tools
-    /// to the AI agent. The macro automatically generates the necessary metadata
-    /// (name, description, schema) for the tool based on the function signature
-    /// and documentation comments.
-    ///
-    /// The tool name will be derived from the function name (`web_fetch`).
-    /// The description will be taken from this documentation comment.
-    /// The schema will be generated from the function arguments (here, `url: String`).
-    /// The body of this function will be executed when the AI agent decides to use the tool.
+    // The `#[tool()]` macro annotates methods that should be exposed as tools
+    // to the AI agent. The macro automatically generates the necessary metadata
+    // (name, description, schema) for the tool based on the function signature
+    // and documentation comments.
+
+    // The tool name will be derived from the function name (`web_fetch`).
+    // The description will be taken from this documentation comment.
+    // The schema will be generated from the function arguments (here, `url: String`).
+    // The body of this function will be executed when the AI agent decides to use the tool.
     #[tool()]
-    async fn web_fetch(&self, url: String) -> Result<String, ToolError> {
+    async fn web_fetch(
+        &self,
+        /// Use this field to provide URL of file to download
+        url: String
+    ) -> Result<String, ToolError> {
         // Use reqwest to fetch the content from the provided URL.
         // The `?` operator handles potential errors from the get and text methods.
         Ok(

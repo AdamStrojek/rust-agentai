@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolBox, ToolError, tool, toolbox};
+use crate::tool::{Tool, ToolBox, ToolError, toolbox};
 use anyhow::Context;
 use reqwest::Client;
 use serde_json::Value;
@@ -7,7 +7,7 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 
 /// # Brave Web Search Tool
 ///
-/// This is a simple implementation of [crate::ToolBox] for Web Search using Brave Search engine.
+/// This is a simple implementation of [crate::tool::ToolBox] for Web Search using Brave Search engine.
 /// To use it you need to provide API Keys. This requires account creation, fortunately you can
 /// choose free plan. Go to [<https://api.search.brave.com/app/keys>] to generate keys.
 ///
@@ -30,12 +30,12 @@ impl WebSearchToolBox {
         }
     }
 
-    #[tool()]
     /// A tool that performs web searches using a specified query parameter to retrieve relevant
     /// results from a search engine. As the result you will receive list of websites with description
+    #[tool()]
     async fn web_search(
         &self,
-        // #[tool_doc = "The search terms or keywords to be used by the search engine for retrieving relevant results"]
+        #[doc = "The search terms or keywords to be used by the search engine for retrieving relevant results"]
         query: String
     ) -> Result<String, ToolError> {
         let params = [("q", query.as_str()), ("count", "5"), ("result_filter", "web")];
