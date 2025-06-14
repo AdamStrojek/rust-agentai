@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, punctuated::Punctuated, Attribute, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
+    parse_macro_input, punctuated::Punctuated, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat, PatType
 };
 use std::collections::HashSet;
 use heck::ToUpperCamelCase;
@@ -46,9 +46,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for item in &item_impl.items {
         if let ImplItem::Fn(method) = item {
             // Find the #[tool] attribute
-            let tool_attr_option = method.attrs.iter().find(|attr| attr.path().is_ident("tool"));
-
-            if let Some(tool_attr) = tool_attr_option {
+            if let Some(tool_attr) = method.attrs.iter().find(|attr| attr.path().is_ident("tool")) {
                 let fn_name = &method.sig.ident;
                 let original_fn_name_str = fn_name.to_string();
                 let mut tool_name = original_fn_name_str.clone();
@@ -118,27 +116,23 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // Generate parameter struct
                 let params_struct_name = Ident::new(&format!("{}Params", original_fn_name_str.to_upper_camel_case()), fn_name.span());
                 let mut param_fields = TokenStream2::new();
-                let mut param_names: Vec<Ident> = vec![];
+                let mut param_assignments = TokenStream2::new();
+                // let mut param_names: Vec<Ident> = vec![];
 
                 // Skip `&self` or `&mut self` receiver
                 for arg in method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))) {
                     // #[doc = "Documentation"]
                     // attribute: Type,
                     // ...
-                    let FnArg::Typed(pat_type) = arg else {
+                    let FnArg::Typed(PatType {
+                        attrs, // Collect #[doc] attributes from the parameter to include in the generated struct
+                        pat,
+                        ty, ..
+                    }) = arg else {
                         return Error::new_spanned(arg.to_token_stream(), "Unexpected function argument type in tool method").to_compile_error().into();
                     };
 
-                    let pat = &pat_type.pat;
-                    let ty = &pat_type.ty;
-
-                    // Collect #[doc] attributes from the parameter to include in the generated struct
-                    let doc_attrs: Vec<Attribute> = pat_type.attrs.iter()
-                        .filter(|attr| attr.path().is_ident("doc")) // TODO: Remove this filter and clone all attributes
-                        .cloned()
-                        .collect();
-
-                    let Pat::Ident(pat_ident) = &**pat else {
+                    let Pat::Ident(ref pat_ident) = **pat else {
                         // Handle other patterns if necessary, or return an error
                         return Error::new_spanned(pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
                     };
@@ -146,9 +140,13 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     let arg_name = &pat_ident.ident;
                     // TODO: Change pub to pub(crate), this structures will be used only inside generated code
                     param_fields.extend(quote! {
-                        #(#doc_attrs)* pub #arg_name: #ty,
+                        #(#attrs)* pub #arg_name: #ty,
                     });
-                    param_names.push(arg_name.clone());
+
+                    param_assignments.extend(quote! {
+                        params.#arg_name
+                    });
+                    // param_names.push(arg_name.clone());
                 }
 
                 if !param_fields.is_empty() {
@@ -158,7 +156,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #[allow(dead_code)]
                         #[allow(clippy::all)]
                         struct #params_struct_name {
-                        #param_fields
+                            #param_fields
                         }
                      });
                 }
@@ -189,51 +187,31 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 });
 
                 // Add to match arms for call_tool
-                let param_assignments = param_names.iter().map(|name| {
-                    // Direct access to fields of the deserialized params struct
-                    quote! { params.#name }
-                }).collect::<TokenStream2>();
+                let mut method_call = TokenStream2::new();
 
-                // Determine the method call, including parameters
-                let method_call = if param_names.is_empty() {
-                    quote! { self.#fn_name() }
-                } else {
-                    quote! { self.#fn_name(#param_assignments) }
-                };
-
-                // Add .await if the original function was async
-                let await_if_async = if method.sig.asyncness.is_some() {
-                    quote! {.await}
-                } else {
-                    quote! {}
-                };
-
-                let call_body = if param_fields.is_empty() {
-                    // No parameters to deserialize, just call the method
-                    quote! {
-                        #method_call #await_if_async .map_err(|e| {
-                            eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
-                            ToolError::ExecutionError
-                        })
-                    }
-                } else {
-                    // Deserialize parameters and call the method
-                    quote! {
+                if !param_fields.is_empty(){
+                    method_call.extend(quote! {
                         let params: #params_struct_name = serde_json::from_value(parameters)
                             .map_err(|e| {
                                 eprintln!("Tool parameter deserialization error for '{}': {:?}", #tool_name, e);
                                 ToolError::ExecutionError
                             })?;
-                        #method_call #await_if_async .map_err(|e| {
-                            eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
-                            ToolError::ExecutionError
-                        })
-                    }
-                };
+                    });
+                }
+
+                method_call.extend(quote! { self.#fn_name(#param_assignments) });
+                if method.sig.asyncness.is_some() {
+                    method_call.extend(quote! {.await});
+                }
+
+                method_call.extend(quote! { .map_err(|e| {
+                    eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
+                    ToolError::ExecutionError
+                }) });
 
                 match_arms.extend(quote! {
                     #tool_name => {
-                        #call_body
+                        #method_call
                     },
                 });
             }
@@ -277,8 +255,8 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let is_tool_method = method.attrs.iter().any(|attr| attr.path().is_ident("tool"));
 
             if is_tool_method {
-                 // This is a tool function, remove #[doc] from parameters and #[tool] from the method
-                 method.attrs.retain(|attr| !attr.path().is_ident("tool")); // Remove #[tool] attribute
+                // This is a tool function, remove #[doc] from parameters and #[tool] from the method
+                method.attrs.retain(|attr| !attr.path().is_ident("tool")); // Remove #[tool] attribute
                 let mut modified_inputs = Punctuated::<FnArg, syn::token::Comma>::new();
                 // Consume method.sig.inputs here
                 for arg in method.sig.inputs.into_iter() {
