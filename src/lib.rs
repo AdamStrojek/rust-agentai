@@ -36,8 +36,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let mut agent = Agent::new("You are a useful assistant", &());
-//!     let answer: String = agent.run("gpt-4o", "Why sky is blue?").await?;
+//!     let mut agent = Agent::new("You are a useful assistant");
+//!     let answer: String = agent.run("gpt-4o", "Why sky is blue?", None).await?;
 //!     println!("Answer: {}", answer);
 //!     Ok(())
 //! }
@@ -62,9 +62,12 @@
 pub mod agent;
 pub mod tool;
 
-// This module will be enabled only when generating documentation
+// This modules will be enabled only when generating documentation
 #[cfg(doc)]
 pub mod examples;
+
+#[cfg(doc)]
+pub mod structured_output;
 
 #[allow(unused_imports)]
 pub use agent::*;

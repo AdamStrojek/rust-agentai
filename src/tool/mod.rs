@@ -1,3 +1,9 @@
+//! # Tools and ToolBoxes
+//! To implement toolboxes you have two possibilities:
+//! - Implement whole ToolBox trait manually
+//! - Use `#[toolbox]` macro
+//! TODO update documentation
+
 pub mod websearch;
 
 #[cfg(feature = "mcp-client")]
@@ -7,6 +13,7 @@ use thiserror::{Error};
 use serde_json::Value;
 
 // Re-export Tool structure, it is being used by ToolBoxes
+/// Structure responsible for providing tool registration for LLM
 pub use genai::chat::Tool;
 
 // Re-export tool and toolbox macros, they are used to generate auto implementation of

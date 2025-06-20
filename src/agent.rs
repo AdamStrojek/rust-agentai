@@ -1,3 +1,13 @@
+//! # Core components of AI Agents
+//!
+//! This module contains core components that you can use in your AI Agents
+//!
+//! To read more about Agents look into [crate::agent::Agent]
+//!
+//! To read more about structured output look into [crate::structured_output]
+//!
+//! To read more about tool look into [crate::tool]
+
 use crate::tool::ToolBox;
 use anyhow::{anyhow, Result};
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
