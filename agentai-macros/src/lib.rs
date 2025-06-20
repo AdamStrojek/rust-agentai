@@ -7,21 +7,91 @@ use syn::{
 use std::collections::HashSet;
 use heck::ToUpperCamelCase;
 
-/// Attribute macro to generate a `ToolBox` implementation for a struct.
+/// Attribute macro to generate a `ToolBox` implementation for a struct based on provided tools.
 ///
-/// Apply this macro to an `impl` block for your struct. Any `async fn`
-/// methods within this `impl` block marked with the `#[tool]` attribute
-/// will be automatically exposed as tools.
+/// Apply this macro to an `impl` block for your struct. Any methods (sync or async)
+/// within this `impl` block marked with the `#[tool]` attribute will be automatically exposed as tools.
+///
+/// Macro requires `serde`, `serde_json`, `schemars` and `async-trait` as dependencies in your project.
+/// Make sure `schemars` is enabled with the `derive` feature. All this dependencies don't need to imported.
+///
+/// To use this macro you need ensure that all requirements from `agentai` crate are imported
+///
+/// ```no_run
+/// use agentai::tool::{Tool, ToolBox, ToolError, toolbox};
+/// ```
 ///
 /// The macro generates:
-/// 1. A `serde::Serialize`, `serde::Deserialize`, and `schemars::JsonSchema`
-///    struct for the parameters of each #[tool] function. Doc comments (`#[doc = "..."`)
+/// 1. A parameters wrapper struct for the parameters of each `#[tool]` function. Doc comments (`#[doc = "..."`)
 ///    on the parameters will be included as attributes on the struct fields.
 /// 2. An implementation of the `ToolBox` trait for the struct.
 ///    - `tools_definitions` method that returns a list of `Tool` structs
-///      based on the #[tool] methods and their documentation/schemas.
-///    - `call_tool` method that dispatches calls to the appropriate #[tool]
+///      based on the `#[tool]` methods and their documentation/schemas.
+///    - `call_tool` method that dispatches calls to the appropriate `#[tool]`
 ///      method based on the tool name and deserializes the provided parameters.
+///
+/// Attribute macro applied to an `impl` block to derive the `ToolBox` trait implementation.
+///
+/// Methods within the `impl` block annotated with `#[tool]` will be exposed as tools.
+/// The `#[tool]` attribute can optionally take a `name` argument to specify the tool name.
+/// Doc comments (`///`) on `#[tool]` methods are used as the tool description.
+/// Doc comments (`#[doc = "..."]`) on function parameters are moved to the generated parameter struct fields.
+///
+///
+/// Example:
+/// ```no_run
+/// use serde_json::Value;
+/// use rust_agentai_macros::toolbox;
+/// use anyhow::Result;
+///
+/// // All this modules need to be accessible
+/// use agentai::tool::{Tool, ToolBox, ToolError, toolbox};
+///
+/// struct MyToolBox {
+///     my_field: i32,
+/// }
+///
+/// #[toolbox]
+/// impl MyToolBox {
+///     // Constructor - not a tool as it's not #[tool]
+///     pub fn new() -> Self {
+///         Self { my_field: 69 }
+///     }
+///
+///     /// This is the docstring for tool_one.
+///     /// It demonstrates accessing a field.
+///     #[tool]
+///     async fn tool_one(&self) -> Result<String> {
+///         Ok(format!("Result from tool one: {}", self.my_field))
+///     }
+///
+///     /// This tool takes a parameter with documentation.
+///     #[tool]
+///     async fn tool_two(&self, #[doc = "The input string."] input: String) -> Result<String> {
+///         Ok(format!("Tool two received: {}", input))
+///     }
+///
+///     /// This tool has an altered name and takes a parameter without documentation.
+///     #[tool(name = "my_special_tool")]
+///     fn tool_three(&self, value: i32) -> Result<String> {
+///         Ok(format!("Result from tool three with special name and value: {}", value))
+///     }
+///
+///     /// This is a sync tool.
+///     #[tool]
+///     fn tool_sync(&self) -> Result<String> {
+///          Ok("This is a synchronous tool result".to_string())
+///     }
+///
+///     // This method will not be exposed as a tool
+///     pub fn helper_method(&self) -> i32 {
+///         42
+///     }
+/// }
+///
+/// // The macro generates the `impl ToolBox for MyToolBox` block
+/// // and parameter structs like ToolTwoParams, ToolThreeParams, ToolSyncParams
+/// ```
 #[proc_macro_attribute]
 pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the original impl block
