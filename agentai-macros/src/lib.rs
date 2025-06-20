@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, punctuated::Punctuated, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat, PatType
+    parse_macro_input, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
 };
 use std::collections::HashSet;
 use heck::ToUpperCamelCase;
@@ -43,13 +43,17 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Pass 1: Collect information for tool definitions and call dispatch
     // We iterate over a reference here because we need the original items again in Pass 2
-    for item in &item_impl.items {
-        if let ImplItem::Fn(method) = item {
+    for item in item_impl.items.iter_mut() {
+        if let ImplItem::Fn(ref mut method) = item {
             // Find the #[tool] attribute
-            if let Some(tool_attr) = method.attrs.iter().find(|attr| attr.path().is_ident("tool")) {
-                let fn_name = &method.sig.ident;
-                let original_fn_name_str = fn_name.to_string();
-                let mut tool_name = original_fn_name_str.clone();
+            if let Some(tool_attr) = method.attrs.clone().iter().find(|attr| attr.path().is_ident("tool")) {
+                // Remove #[tool] attribute
+                // #[tool] is used only to mark functions that will be converted into tools
+                method.attrs.retain(|attr| !attr.path().is_ident("tool"));
+
+                let fn_name_sig = &method.sig.ident;
+                let fn_name = fn_name_sig.to_string();
+                let mut tool_name = fn_name.clone();
 
                 // Parse the #[tool] attribute for name = "..." using parse_args_with with Meta
                 let mut name_arg_found = false;
@@ -114,39 +118,39 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 };
 
                 // Generate parameter struct
-                let params_struct_name = Ident::new(&format!("{}Params", original_fn_name_str.to_upper_camel_case()), fn_name.span());
+                let params_struct_name = Ident::new(&format!("{}Params", fn_name.to_upper_camel_case()), fn_name_sig.span());
                 let mut param_fields = TokenStream2::new();
                 let mut param_assignments = TokenStream2::new();
-                // let mut param_names: Vec<Ident> = vec![];
 
-                // Skip `&self` or `&mut self` receiver
-                for arg in method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))) {
-                    // #[doc = "Documentation"]
-                    // attribute: Type,
-                    // ...
-                    let FnArg::Typed(PatType {
-                        attrs, // Collect #[doc] attributes from the parameter to include in the generated struct
-                        pat,
-                        ty, ..
-                    }) = arg else {
-                        return Error::new_spanned(arg.to_token_stream(), "Unexpected function argument type in tool method").to_compile_error().into();
-                    };
+                for arg in method.sig.inputs.iter_mut() {
+                    // self attribute are type FnArg::Receiver()
+                    if let FnArg::Typed(ref mut pat_type) = arg {
+                        // #[doc = "Documentation"]    // < pat_type.attrs
+                        // attribute: Type,            // < pat_type.pat: pat_type.ty
+                        // ...
+                        let ty = pat_type.ty.clone();
 
-                    let Pat::Ident(ref pat_ident) = **pat else {
-                        // Handle other patterns if necessary, or return an error
-                        return Error::new_spanned(pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
-                    };
+                        // Clone all attributes that will be moved to new structure
+                        let attrs = pat_type.attrs.clone();
 
-                    let arg_name = &pat_ident.ident;
-                    // TODO: Change pub to pub(crate), this structures will be used only inside generated code
-                    param_fields.extend(quote! {
-                        #(#attrs)* pub #arg_name: #ty,
-                    });
+                        // Clean attributes for tool definition
+                        pat_type.attrs.clear();
 
-                    param_assignments.extend(quote! {
-                        params.#arg_name
-                    });
-                    // param_names.push(arg_name.clone());
+                        let Pat::Ident(ref pat_ident) = *pat_type.pat else {
+                            // Handle other patterns if necessary, or return an error
+                            return Error::new_spanned(pat_type.pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
+                        };
+
+                        let arg_name = &pat_ident.ident;
+                        // TODO: Change pub to pub(crate), this structures will be used only inside generated code
+                        param_fields.extend(quote! {
+                            #(#attrs)* pub #arg_name: #ty,
+                        });
+
+                        param_assignments.extend(quote! {
+                            params.#arg_name
+                        });
+                    }
                 }
 
                 if !param_fields.is_empty() {
@@ -160,7 +164,6 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                      });
                 }
-
 
                 // Add to tool definitions
                 let schema_token = if param_fields.is_empty() {
@@ -199,7 +202,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     });
                 }
 
-                method_call.extend(quote! { self.#fn_name(#param_assignments) });
+                method_call.extend(quote! { self.#fn_name_sig(#param_assignments) });
                 if method.sig.asyncness.is_some() {
                     method_call.extend(quote! {.await});
                 }
@@ -244,53 +247,13 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // Pass 2: Reconstruct item_impl removing #[doc] and #[tool] from tool methods
-    // Iterate through the original items again to modify them for the final output
-    let mut final_items = Vec::<ImplItem>::new();
-
-    // We consume item_impl.items here
-    for item in item_impl.items.into_iter() {
-        if let ImplItem::Fn(mut method) = item {
-            // Check if this method had the #[tool] attribute (replicate the check from Pass 1)
-            let is_tool_method = method.attrs.iter().any(|attr| attr.path().is_ident("tool"));
-
-            if is_tool_method {
-                // This is a tool function, remove #[doc] from parameters and #[tool] from the method
-                method.attrs.retain(|attr| !attr.path().is_ident("tool")); // Remove #[tool] attribute
-                let mut modified_inputs = Punctuated::<FnArg, syn::token::Comma>::new();
-                // Consume method.sig.inputs here
-                for arg in method.sig.inputs.into_iter() {
-                    if let FnArg::Typed(mut pat_type) = arg {
-                        // Filter out #[doc] attributes
-                        pat_type.attrs.retain(|attr| !attr.path().is_ident("doc"));
-                        modified_inputs.push(FnArg::Typed(pat_type));
-                    } else {
-                        // Keep other argument types (like &self) as is
-                        modified_inputs.push(arg);
-                    }
-                }
-                method.sig.inputs = modified_inputs;
-                final_items.push(ImplItem::Fn(method));
-            } else {
-                // Not a tool function, keep as is
-                final_items.push(ImplItem::Fn(method));
-            }
-        } else {
-            // Not a function, keep as is
-            final_items.push(item);
-        }
-    }
-
-    // Replace the original items with the modified ones for the final quote!
-    item_impl.items = final_items;
-
     // Combine generated code, the ToolBox impl, and the modified original impl block
     let final_code = quote! {
-        #generated_code
+        #item_impl
 
         #toolbox_impl
 
-        #item_impl // Keep the original impl block, now modified
+        #generated_code
     };
 
     final_code.into()
