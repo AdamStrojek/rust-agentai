@@ -32,7 +32,7 @@ impl WebSearchToolBox {
 
     /// A tool that performs web searches using a specified query parameter to retrieve relevant
     /// results from a search engine. As the result you will receive list of websites with description
-    #[tool()]
+    #[tool]
     async fn web_search(
         &self,
         #[doc = "The search terms or keywords to be used by the search engine for retrieving relevant results"]
