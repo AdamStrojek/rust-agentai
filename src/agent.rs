@@ -10,8 +10,10 @@
 
 use crate::tool::ToolBox;
 use anyhow::{anyhow, Result};
+use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
-use genai::Client;
+use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
+use genai::{Client, ClientBuilder, ModelIden, ServiceTarget};
 use log::{debug, trace};
 use schemars::{schema_for, JsonSchema};
 use serde::de::DeserializeOwned;
@@ -69,6 +71,21 @@ impl Agent {
         }
     }
 
+    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Self {
+        let endpoint = Endpoint::from_owned(Arc::from(base_url));
+        let auth = AuthData::from_single(api_key);
+       	let target_resolver = ServiceTargetResolver::from_resolver_fn(
+            |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
+                let ServiceTarget { model, .. } = service_target;
+                let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
+                Ok(ServiceTarget { endpoint, auth, model })
+            },
+        );
+        let client = ClientBuilder::default()
+            .with_service_target_resolver(target_resolver).build();
+        Self::new_with_client(client, system)
+    }
+
     /// Runs the agent with the given model and prompt.
     ///
     /// # Arguments
@@ -84,7 +101,7 @@ impl Agent {
     /// Type returned by this function is responsible for setting LLM response into structured output
     ///
     /// For more information go to [crate::structured_output]
-    pub async fn run<D>(&mut self, model: &str, prompt: &str, toolbox: Option<Arc<dyn ToolBox>>) -> Result<D>
+    pub async fn run<D>(&mut self, model: &str, prompt: &str, toolbox: Option<&dyn ToolBox>) -> Result<D>
     where
         D: DeserializeOwned + JsonSchema + 'static,
     {

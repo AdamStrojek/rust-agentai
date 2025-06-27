@@ -6,7 +6,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 use std::env;
-use std::sync::Arc;
 
 const SYSTEM: &str =
     "You are helpful assistant. You goal is to search for information requested by user,\
@@ -25,15 +24,17 @@ async fn main() -> Result<()> {
     let api_key = env::var("BRAVE_API_KEY")?;
     let web_search_tool = WebSearchToolBox::new(&api_key);
 
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gemini-2.0-flash".to_string());
-
     let question = "Search me for tools that can be used with terminal and Rust";
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM);
+    let base_url = std::env::var("AGENTAI_BASE_URL")?;
+    let api_key = std::env::var("AGENTAI_API_KEY")?;
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
 
-    let answer: Answer = agent.run(&model, question, Some(Arc::new(web_search_tool))).await?;
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
+
+    let answer: Answer = agent.run(&model, question, Some(&web_search_tool)).await?;
 
     info!("{:#?}", answer);
 

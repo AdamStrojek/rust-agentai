@@ -9,7 +9,6 @@ use agentai::tool::{ToolBox, Tool, ToolError, toolbox};
 use anyhow::Error;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
-use std::sync::Arc;
 
 const SYSTEM: &str = "You are helpful assistant. You goal is to provide summary for provided site. Limit you answer to 3 sentences.";
 
@@ -23,17 +22,22 @@ async fn main() -> Result<(), Error> {
     )?;
     info!("Starting AgentAI");
 
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gpt-4o-mini".to_string());
-
     let question =
         "For what I can use this library? https://raw.githubusercontent.com/AdamStrojek/rust-agentai/refs/heads/master/README.md";
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM);
+    let toolbox = UrlFetcherToolBox {};
 
-    let answer: String = agent.run(&model, question, Some(Arc::new(UrlFetcherToolBox {}))).await?;
-    // let answer: String = agent.run(&model, question, None).await?;
+    dbg!(toolbox.tools_definitions()?);
+
+    let base_url = std::env::var("AGENTAI_BASE_URL")?;
+    let api_key = std::env::var("AGENTAI_API_KEY")?;
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
+
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
+
+    let answer: String = agent.run(&model, question, Some(&toolbox)).await?;
 
     info!("Answer: {}", answer);
 
@@ -54,7 +58,7 @@ struct UrlFetcherToolBox {}
 // It processes the methods within this block to create the tool definitions.
 #[toolbox]
 impl UrlFetcherToolBox {
-    // The `#[tool()]` macro annotates methods that should be exposed as tools
+    // The `#[tool]` macro annotates methods that should be exposed as tools
     // to the AI agent. The macro automatically generates the necessary metadata
     // (name, description, schema) for the tool based on the function signature
     // and documentation comments.
@@ -63,7 +67,8 @@ impl UrlFetcherToolBox {
     // The description will be taken from this documentation comment.
     // The schema will be generated from the function arguments (here, `url: String`).
     // The body of this function will be executed when the AI agent decides to use the tool.
-    #[tool()]
+    #[tool]
+    /// This tool allow to fetch resource from provided URL
     async fn web_fetch(
         &self,
         /// Use this field to provide URL of file to download

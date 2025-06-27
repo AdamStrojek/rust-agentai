@@ -4,7 +4,6 @@ use log::{info, LevelFilter};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
-use std::sync::Arc;
 use agentai::tool::mcp::McpToolBox;
 
 const SYSTEM: &str =
@@ -20,17 +19,19 @@ async fn main() -> Result<()> {
     )?;
     info!("Starting AgentAI");
 
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gpt-4o-mini".to_string());
-
     let question = "What is current time in Poland??";
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM);
+    let base_url = std::env::var("AGENTAI_BASE_URL")?;
+    let api_key = std::env::var("AGENTAI_API_KEY")?;
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
+
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
 
     let mcp_tools = McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
 
-    let answer: Answer = agent.run(&model, question, Some(Arc::new(mcp_tools))).await?;
+    let answer: Answer = agent.run(&model, question, Some(&mcp_tools)).await?;
 
     info!("{:#?}", answer);
 

@@ -15,15 +15,15 @@ async fn main() -> Result<()> {
     )?;
     info!("Starting AgentAI");
 
-    // Remember about providing what model you want to use
-    // Some models may require providing authorization details
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gemini-2.0-flash".to_string());
-
     let question = "Why sky is blue?";
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new(SYSTEM);
+    let base_url = std::env::var("AGENTAI_BASE_URL")?;
+    let api_key = std::env::var("AGENTAI_API_KEY")?;
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
+
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
 
     let answer: String = agent.run(&model, question, None).await?;
 
