@@ -77,9 +77,13 @@ jobs:
 
           exit $FINAL_EXIT_CODE
 
+      - name: Sanitize model name
+        id: sanitize_model_name
+        run: echo "name=$(echo '${{ matrix.model }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Upload example logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: example-logs-${{ matrix.model }}
+          name: example-logs-${{ steps.sanitize_model_name.outputs.name }}
           path: logs/*.log
