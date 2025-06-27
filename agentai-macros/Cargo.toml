@@ -2,21 +2,20 @@
 name = "agentai-macros"
 version = "0.1.0"
 edition = "2021"
+authors = ["Adam Strojek <adam@strojek.info>"]
+license = "MIT"
+repository = "https://github.com/AdamStrojek/rust-agentai"
+description = "AgentAI is a Rust library designed to simplify the creation of AI agents."
+readme = "../README.md"
+categories = ["text-processing"]
+keywords = ["generative-ai", "openai", "chatgpt", "gemini", "agent"]
+exclude = ["release-plz.toml", ".github"]
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0", features = ["full", "extra-traits"] }
+syn = "2.0"
 quote = "1.0"
 proc-macro2 = "1.0"
-# These dependencies are needed because the macro will generate code that uses them
-# and they need to be available to the macro during compilation.
-# However, the generated code will *also* need them in the consuming crate,
-# so they are also dependencies of `rust-agentai`.
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-schemars = { version = "0.8", features = ["derive"] }
-anyhow = "1.0"
-async-trait = "0.1"
-heck = "0.5.0"
+heck = "0.5"

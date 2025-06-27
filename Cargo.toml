@@ -21,25 +21,25 @@ exclude = ["release-plz.toml", ".github"]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
+agentai-macros = { path = "./agentai-macros", version = "0.1", optional = true }
 genai = "0.3.5"
 anyhow = "1.0.98"
+thiserror = "2.0"
+serde = "1.0.219"
 serde_json = "1.0.140"
+schemars = { version = "0.9", features = ["derive"] }
 async-trait = "0.1.88"
 log = "0.4.27"
-schemars = { version = "0.9", features = ["derive"] }
-serde = "1.0.219"
 reqwest = "0.12.18"
 mcp_client_rs = {version = "0.1.7", optional = true}
 document-features = { version = "0.2"}
-agentai-macros = { path = "./agentai-macros" }
-thiserror = "2.0"
 
 [dev-dependencies]
 tokio = { version = "1.45.0", features = ["full"] }
 simplelog = "0.12.2"
 
 [features]
-default = ["mcp-client"]
+default = ["mcp-client", "macros"]
 #! Available features for `agentai` crate.
 #! To enable any of these features, you need to enter this command:
 #!
@@ -51,3 +51,5 @@ default = ["mcp-client"]
 
 ## Enables experimental support for Agent Tools based on MCP Servers
 mcp-client = ["dep:mcp_client_rs"]
+## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
+macros = ["agentai-macros"]
