@@ -1,0 +1,89 @@
+name: Run Examples on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  run-examples:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          - openai/gpt-4.1-mini
+          # You can add more models to test against here
+          # - another/model-name
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run examples and collect logs
+        env:
+          AGENTAI_BASE_URL: https://models.github.ai/inference/
+          AGENTAI_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+          AGENTAI_MODEL: ${{ matrix.model }}
+          RUST_BACKTRACE: 1
+        run: |
+          LOG_DIR="logs"
+          mkdir -p "$LOG_DIR"
+          FINAL_EXIT_CODE=0
+
+          echo "Running examples with model: ${{ matrix.model }}"
+
+          for example_file in examples/*.rs; do
+            EXAMPLE_NAME=$(basename "$example_file" .rs)
+            LOG_FILE="$LOG_DIR/${EXAMPLE_NAME}.log"
+            
+            echo ""
+            echo "--- Running example: $EXAMPLE_NAME ---"
+            
+            # Execute the example, stream its output to the console, and save it to a log file.
+            # The exit code of `cargo run` is captured via PIPESTATUS.
+            cargo run --release --example "$EXAMPLE_NAME" 2>&1 | tee "$LOG_FILE"
+            CARGO_EXIT_CODE=${PIPESTATUS[0]}
+            
+            if [ $CARGO_EXIT_CODE -ne 0 ]; then
+              echo "::error::Example '$EXAMPLE_NAME' failed with exit code $CARGO_EXIT_CODE."
+              FINAL_EXIT_CODE=1
+            else
+              echo "Example '$EXAMPLE_NAME' finished successfully."
+            fi
+          done
+
+          if [ $FINAL_EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "::error::One or more examples failed. Please check the logs."
+          fi
+          
+          exit $FINAL_EXIT_CODE
+
+      - name: Upload example logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-logs-${{ matrix.model }}
+          path: logs/*.log
