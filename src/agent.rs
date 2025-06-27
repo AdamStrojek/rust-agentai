@@ -79,6 +79,11 @@ impl Agent {
     /// # Returns
     ///
     /// A result containing the deserialized response.
+    ///
+    /// ## Structured Output
+    /// Type returned by this function is responsible for setting LLM response into structured output
+    ///
+    /// For more information go to [crate::structured_output]
     pub async fn run<D>(&mut self, model: &str, prompt: &str, toolbox: Option<Arc<dyn ToolBox>>) -> Result<D>
     where
         D: DeserializeOwned + JsonSchema + 'static,
