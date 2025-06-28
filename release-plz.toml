@@ -60,5 +60,5 @@ commit_parsers = [
     { message = "^[Cc]hanged", group = "2. Changed" },        # Use this section when performing some "smaller" change to other "module"
     { message = "^[Ff]ix", group = "3. Fixes" },              # Use this section when fixing reported issues
     { message = "^[Dd]eprecated", group = "4. Deprecated" },  # Use this section for items that will be or was removed
-    { message = "^[Cc]hore*", group = "9. Miscellaneous" },   # Miscellanous items like chore, documentation update etc.
+    { message = "^.*", group = "9. Miscellaneous" },          # Miscellanous items like chore, documentation update etc.
 ]
