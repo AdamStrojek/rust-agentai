@@ -28,7 +28,6 @@ body = """
     - {{ timestamp | date(format="%Y-%m-%d") }}
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | slice(start=3) | upper_first }}
-
     {% for commit in commits %}
         {%- if commit.scope -%}
             - *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}\
@@ -55,19 +54,10 @@ body = """
 {% endmacro -%}
 """
 
-# commit_parsers = [
-#   { message = "^feat", group = "added" },
-#   { message = "^changed", group = "changed" },
-#   { message = "^deprecated", group = "deprecated" },
-#   { message = "^fix", group = "fixed" },
-#   { message = "^security", group = "security" },
-#   { message = "^.*", group = "other" },
-# ]
-
 commit_parsers = [
-    { message = "^feat", group = "1. New features" },    # This should be used only when adding new functionality or peforming bigger change to it
-    { message = "^changed", group = "2. Changed" },      # Use this when only updating some part "by accident"
-    { message = "^fix", group = "3. Fixes" },            #
-    { message = "^deprecated", group = "4. Deprecated" },
+    { message = "^feat", group = "1. New features" },      # Use this section when adding new functionality or peforming bigger change to it
+    { message = "^changed", group = "2. Changed" },        # Use this section when performing some "smaller" change to other "module"
+    { message = "^fix", group = "3. Fixes" },              # Use this section when fixing reported issues
+    { message = "^deprecated", group = "4. Deprecated" },  # Use this section for items that will be or was removed
     { message = "^chore*", group = "9. Miscellaneous" },   # Miscellanous items like chore, documentation update etc.
 ]
