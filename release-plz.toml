@@ -4,3 +4,70 @@ pr_name = "Release {{ package }} v{{ version }}" # template for the PR name
 pr_labels = ["release"] # add the `release` label to the release Pull Request
 pr_draft = false
 git_release_draft = false
+
+# Currently we are in alpha state of development
+semver_check = false
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+"""
+
+body = """
+
+## [{{ version }}]\
+    {%- if release_link -%}\
+        ({{ release_link }})\
+    {% endif %} \
+    - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | slice(start=3) | upper_first }}
+
+    {% for commit in commits %}
+        {%- if commit.scope -%}
+            - *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}\
+                {{ commit.message }}{{ self::username(commit=commit) }}\
+                {%- if commit.links %} \
+                    ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%})\
+                {% endif %}
+        {% else -%}
+            - {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{{ self::username(commit=commit) }}{{ self::pr(commit=commit) }}
+        {% endif -%}
+    {% endfor -%}
+{% endfor %}
+{%- if remote.contributors %}
+### Contributors
+{% for contributor in remote.contributors %}
+    * @{{ contributor.username }}
+{%- endfor %}
+{% endif -%}
+{%- macro username(commit) -%}
+    {% if commit.remote.username %} (by @{{ commit.remote.username }}){% endif -%}
+{% endmacro -%}
+{%- macro pr(commit) -%}
+    {% if commit.remote.pr_number %} - #{{ commit.remote.pr_number }}{% endif -%}
+{% endmacro -%}
+"""
+
+# commit_parsers = [
+#   { message = "^feat", group = "added" },
+#   { message = "^changed", group = "changed" },
+#   { message = "^deprecated", group = "deprecated" },
+#   { message = "^fix", group = "fixed" },
+#   { message = "^security", group = "security" },
+#   { message = "^.*", group = "other" },
+# ]
+
+commit_parsers = [
+    { message = "^feat", group = "1. New features" },    # This should be used only when adding new functionality or peforming bigger change to it
+    { message = "^changed", group = "2. Changed" },      # Use this when only updating some part "by accident"
+    { message = "^fix", group = "3. Fixes" },            #
+    { message = "^deprecated", group = "4. Deprecated" },
+    { message = "^chore*", group = "9. Miscellaneous" },   # Miscellanous items like chore, documentation update etc.
+]
