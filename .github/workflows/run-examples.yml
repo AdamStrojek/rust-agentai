@@ -14,10 +14,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model:
-          - openai/gpt-4.1-mini
-          # You can add more models to test against here
-          # - another/model-name
+        llm:
+          - base_url: https://models.github.ai/inference/
+            model: openai/gpt-4.1-mini
+            key_secret: GITHUB_TOKEN
+          - base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+            model: gemini-2.5-flash
+            key_secret: GOOGLE_API_KEY
 
     steps:
       - name: Checkout repository
@@ -41,9 +44,9 @@ jobs:
 
       - name: Run examples and collect logs
         env:
-          AGENTAI_BASE_URL: https://models.github.ai/inference/
-          AGENTAI_API_KEY: ${{ secrets.GITHUB_TOKEN }}
-          AGENTAI_MODEL: ${{ matrix.model }}
+          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
+          AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
           RUST_BACKTRACE: 1
         run: |
           LOG_DIR="logs"
