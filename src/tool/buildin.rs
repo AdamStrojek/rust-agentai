@@ -37,15 +37,6 @@ impl CurrentDateAndTimeToolBox {
             .map_err(|e| ToolError::Other(anyhow!(e)))
     }
 
-    /// Use this tool to find the day of the week for a given date. For example, to answer "What day of the week was 2024-01-01?".
-    /// The date must be in `YYYY-MM-DD` format.
-    #[tool]
-    fn get_day_of_week(&self, date: String) -> ToolResult {
-        let parsed_date =
-            Date::parse(&date, &Iso8601::DEFAULT).map_err(|err| ToolError::Other(anyhow!(err)))?;
-        Ok(parsed_date.weekday().to_string())
-    }
-
     /// Use this tool to get the complete current date and time for precise and unambiguous time-stamping.
     /// For example, to answer "What is the current timestamp?".
     /// Returns a timestamp in the standard ISO 8601 format (e.g., "2023-10-27T10:30:00+00:00").
@@ -57,11 +48,27 @@ impl CurrentDateAndTimeToolBox {
         // Ok(now.to_string())
     }
 
+    /// Use this tool to find the day of the week for a given date. For example, to answer "What day of the week was 2024-01-01?".
+    #[tool]
+    fn get_day_of_week(
+        &self,
+        /// Date in `YYYY-MM-DD` format
+        date: String,
+    ) -> ToolResult {
+        let parsed_date =
+            Date::parse(&date, &Iso8601::DEFAULT).map_err(|err| ToolError::Other(anyhow!(err)))?;
+        Ok(parsed_date.weekday().to_string())
+    }
+
     /// Use this tool to answer questions like: "What time is it in Tokyo?".
-    /// You must provide the timezone as a string (e.g., "America/New_York", "Europe/London", "Asia/Tokyo").
+    /// You must provide the timezone as a string
     /// It returns the time in `HH:MM:SS` format for that zone.
     #[tool]
-    fn get_time_in_timezone(&self, timezone: String) -> ToolResult {
+    fn get_time_in_timezone(
+        &self,
+        /// Timezone provided in IANA timezone names format (e.g., "America/New_York", "Europe/London", "Asia/Tokyo").
+        timezone: String,
+    ) -> ToolResult {
         let tz = timezones::get_by_name(&timezone)
             .ok_or_else(|| ToolError::Other(anyhow!("Unknown timezone: {}", timezone)))?;
         let now_utc = OffsetDateTime::now_utc();
@@ -75,12 +82,14 @@ impl CurrentDateAndTimeToolBox {
 
     /// Use this tool to convert time between different timezones. For example, to answer "What is 14:00 in New York in Tokyo time?".
     /// You must provide the source timezone, the time to convert, and the target timezone.
-    /// Time must be in `HH:MM` format. Timezones must be IANA timezone names (e.g., "America/New_York", "Asia/Tokyo").
     #[tool]
     fn convert_time(
         &self,
+        /// Source timezone provided in IANA timezone names format (e.g., "America/New_York", "Asia/Tokyo").
         source_timezone: String,
+        /// Time in `HH:MM` format to be converted
         time: String,
+        /// Target timezone provided in IANA timezone names format (e.g., "America/New_York", "Asia/Tokyo").
         target_timezone: String,
     ) -> ToolResult {
         let source_tz = timezones::get_by_name(&source_timezone).ok_or_else(|| {
