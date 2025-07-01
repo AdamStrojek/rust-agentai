@@ -284,7 +284,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         });
 
                         param_assignments.extend(quote! {
-                            params.#arg_name
+                            params.#arg_name,
                         });
                     }
                 }
