@@ -110,6 +110,7 @@ impl Agent {
         &mut self,
         model: &str,
         prompt: &str,
+        iterations: Option<usize>,
         toolbox: Option<&dyn ToolBox>,
     ) -> Result<D>
     where
@@ -142,8 +143,7 @@ impl Agent {
             chat_opts = chat_opts.with_response_format(JsonSpec::new("ResponseFormat", json!(obj)));
         }
 
-        // TODO move it to config structure
-        let max_iterations = 5;
+        let max_iterations = iterations.unwrap_or(5);
 
         for iteration in 0..max_iterations {
             debug!("Agent iteration: {}", iteration);
