@@ -74,15 +74,20 @@ impl Agent {
     pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Self {
         let endpoint = Endpoint::from_owned(Arc::from(base_url));
         let auth = AuthData::from_single(api_key);
-       	let target_resolver = ServiceTargetResolver::from_resolver_fn(
+        let target_resolver = ServiceTargetResolver::from_resolver_fn(
             |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
                 let ServiceTarget { model, .. } = service_target;
                 let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
-                Ok(ServiceTarget { endpoint, auth, model })
+                Ok(ServiceTarget {
+                    endpoint,
+                    auth,
+                    model,
+                })
             },
         );
         let client = ClientBuilder::default()
-            .with_service_target_resolver(target_resolver).build();
+            .with_service_target_resolver(target_resolver)
+            .build();
         Self::new_with_client(client, system)
     }
 
@@ -101,7 +106,12 @@ impl Agent {
     /// Type returned by this function is responsible for setting LLM response into structured output
     ///
     /// For more information go to [crate::structured_output]
-    pub async fn run<D>(&mut self, model: &str, prompt: &str, toolbox: Option<&dyn ToolBox>) -> Result<D>
+    pub async fn run<D>(
+        &mut self,
+        model: &str,
+        prompt: &str,
+        toolbox: Option<&dyn ToolBox>,
+    ) -> Result<D>
     where
         D: DeserializeOwned + JsonSchema + 'static,
     {
@@ -139,7 +149,7 @@ impl Agent {
             debug!("Agent iteration: {}", iteration);
             // Create chat request
             let mut chat_req = ChatRequest::new(self.history.clone());
-            if let Some(ref toolbox) = toolbox {
+            if let Some(toolbox) = toolbox {
                 chat_req = chat_req.with_tools(toolbox.tools_definitions()?);
             }
             let chat_resp = self
@@ -147,61 +157,74 @@ impl Agent {
                 .exec_chat(model, chat_req, Some(&chat_opts))
                 .await?;
 
-            match chat_resp.content {
-                Some(MessageContent::Text(text)) => {
-                    let mut resp = text;
-                    debug!("Agent Answer: {resp}");
-                    self.history.push(ChatMessage::assistant(resp.clone()));
-                    if is_answer_string {
-                        // TODO: Workaround when choosing String as response type. Because we are
-                        // expecting D: DeserializeOwned then we can't return String directly.
-                        // To workaround this I escape content and later deserialize it using
-                        // serde_json::from_str to correct "struct" (String)
-                        resp = Value::String(resp).to_string();
+            for content in chat_resp.content {
+                match content {
+                    MessageContent::Text(text) => {
+                        let mut resp = text;
+                        debug!("Agent Answer: {resp}");
+                        self.history.push(ChatMessage::assistant(resp.clone()));
+                        if is_answer_string {
+                            // TODO: Workaround when choosing String as response type. Because we are
+                            // expecting D: DeserializeOwned then we can't return String directly.
+                            // To workaround this I escape content and later deserialize it using
+                            // serde_json::from_str to correct "struct" (String)
+                            resp = Value::String(resp).to_string();
+                        }
+                        let resp = from_str(&resp)?;
+                        return Ok(resp);
                     }
-                    let resp = from_str(&resp)?;
-                    return Ok(resp);
-                },
-                Some(MessageContent::ToolCalls(tools_call)) => {
-                    self.history.push(ChatMessage::from(tools_call.clone()));
-                    // Go through tool use
-                    for tool_request in tools_call {
-                        trace!("Tool request: {} with arguments: {}", tool_request.fn_name, tool_request.fn_arguments.to_string());
-                        if let Some(ref tool) = toolbox {
-                            match tool.call_tool(tool_request.fn_name, tool_request.fn_arguments).await {
-                                Ok(result) => {
-                                    trace!("Tool result: {}", result);
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        result,
-                                    )));
-                                },
-                                Err(err) => {
-                                    // If MCP Server fails we need to redirect this information to model
-                                    // this will allow to react on what happens. Some MCP Servers returns
-                                    // important information as error for Agent
-                                    // TODO: Allow user to configure this behaviour. Depending on MCP
-                                    // server this may contain important information, or this may be
-                                    // indication of unrecoverable failure
-                                    trace!("Error: {}", err);
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        err.to_string(),
-                                    )));
-                                }
-                            };
-                        } else {
-                            todo!("No tool found for {}", tool_request.fn_name);
+                    MessageContent::ToolCalls(tools_call) => {
+                        self.history.push(ChatMessage::from(tools_call.clone()));
+                        // Go through tool use
+                        for tool_request in tools_call {
+                            trace!(
+                                "Tool request: {} with arguments: {}",
+                                tool_request.fn_name,
+                                tool_request.fn_arguments
+                            );
+                            if let Some(tool) = toolbox {
+                                match tool
+                                    .call_tool(tool_request.fn_name, tool_request.fn_arguments)
+                                    .await
+                                {
+                                    Ok(result) => {
+                                        trace!("Tool result: {}", result);
+                                        self.history.push(ChatMessage::from(ToolResponse::new(
+                                            tool_request.call_id.clone(),
+                                            result,
+                                        )));
+                                    }
+                                    Err(err) => {
+                                        // If MCP Server fails we need to redirect this information to model
+                                        // this will allow to react on what happens. Some MCP Servers returns
+                                        // important information as error for Agent
+                                        // TODO: Allow user to configure this behaviour. Depending on MCP
+                                        // server this may contain important information, or this may be
+                                        // indication of unrecoverable failure
+                                        trace!("Error: {}", err);
+                                        self.history.push(ChatMessage::from(ToolResponse::new(
+                                            tool_request.call_id.clone(),
+                                            err.to_string(),
+                                        )));
+                                    }
+                                };
+                            } else {
+                                todo!("No tool found for {}", tool_request.fn_name);
+                            }
                         }
                     }
-                },
-                Some(msg_content) => {
-                    return Err(anyhow!(format!("Unsupported message content {:?}", msg_content)));
-                },
-                None => {}
-            };
+                    msg_content => {
+                        return Err(anyhow!(format!(
+                            "Unsupported message content {:?}",
+                            msg_content
+                        )));
+                    }
+                };
+            }
         }
 
-        Err(anyhow!(format!("Unable to get response in {max_iterations} tries")))
+        Err(anyhow!(format!(
+            "Unable to get response in {max_iterations} tries"
+        )))
     }
 }
