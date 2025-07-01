@@ -46,6 +46,8 @@ use serde_json::Value;
 /// but highly recommended for effective tool use by the agent.
 pub use genai::chat::Tool;
 
+pub type ToolResult = Result<String, ToolError>;
+
 // Re-export tool and toolbox macros, they are used to generate auto implementation of
 pub use agentai_macros::toolbox;
 
@@ -94,7 +96,7 @@ pub trait ToolBox {
     /// # Returns
     /// A `Result` containing the tool's output as a `String` on success,
     /// or a `ToolError` if the tool call fails or the tool is not found.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> Result<String, ToolError>;
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult;
 }
 
 #[derive(Error, Debug)]

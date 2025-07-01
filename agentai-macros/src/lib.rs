@@ -73,7 +73,7 @@ use heck::ToUpperCamelCase;
 /// #### 2.2. Requirements and Limitations
 ///
 /// - **Method Receiver**: Exposed tools must be methods that take `&self` as the first argument. Static methods are not supported.
-/// - **Return Type**: The return type must be `Result<String, ToolError>`.
+/// - **Return Type**: The return type must be `ToolResult` which is `Result<String, ToolError>`.
 /// - **Serializable Parameters**: All method parameters must be (de)serializable by `serde`.
 ///
 /// ### 3. Advanced Configuration
@@ -111,13 +111,13 @@ use heck::ToUpperCamelCase;
 ///
 ///     /// This tool demonstrates accessing a field on the struct.
 ///     #[tool]
-///     async fn tool_one(&self) -> Result<String, ToolError> {
+///     async fn tool_one(&self) -> ToolResult {
 ///         Ok(format!("Result from tool one: {}", self.my_field))
 ///     }
 ///
 ///     /// This tool takes a parameter with documentation.
 ///     #[tool]
-///     async fn tool_two(&self, #[doc = "The input string."] input: String) -> Result<String, ToolError> {
+///     async fn tool_two(&self, #[doc = "The input string."] input: String) -> ToolResult {
 ///         Ok(format!("Tool two received: {}", input))
 ///     }
 ///
@@ -127,13 +127,13 @@ use heck::ToUpperCamelCase;
 ///         &self,
 ///         /// You can use both methods of providing documentation for an argument
 ///         value: i32
-///     ) -> Result<String, ToolError> {
+///     ) -> ToolResult {
 ///         Ok(format!("Result from tool three with special name and value: {}", value))
 ///     }
 ///
 ///     /// This is a sync tool method example.
 ///     #[tool]
-///     fn tool_sync(&self) -> Result<String, ToolError> {
+///     fn tool_sync(&self) -> ToolResult {
 ///          Ok("This is a synchronous tool result".to_string())
 ///     }
 ///
@@ -372,7 +372,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 ])
             }
 
-            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> Result<String, ToolError> {
+            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> ToolResult {
                  match tool_name.as_str() {
                      #match_arms
                      _ => {
