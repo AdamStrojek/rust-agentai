@@ -1,0 +1,214 @@
+use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+use anyhow::anyhow;
+use time::format_description::well_known::{Iso8601, Rfc3339};
+use time::{format_description, Date, OffsetDateTime, Time};
+use time_tz::{timezones, OffsetDateTimeExt};
+
+/// # Current Date and Time Toolbox
+///
+/// This struct provides tools for getting the current date and time.
+/// The `#[toolbox]` macro exposes methods marked with `#[tool]` to an AI model,
+/// enabling it to answer questions about the current date and time.
+pub struct CurrentDateAndTimeToolBox {}
+
+#[toolbox]
+impl CurrentDateAndTimeToolBox {
+    /// Use this tool to answer questions like: "What is today's date?".
+    /// It returns the date in `YYYY-MM-DD` format.
+    /// The date is based on the local timezone of the system.
+    #[tool]
+    fn get_today_date(&self) -> ToolResult {
+        let today = OffsetDateTime::now_local().map_err(|err| ToolError::Other(anyhow!(err)))?;
+        today
+            .date()
+            .format(&Iso8601::DATE)
+            .map_err(|err| ToolError::Other(anyhow!(err)))
+    }
+
+    /// Use this tool to answer questions like: "What time is it?".
+    /// It returns the time in `HH:MM:SS` format.
+    /// The time is based on the local timezone of the system.
+    #[tool]
+    fn get_current_time(&self) -> ToolResult {
+        let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let format = format_description::parse("[hour]:[minute]:[second]")
+            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        now.format(&format)
+            .map_err(|e| ToolError::Other(anyhow!(e)))
+    }
+
+    /// Use this tool to find the day of the week for a given date. For example, to answer "What day of the week was 2024-01-01?".
+    /// The date must be in `YYYY-MM-DD` format.
+    #[tool]
+    fn get_day_of_week(&self, date: String) -> ToolResult {
+        let parsed_date =
+            Date::parse(&date, &Iso8601::DEFAULT).map_err(|err| ToolError::Other(anyhow!(err)))?;
+        Ok(parsed_date.weekday().to_string())
+    }
+
+    /// Use this tool to get the complete current date and time for precise and unambiguous time-stamping.
+    /// For example, to answer "What is the current timestamp?".
+    /// Returns a timestamp in the standard ISO 8601 format (e.g., "2023-10-27T10:30:00+00:00").
+    #[tool]
+    fn get_current_datetime(&self) -> ToolResult {
+        let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
+        now.format(&Rfc3339)
+            .map_err(|e| ToolError::Other(anyhow!(e)))
+        // Ok(now.to_string())
+    }
+
+    /// Use this tool to answer questions like: "What time is it in Tokyo?".
+    /// You must provide the timezone as a string (e.g., "America/New_York", "Europe/London", "Asia/Tokyo").
+    /// It returns the time in `HH:MM:SS` format for that zone.
+    #[tool]
+    fn get_time_in_timezone(&self, timezone: String) -> ToolResult {
+        let tz = timezones::get_by_name(&timezone)
+            .ok_or_else(|| ToolError::Other(anyhow!("Unknown timezone: {}", timezone)))?;
+        let now_utc = OffsetDateTime::now_utc();
+        let now_in_tz = now_utc.to_timezone(tz);
+        let format = format_description::parse("[hour]:[minute]:[second]")
+            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        now_in_tz
+            .format(&format)
+            .map_err(|e| ToolError::Other(anyhow!(e)))
+    }
+
+    /// Use this tool to convert time between different timezones. For example, to answer "What is 14:00 in New York in Tokyo time?".
+    /// You must provide the source timezone, the time to convert, and the target timezone.
+    /// Time must be in `HH:MM` format. Timezones must be IANA timezone names (e.g., "America/New_York", "Asia/Tokyo").
+    #[tool]
+    fn convert_time(
+        &self,
+        source_timezone: String,
+        time: String,
+        target_timezone: String,
+    ) -> ToolResult {
+        let source_tz = timezones::get_by_name(&source_timezone).ok_or_else(|| {
+            ToolError::Other(anyhow!("Unknown source timezone: {}", source_timezone))
+        })?;
+        let target_tz = timezones::get_by_name(&target_timezone).ok_or_else(|| {
+            ToolError::Other(anyhow!("Unknown target timezone: {}", target_timezone))
+        })?;
+
+        let time_format = format_description::parse("[hour]:[minute]")
+            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let parsed_time = Time::parse(&time, &time_format)
+            .map_err(|e| ToolError::Other(anyhow!("Invalid time format for '{}': {}", time, e)))?;
+
+        let now_in_source_tz = OffsetDateTime::now_utc().to_timezone(source_tz);
+        let source_datetime = now_in_source_tz.replace_time(parsed_time);
+
+        let target_datetime = source_datetime.to_timezone(target_tz);
+
+        target_datetime
+            .format(&time_format)
+            .map_err(|e| ToolError::Other(anyhow!(e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::format_description::well_known::Iso8601;
+    use time::{Date, OffsetDateTime};
+
+    #[test]
+    fn test_get_today_date() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_today_date().unwrap();
+        assert!(Date::parse(&result, &Iso8601::DATE).is_ok());
+    }
+
+    #[test]
+    fn test_get_current_time() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_current_time().unwrap();
+        let parts: Vec<&str> = result.split(':').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].len(), 2);
+        assert_eq!(parts[1].len(), 2);
+        assert_eq!(parts[2].len(), 2);
+    }
+
+    #[test]
+    fn test_get_day_of_week() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_day_of_week("2024-01-01".to_string()).unwrap();
+        assert_eq!(result, "Monday");
+    }
+
+    #[test]
+    fn test_get_day_of_week_invalid_date() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_day_of_week("invalid-date".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_current_datetime() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_current_datetime().unwrap();
+        assert!(OffsetDateTime::parse(&result, &Iso8601::DEFAULT).is_ok());
+    }
+
+    #[test]
+    fn test_get_time_in_timezone() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox
+            .get_time_in_timezone("Asia/Tokyo".to_string())
+            .unwrap();
+        let parts: Vec<&str> = result.split(':').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].len(), 2);
+        assert_eq!(parts[1].len(), 2);
+        assert_eq!(parts[2].len(), 2);
+    }
+
+    #[test]
+    fn test_get_time_in_invalid_timezone() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.get_time_in_timezone("Invalid/Timezone".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_convert_time() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox
+            .convert_time(
+                "America/New_York".to_string(),
+                "10:00".to_string(),
+                "Asia/Tokyo".to_string(),
+            )
+            .unwrap();
+        let parts: Vec<&str> = result.split(':').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].len(), 2);
+        assert_eq!(parts[1].len(), 2);
+    }
+
+    #[test]
+    fn test_convert_time_invalid_input() {
+        let toolbox = CurrentDateAndTimeToolBox {};
+        let result = toolbox.convert_time(
+            "Invalid/Timezone".to_string(),
+            "10:00".to_string(),
+            "Asia/Tokyo".to_string(),
+        );
+        assert!(result.is_err());
+
+        let result = toolbox.convert_time(
+            "America/New_York".to_string(),
+            "99:99".to_string(),
+            "Asia/Tokyo".to_string(),
+        );
+        assert!(result.is_err());
+
+        let result = toolbox.convert_time(
+            "America/New_York".to_string(),
+            "10:00".to_string(),
+            "Invalid/Timezone".to_string(),
+        );
+        assert!(result.is_err());
+    }
+}

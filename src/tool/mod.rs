@@ -24,7 +24,8 @@
 //!
 //! For example demonstrating how to implement `ToolBox` trait using `#[toolbox]` macro, look into [crate::examples::tools_custom] example.
 
-pub mod websearch;
+#[cfg(feature = "tools-buildin")]
+pub mod buildin;
 
 #[cfg(feature = "mcp-client")]
 pub mod mcp;
