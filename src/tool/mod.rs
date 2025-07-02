@@ -27,10 +27,13 @@
 pub mod websearch;
 
 #[cfg(feature = "mcp-client")]
-pub mod mcp;
+pub mod stdio_mcp;
+pub mod streamable_http_mcp;
 
-use thiserror::{Error};
+pub mod multi_tool;
+
 use serde_json::Value;
+use thiserror::Error;
 
 // Re-export Tool structure, it is being used by ToolBoxes
 /// Represents a tool definition that can be exposed to an agent.
@@ -62,7 +65,7 @@ pub use agentai_macros::toolbox;
 /// the [`#[toolbox]`](crate::tool::toolbox) attribute macro. This macro automatically
 /// generates the necessary `ToolBox` implementation for a struct based on its methods.
 #[async_trait::async_trait]
-pub trait ToolBox {
+pub trait ToolBox: Send + Sync {
     /// Returns a list of all `Tool` instances contained within this ToolBox.
     /// These definitions include the tool's name, description, and parameters,
     /// which are used by the language model to decide which tool to call.
@@ -117,7 +120,7 @@ pub enum ToolError {
     /// This is a general error variant that can encapsulate various runtime issues
     /// encountered while the tool's logic is running.
     #[error("Tool execution failed")]
-	ExecutionError,
+    ExecutionError,
     /// Represents any other underlying error that occurred, wrapped from the `anyhow::Error` type.
     /// This allows for propagating errors from dependencies or other parts of the system.
     #[error(transparent)]
