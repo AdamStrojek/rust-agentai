@@ -31,7 +31,13 @@ schemars = { version = "0.9", features = ["derive"] }
 async-trait = "0.1.88"
 log = "0.4.27"
 reqwest = "0.12.18"
-mcp_client_rs = {version = "0.1.7", optional = true}
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
+    "client",
+    "transport-child-process",
+    "reqwest",
+    "transport-streamable-http-client"
+], optional = true}
+tokio = { version = "1", default-features = false, optional = true}
 document-features = { version = "0.2"}
 
 [dev-dependencies]
@@ -50,6 +56,6 @@ default = ["mcp-client", "macros"]
 #! Features list:
 
 ## Enables experimental support for Agent Tools based on MCP Servers
-mcp-client = ["dep:mcp_client_rs"]
+mcp-client = ["dep:rmcp", "dep:tokio"]
 ## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
 macros = ["agentai-macros"]
