@@ -115,6 +115,78 @@ impl CurrentDateAndTimeToolBox {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct LocationResponse {
+    display_name: Box<str>,
+    lat: Box<str>,
+    lon: Box<str>,
+}
+
+/// # Location Toolbox
+///
+/// This struct provides tools for getting location data from the Nominatim OpenStreetMap API.
+///
+/// Many times others tools like weather API accepts only geolocation as coordinates. Humans do not
+/// communicate that way, we prefer to provide proper address. By utilizing location search we can
+/// allow to provide it as address, which will be converted to geolocation.
+///
+/// Please remember to follow Nominatim Usage Policy
+/// https://operations.osmfoundation.org/policies/nominatim/
+pub struct LocationToolBox;
+
+#[toolbox]
+impl LocationToolBox {
+    /// Use this tool to get the geographical location (latitude and longitude) of a place.
+    /// For example, to answer "Where is the Eiffel Tower?". You can use it not only city name, but also
+    /// details like whole address with street.
+    /// It returns the display name, latitude, and longitude.
+    #[tool]
+    async fn get_location(
+        &self,
+        /// The name of the location to search for (e.g., "Eiffel Tower", "New York City").
+        location: String,
+    ) -> ToolResult {
+        let url = format!(
+            "https://nominatim.openstreetmap.org/search?q={}&format=jsonv2",
+            location
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            // Nominatim API requires a User-Agent header.
+            .header("User-Agent", "rust-agentai-client")
+            .send()
+            .await
+            .map_err(|e| ToolError::Other(anyhow!("Failed to send request: {}", e)))?;
+
+        if !response.status().is_success() {
+            // TODO: Unify way of API Error
+            return Err(ToolError::Other(anyhow!(
+                "API request failed with status: {}",
+                response.status()
+            )));
+        }
+
+        let locations: Vec<LocationResponse> = response
+            .json()
+            .await
+            .map_err(|e| ToolError::Other(anyhow!("Failed to parse JSON response: {}", e)))?;
+
+        if let Some(first_location) = locations.first() {
+            Ok(format!(
+                "Location: {}, Latitude: {}, Longitude: {}",
+                first_location.display_name, first_location.lat, first_location.lon
+            ))
+        } else {
+            Err(ToolError::Other(anyhow!(
+                "No location found for '{}'",
+                location
+            )))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +290,26 @@ mod tests {
             "10:00".to_string(),
             "Invalid/Timezone".to_string(),
         );
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_location() {
+        let toolbox = LocationToolBox;
+        let result = toolbox.get_location("Wrocław".to_string()).await;
+        assert!(result.is_ok());
+        let location_info = result.unwrap();
+        assert!(location_info.contains("Location: Wrocław"));
+        assert!(location_info.contains("Latitude: 51."));
+        assert!(location_info.contains("Longitude: 16."));
+    }
+
+    #[tokio::test]
+    async fn test_get_location_not_found() {
+        let toolbox = LocationToolBox;
+        let result = toolbox
+            .get_location("SomeInvalidPlaceThatDoesNotExist".to_string())
+            .await;
         assert!(result.is_err());
     }
 }
