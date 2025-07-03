@@ -1,3 +1,14 @@
+//! # Built-in Tools
+//!
+//! This module provides a collection of commonly used tools that can be shared across different AI agents.
+//! These tools offer functionalities for common tasks such as retrieving the current date and time, and fetching location data.
+//!
+//! ## Included Toolboxes:
+//!
+//! - `CurrentDateAndTimeToolBox`: A set of tools for querying the current date, time, and performing timezone conversions.
+//! - `LocationToolBox`: A tool for retrieving geographical information (latitude and longitude) for a given location using the OpenStreetMap Nominatim API.
+//!
+//! For a practical demonstration of how to use these tools, please refer to the `examples/tool_buildin.rs` file.
 use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
 use anyhow::anyhow;
 use time::format_description::well_known::{Iso8601, Rfc3339};
