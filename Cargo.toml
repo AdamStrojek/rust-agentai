@@ -25,12 +25,12 @@ agentai-macros = { path = "./agentai-macros", version = "0.1", optional = true }
 genai = "0.3.5"
 anyhow = "1.0.98"
 thiserror = "2.0"
-serde = "1.0.219"
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 schemars = { version = "0.9", features = ["derive"] }
 async-trait = "0.1.88"
 log = "0.4.27"
-reqwest = "0.12.18"
+reqwest = { version = "0.12.18", features = ["json"] }
 mcp_client_rs = {version = "0.1.7", optional = true }
 document-features = { version = "0.2"}
 time = { version = "0.3", features = ["serde", "parsing"], optional = true }
@@ -55,5 +55,5 @@ default = ["mcp-client", "macros", "tools-buildin"]
 mcp-client = ["dep:mcp_client_rs"]
 ## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
 macros = ["agentai-macros"]
-## Enables support for buildin tools
+## Enables support for [buildin tools](crate::tool::buildin)
 tools-buildin = ["time", "time-tz"]
