@@ -30,8 +30,8 @@ pub mod buildin;
 #[cfg(feature = "mcp-client")]
 pub mod mcp;
 
-use thiserror::{Error};
 use serde_json::Value;
+use thiserror::Error;
 
 // Re-export Tool structure, it is being used by ToolBoxes
 /// Represents a tool definition that can be exposed to an agent.
@@ -120,7 +120,7 @@ pub enum ToolError {
     /// This is a general error variant that can encapsulate various runtime issues
     /// encountered while the tool's logic is running.
     #[error("Tool execution failed")]
-	ExecutionError,
+    ExecutionError,
     /// Represents any other underlying error that occurred, wrapped from the `anyhow::Error` type.
     /// This allows for propagating errors from dependencies or other parts of the system.
     #[error(transparent)]
