@@ -28,7 +28,7 @@ impl CurrentDateAndTimeToolBox {
     /// It returns the date in `YYYY-MM-DD` format.
     /// The date is based on the local timezone of the system.
     #[tool]
-    fn get_today_date(&self) -> ToolResult {
+    pub fn get_today_date(&self) -> ToolResult {
         let today = OffsetDateTime::now_local().map_err(|err| ToolError::Other(anyhow!(err)))?;
         today
             .date()
@@ -40,7 +40,7 @@ impl CurrentDateAndTimeToolBox {
     /// It returns the time in `HH:MM:SS` format.
     /// The time is based on the local timezone of the system.
     #[tool]
-    fn get_current_time(&self) -> ToolResult {
+    pub fn get_current_time(&self) -> ToolResult {
         let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
         let format = format_description::parse("[hour]:[minute]:[second]")
             .map_err(|e| ToolError::Other(anyhow!(e)))?;
@@ -52,7 +52,7 @@ impl CurrentDateAndTimeToolBox {
     /// For example, to answer "What is the current timestamp?".
     /// Returns a timestamp in the standard ISO 8601 format (e.g., "2023-10-27T10:30:00+00:00").
     #[tool]
-    fn get_current_datetime(&self) -> ToolResult {
+    pub fn get_current_datetime(&self) -> ToolResult {
         let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
         now.format(&Rfc3339)
             .map_err(|e| ToolError::Other(anyhow!(e)))
@@ -61,7 +61,7 @@ impl CurrentDateAndTimeToolBox {
 
     /// Use this tool to find the day of the week for a given date. For example, to answer "What day of the week was 2024-01-01?".
     #[tool]
-    fn get_day_of_week(
+    pub fn get_day_of_week(
         &self,
         /// Date in `YYYY-MM-DD` format
         date: String,
@@ -75,7 +75,7 @@ impl CurrentDateAndTimeToolBox {
     /// You must provide the timezone as a string
     /// It returns the time in `HH:MM:SS` format for that zone.
     #[tool]
-    fn get_time_in_timezone(
+    pub fn get_time_in_timezone(
         &self,
         /// Timezone provided in IANA timezone names format (e.g., "America/New_York", "Europe/London", "Asia/Tokyo").
         timezone: String,
@@ -94,7 +94,7 @@ impl CurrentDateAndTimeToolBox {
     /// Use this tool to convert time between different timezones. For example, to answer "What is 14:00 in New York in Tokyo time?".
     /// You must provide the source timezone, the time to convert, and the target timezone.
     #[tool]
-    fn convert_time(
+    pub fn convert_time(
         &self,
         /// Source timezone provided in IANA timezone names format (e.g., "America/New_York", "Asia/Tokyo").
         source_timezone: String,
@@ -142,17 +142,17 @@ struct LocationResponse {
 /// allow to provide it as address, which will be converted to geolocation.
 ///
 /// Please remember to follow Nominatim Usage Policy
-/// https://operations.osmfoundation.org/policies/nominatim/
+/// <https://operations.osmfoundation.org/policies/nominatim/>
 pub struct LocationToolBox;
 
 #[toolbox]
 impl LocationToolBox {
     /// Use this tool to get the geographical location (latitude and longitude) of a place.
-    /// For example, to answer "Where is the Eiffel Tower?". You can use it not only city name, but also
-    /// details like whole address with street.
+    /// For example, to answer "Where is the Eiffel Tower?". You can search using not only a city name
+    /// but also more specific details, like a full street address.
     /// It returns the display name, latitude, and longitude.
     #[tool]
-    async fn get_location(
+    pub async fn get_location(
         &self,
         /// The name of the location to search for (e.g., "Eiffel Tower", "New York City").
         location: String,
