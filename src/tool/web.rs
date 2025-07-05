@@ -7,7 +7,7 @@
 //! For a practical demonstration of these tools, please refer to the example located at
 //! [examples/tools_web.rs](crate::examples::tools_web).
 
-use crate::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
+use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
 use anyhow::Context;
 use reqwest::Client;
 use serde_json::Value;
@@ -56,22 +56,28 @@ impl WebSearchToolBox {
         #[doc = "The search terms or keywords to be used by the search engine for retrieving relevant results."]
         query: String,
     ) -> ToolResult {
-        let params = [("q", query.as_str()), ("count", "5"), ("result_filter", "web")];
+        let params = [
+            ("q", query.as_str()),
+            ("count", "5"),
+            ("result_filter", "web"),
+        ];
         let response = self
             .client
             .get(BRAVE_API_URL)
             .query(&params)
             .header("X-Subscription-Token", self.api_key.clone())
             .send()
-            .await.map_err(|e| anyhow::Error::new(e))?;
+            .await
+            .map_err(|e| anyhow::Error::new(e))?;
 
         let json: Value = response.json().await.map_err(|e| anyhow::Error::new(e))?;
 
         let mut results: Vec<String> = vec![];
 
-        let response = json["web"]["results"].as_array().ok_or(ToolError::ExecutionError)?;
-        for item in response
-        {
+        let response = json["web"]["results"]
+            .as_array()
+            .ok_or(ToolError::ExecutionError)?;
+        for item in response {
             let title = item["title"]
                 .as_str()
                 .context("web title is not a string")?;
@@ -85,7 +91,7 @@ impl WebSearchToolBox {
         }
 
         Ok(results.join("\n\n"))
-	}
+    }
 }
 
 /// Provides a tool that enables an LLM to fetch the content of a web page.
@@ -120,7 +126,7 @@ impl WebFetchToolBox {
     pub async fn web_fetch(
         &self,
         #[doc = "The full URL of the web page to fetch, including the protocol (e.g., https://)."]
-        url: String
+        url: String,
     ) -> ToolResult {
         let response = self
             .client
