@@ -133,3 +133,69 @@ pub enum ToolError {
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
+
+/// A collection of `ToolBox` instances.
+///
+/// It allows for managing multiple toolboxes as a single unit, aggregating
+/// their tool definitions and dispatching tool calls to the appropriate `ToolBox`.
+///
+/// When a tool is called, the `ToolBoxSet` will search through its contained
+/// toolboxes in the order they were added. The first `ToolBox` that contains
+/// a tool with a matching name will be used to execute the call.
+#[derive(Default)]
+pub struct ToolBoxSet {
+    toolboxes: Vec<Box<dyn ToolBox + Send + Sync>>,
+}
+
+impl ToolBoxSet {
+    /// Creates a new, empty `ToolBoxSet`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a `ToolBox` to the set.
+    ///
+    /// The order in which toolboxes are added is significant. When a tool call
+    /// is made, the `ToolBoxSet` will search for the tool in the order the
+    /// toolboxes were added.
+    pub fn add_tool(&mut self, toolbox: impl ToolBox + Send + Sync + 'static) {
+        self.toolboxes.push(Box::new(toolbox));
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolBox for ToolBoxSet {
+    /// Returns a list of all `Tool` instances contained within this ToolBoxSet.
+    ///
+    /// It aggregates the tool definitions from all the contained toolboxes.
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        let mut all_definitions = Vec::new();
+        for toolbox in &self.toolboxes {
+            all_definitions.extend(toolbox.tools_definitions()?);
+        }
+        Ok(all_definitions)
+    }
+
+    /// Calls a specific tool by its name with the given parameters.
+    ///
+    /// It finds the correct `ToolBox` that contains the tool and delegates the call.
+    /// If multiple toolboxes contain a tool with the same name, the one that was
+    /// added first will be used.
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+        for toolbox in &self.toolboxes {
+            match toolbox
+                .call_tool(tool_name.clone(), arguments.clone())
+                .await
+            {
+                Err(ToolError::NoToolFound(_)) => {
+                    // No tool in this toolbox, we can check others
+                    continue;
+                }
+                result => {
+                    return result;
+                }
+            };
+        }
+        Err(ToolError::NoToolFound(tool_name))
+    }
+}
