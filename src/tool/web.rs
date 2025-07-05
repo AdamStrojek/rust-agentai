@@ -50,7 +50,6 @@ impl WebSearchToolBox {
     /// ## Example
     ///
     /// **User:** "What is the latest news about AI?"
-    /// ```
     #[tool]
     pub async fn web_search(
         &self,
@@ -110,6 +109,7 @@ impl WebFetchToolBox {
         }
     }
 
+    #[allow(rustdoc::bare_urls)]
     /// Fetches the content of a web page given its URL. This tool is useful for accessing the
     /// raw text content of a webpage. The content is returned as a single string.
     ///

@@ -30,6 +30,8 @@ pub mod buildin;
 #[cfg(feature = "mcp-client")]
 pub mod mcp;
 
+pub mod web;
+
 use serde_json::Value;
 use thiserror::Error;
 
