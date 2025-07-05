@@ -1,4 +1,7 @@
-use agentai::tool::websearch::WebSearchToolBox;
+use agentai::tool::{
+    web::{WebFetchToolBox, WebSearchToolBox},
+    ToolBoxSet,
+};
 use agentai::Agent;
 use anyhow::Result;
 use log::{info, LevelFilter};
@@ -7,9 +10,8 @@ use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 use std::env;
 
-const SYSTEM: &str =
-    "You are helpful assistant. You goal is to search for information requested by user,\
-in result you will receive 5 sites, provide summary based on titles and descriptions.";
+const SYSTEM: &str = "You are helpful assistant. You goal is to provide user answer based on search
+    results and content of found pages. You can use provided tools to achieve that.";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,6 +25,11 @@ async fn main() -> Result<()> {
 
     let api_key = env::var("BRAVE_API_KEY")?;
     let web_search_tool = WebSearchToolBox::new(&api_key);
+    let web_fetch_tool = WebFetchToolBox::new();
+
+    let mut toolbox = ToolBoxSet::new();
+    toolbox.add_tool(web_search_tool);
+    toolbox.add_tool(web_fetch_tool);
 
     let question = "Search me for tools that can be used with terminal and Rust";
 
@@ -34,7 +41,7 @@ async fn main() -> Result<()> {
 
     let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
 
-    let answer: Answer = agent.run(&model, question, Some(&web_search_tool)).await?;
+    let answer: Answer = agent.run(&model, question, Some(&toolbox)).await?;
 
     info!("{:#?}", answer);
 

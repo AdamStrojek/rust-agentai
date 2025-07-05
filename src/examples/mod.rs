@@ -11,9 +11,9 @@
 //!
 //! The list of all available examples can be found below
 
+pub mod genai_custom;
 pub mod simple;
 pub mod struct_output;
-pub mod tools_search;
 pub mod tools_custom;
 pub mod tools_mcp;
-pub mod genai_custom;
+pub mod tools_web;
