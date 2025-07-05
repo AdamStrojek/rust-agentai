@@ -30,6 +30,7 @@ pub mod buildin;
 #[cfg(feature = "mcp-client")]
 pub mod mcp;
 
+#[cfg(feature = "tools-web")]
 pub mod web;
 
 use serde_json::Value;
