@@ -118,6 +118,11 @@ pub enum ToolError {
     /// registered tool in the box.
     #[error("Tool named '{0}' not found")]
     NoToolFound(String),
+    /// Indicates that returned error should be handled by LLM, for example it may be
+    /// missing parameter or malformed data. Tool is responsible to provide
+    /// human readable error message, this message will be passed to the LLM
+    #[error("{0}")]
+    LLMError(String),
     /// Indicates a failure occurred during the execution of a specific tool.
     /// This is a general error variant that can encapsulate various runtime issues
     /// encountered while the tool's logic is running.
