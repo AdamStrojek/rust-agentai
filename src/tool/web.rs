@@ -145,6 +145,8 @@ impl WebFetchToolBox {
 
         let body = response.text().await.map_err(|e| anyhow::Error::new(e))?;
 
+        // TODO: Add HTML2MD converter
+
         Ok(body)
     }
 }
