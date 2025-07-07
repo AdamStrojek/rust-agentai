@@ -18,10 +18,10 @@ jobs:
             base_url: https://models.github.ai/inference/
             model: openai/gpt-4.1-mini
             key_secret: GITHUB_TOKEN
-          - name: gemini-2.5-flash
-            base_url: https://generativelanguage.googleapis.com/v1beta/openai/
-            model: gemini-2.5-flash
-            key_secret: GOOGLE_API_KEY
+          # - name: gemini-2.5-flash
+          #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+          #   model: gemini-2.5-flash
+          #   key_secret: GOOGLE_API_KEY
 
     steps:
       - name: Checkout repository
