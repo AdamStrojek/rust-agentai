@@ -1,13 +1,12 @@
+use agentai::tool::mcp::McpToolBox;
 use agentai::Agent;
 use anyhow::Result;
 use log::{info, LevelFilter};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
-use agentai::tool::mcp::McpToolBox;
 
-const SYSTEM: &str =
-    "You are helpful assistant.";
+const SYSTEM: &str = "You are helpful assistant.";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,7 +28,8 @@ async fn main() -> Result<()> {
 
     let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
 
-    let mcp_tools = McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
+    let mcp_tools =
+        McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
 
     let answer: Answer = agent.run(&model, question, Some(&mcp_tools)).await?;
 

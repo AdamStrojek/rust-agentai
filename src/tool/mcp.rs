@@ -7,14 +7,17 @@
 //!
 //!
 
-use std::collections::HashMap;
-use crate::tool::{ToolBox, Tool, ToolError};
+use crate::tool::{Tool, ToolBox, ToolError};
 use anyhow::Result as AnyhowResult;
 use async_trait::async_trait;
-use mcp_client_rs::{client::{Client, ClientBuilder}, MessageContent};
-use serde_json::Value;
-use std::sync::Arc;
 use log::trace;
+use mcp_client_rs::{
+    client::{Client, ClientBuilder},
+    MessageContent,
+};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct McpToolBox {
     client: Arc<Client>,
@@ -22,10 +25,13 @@ pub struct McpToolBox {
 }
 
 impl McpToolBox {
-    pub async fn new(cmd: &str, args: impl IntoIterator<Item = impl AsRef<str>>, envs: Option<HashMap<String, String>>) -> AnyhowResult<Self> {
+    pub async fn new(
+        cmd: &str,
+        args: impl IntoIterator<Item = impl AsRef<str>>,
+        envs: Option<HashMap<String, String>>,
+    ) -> AnyhowResult<Self> {
         trace!("McpToolBox::new for cmd: {}", cmd);
-        let mut builder = ClientBuilder::new(cmd)
-            .args(args);
+        let mut builder = ClientBuilder::new(cmd).args(args);
 
         if let Some(envs) = envs {
             for (k, v) in envs {
@@ -40,11 +46,10 @@ impl McpToolBox {
 
         for tool_desc in client.list_tools().await?.tools {
             tools.push(Tool {
-                    name: tool_desc.name,
-                    description: Some(tool_desc.description),
-                    schema: Some(tool_desc.input_schema),
-                }
-            );
+                name: tool_desc.name,
+                description: Some(tool_desc.description),
+                schema: Some(tool_desc.input_schema),
+            });
         }
 
         Ok(Self {
@@ -61,7 +66,11 @@ impl ToolBox for McpToolBox {
     }
 
     async fn call_tool(&self, tool_name: String, arguments: Value) -> Result<String, ToolError> {
-        let call_result = self.client.call_tool(&tool_name, arguments).await.map_err(|e| anyhow::Error::new(e))?;
+        let call_result = self
+            .client
+            .call_tool(&tool_name, arguments)
+            .await
+            .map_err(anyhow::Error::new)?;
 
         // TODO: Right now we supports only text response from tool
         let msg = call_result
@@ -100,18 +109,23 @@ mod tests {
 
         // Assert that the "get_current_time" tool exists
         let get_time_tool = tool_defs.iter().find(|t| t.name == "get_current_time");
-        assert!(get_time_tool.is_some(), "Expected tool 'get_current_time' not found");
+        assert!(
+            get_time_tool.is_some(),
+            "Expected tool 'get_current_time' not found"
+        );
         assert_eq!(get_time_tool.unwrap().name, "get_current_time");
         assert!(get_time_tool.unwrap().description.is_some());
         assert!(get_time_tool.unwrap().schema.is_some());
 
         // Assert that the "convert_time" tool exists
         let convert_time_tool = tool_defs.iter().find(|t| t.name == "convert_time");
-        assert!(convert_time_tool.is_some(), "Expected tool 'convert_time' not found");
+        assert!(
+            convert_time_tool.is_some(),
+            "Expected tool 'convert_time' not found"
+        );
         assert_eq!(convert_time_tool.unwrap().name, "convert_time");
         assert!(convert_time_tool.unwrap().description.is_some());
         assert!(convert_time_tool.unwrap().schema.is_some());
-
 
         Ok(())
     }
@@ -126,7 +140,9 @@ mod tests {
             "target_timezone": "America/New_York",
             "time": "12:00"
         });
-        let result = mcp_tools.call_tool("convert_time".to_string(), arguments).await?;
+        let result = mcp_tools
+            .call_tool("convert_time".to_string(), arguments)
+            .await?;
 
         // Assert that the result is a non-empty string (the converted time)
         assert!(!result.is_empty());
@@ -140,7 +156,9 @@ mod tests {
 
         // Call a non-existent tool
         let arguments = json!({});
-        let result = mcp_tools.call_tool("non_existent_tool".to_string(), arguments).await;
+        let result = mcp_tools
+            .call_tool("non_existent_tool".to_string(), arguments)
+            .await;
 
         // Assert that calling a non-existent tool returns an error
         assert!(result.is_err());

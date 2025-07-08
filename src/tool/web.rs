@@ -68,9 +68,9 @@ impl WebSearchToolBox {
             .header("X-Subscription-Token", self.api_key.clone())
             .send()
             .await
-            .map_err(|e| anyhow::Error::new(e))?;
+            .map_err(anyhow::Error::new)?;
 
-        let json: Value = response.json().await.map_err(|e| anyhow::Error::new(e))?;
+        let json: Value = response.json().await.map_err(anyhow::Error::new)?;
 
         let mut results: Vec<String> = vec![];
 
@@ -143,7 +143,7 @@ impl WebFetchToolBox {
             )));
         }
 
-        let body = response.text().await.map_err(|e| anyhow::Error::new(e))?;
+        let body = response.text().await.map_err(anyhow::Error::new)?;
 
         // TODO: Add HTML2MD converter
 
