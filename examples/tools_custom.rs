@@ -5,7 +5,7 @@
 //!
 
 use agentai::Agent;
-use agentai::tool::{ToolBox, Tool, ToolError, toolbox};
+use agentai::tool::{ToolBox, Tool, ToolError, ToolResult, toolbox};
 use anyhow::Error;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -73,7 +73,7 @@ impl UrlFetcherToolBox {
         &self,
         /// Use this field to provide URL of file to download
         url: String
-    ) -> Result<String, ToolError> {
+    ) -> ToolResult {
         // Use reqwest to fetch the content from the provided URL.
         // The `?` operator handles potential errors from the get and text methods.
         Ok(

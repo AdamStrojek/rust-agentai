@@ -7,17 +7,21 @@ permissions:
   contents: read
   models: read
 
-
 jobs:
   run-examples:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        model:
-          - openai/gpt-4.1-mini
-          # You can add more models to test against here
-          # - another/model-name
+        llm:
+          - name: gpt-4.1-mini
+            base_url: https://models.github.ai/inference/
+            model: openai/gpt-4.1-mini
+            key_secret: GITHUB_TOKEN
+          # - name: gemini-2.5-flash
+          #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+          #   model: gemini-2.5-flash
+          #   key_secret: GOOGLE_API_KEY
 
     steps:
       - name: Checkout repository
@@ -39,53 +43,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Run examples and collect logs
         env:
-          AGENTAI_BASE_URL: https://models.github.ai/inference/
-          AGENTAI_API_KEY: ${{ secrets.GITHUB_TOKEN }}
-          AGENTAI_MODEL: ${{ matrix.model }}
+          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
+          AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           RUST_BACKTRACE: 1
-        run: |
-          LOG_DIR="logs"
-          mkdir -p "$LOG_DIR"
-          FINAL_EXIT_CODE=0
-
-          echo "Running examples with model: ${{ matrix.model }}"
-
-          for example_file in examples/*.rs; do
-            EXAMPLE_NAME=$(basename "$example_file" .rs)
-            LOG_FILE="$LOG_DIR/${EXAMPLE_NAME}.log"
-
-            echo ""
-            echo "--- Running example: $EXAMPLE_NAME ---"
-
-            # Execute the example, stream its output to the console, and save it to a log file.
-            # The exit code of `cargo run` is captured via PIPESTATUS.
-            cargo run --release --example "$EXAMPLE_NAME" 2>&1 | tee "$LOG_FILE"
-            CARGO_EXIT_CODE=${PIPESTATUS[0]}
-
-            if [ $CARGO_EXIT_CODE -ne 0 ]; then
-              echo "::error::Example '$EXAMPLE_NAME' failed with exit code $CARGO_EXIT_CODE."
-              FINAL_EXIT_CODE=1
-            else
-              echo "Example '$EXAMPLE_NAME' finished successfully."
-            fi
-          done
-
-          if [ $FINAL_EXIT_CODE -ne 0 ]; then
-            echo ""
-            echo "::error::One or more examples failed. Please check the logs."
-          fi
-
-          exit $FINAL_EXIT_CODE
-
-      - name: Sanitize model name
-        id: sanitize_model_name
-        run: echo "name=$(echo '${{ matrix.model }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+        run: ./scripts/run-examples.sh
 
       - name: Upload example logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: example-logs-${{ steps.sanitize_model_name.outputs.name }}
+          name: example-logs-${{ matrix.llm.name }}
           path: logs/*.log
