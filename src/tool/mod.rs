@@ -19,7 +19,6 @@
 //! - [crate::tool::buildin]: Provides a set of useful built-in tools. (Requires the `tools-buildin` feature).
 //! - [crate::tool::mcp]: Provides a `ToolBox` for interacting with the MCP Client. (Requires the `mcp-client` feature).
 //! - [crate::tool::web]: Provides toolboxes for interacting with the web, such as searching and fetching content. (Requires the `tools-web` feature).
-//! - [crate::tool::web]: Provides toolboxes for interacting with the web, such as searching and fetching content. (Requires the `tools-web` feature).
 //!
 //! For examples demonstrating how to use tools and toolboxes, look into the `examples` folder.
 //! Examples related to tools typically start with the `tools_*` prefix, e.g., [crate::examples::tools_mcp].
