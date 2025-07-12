@@ -22,6 +22,7 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 ///
 /// API Keys need to be provided when creating tool:
 /// ```rust
+///     # use agentai::tool::web::WebSearchToolBox;
 ///     let api_key = "<ENTER YOUR KEYS HERE>";
 ///     let tool = WebSearchToolBox::new(api_key);
 /// ```

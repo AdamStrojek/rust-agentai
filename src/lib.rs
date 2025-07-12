@@ -31,7 +31,7 @@
 //!
 //! ## Usage
 //! Here is a basic example of how to create an AI agent using AgentAI:
-//! ```rust
+//! ```no_run
 //! use agentai::Agent;
 //!
 //! #[tokio::main]
