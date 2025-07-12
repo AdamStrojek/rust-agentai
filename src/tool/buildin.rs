@@ -307,6 +307,7 @@ mod tests {
         let result = toolbox.get_location("Wrocław".to_string()).await;
         assert!(result.is_ok());
         let location_info = result.unwrap();
+        eprintln!("{location_info}");
         assert!(location_info.contains("Location: Wrocław"));
         assert!(location_info.contains("Latitude: 51."));
         assert!(location_info.contains("Longitude: 16."));
