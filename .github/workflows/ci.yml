@@ -51,6 +51,14 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llm:
+          - name: gpt-4.1-mini
+            base_url: https://models.github.ai/inference/
+            model: openai/gpt-4.1-mini
+            key_secret: GITHUB_TOKEN
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,6 +79,12 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
       - name: Run tests
+        env:
+          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
+          AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          RUST_BACKTRACE: 1
         run: cargo test
 
   run-examples:
