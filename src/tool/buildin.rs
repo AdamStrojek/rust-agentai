@@ -310,7 +310,10 @@ mod tests {
         eprintln!("{location_info}");
         assert!(location_info.contains("Location: Wrocław"));
         assert!(location_info.contains("Latitude: 51."));
-        assert!(location_info.contains("Longitude: 16."));
+        // Depending on query it can return 16.9x or 17.0x
+        assert!(
+            location_info.contains("Longitude: 16.9") || location_info.contains("Longitude: 17.0")
+        );
     }
 
     #[tokio::test]
