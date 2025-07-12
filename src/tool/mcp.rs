@@ -30,7 +30,7 @@ impl McpToolBox {
         args: impl IntoIterator<Item = impl AsRef<str>>,
         envs: Option<HashMap<String, String>>,
     ) -> AnyhowResult<Self> {
-        trace!("McpToolBox::new for cmd: {}", cmd);
+        trace!("McpToolBox::new for cmd: {cmd}");
         let mut builder = ClientBuilder::new(cmd).args(args);
 
         if let Some(envs) = envs {

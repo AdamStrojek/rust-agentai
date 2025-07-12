@@ -134,7 +134,7 @@ impl WebFetchToolBox {
             .get(&url)
             .send()
             .await
-            .map_err(|e| ToolError::LLMError(format!("Request to {} failed: {}", url, e)))?;
+            .map_err(|e| ToolError::LLMError(format!("Request to {url} failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(ToolError::LLMError(format!(

@@ -157,10 +157,7 @@ impl LocationToolBox {
         /// The name of the location to search for (e.g., "Eiffel Tower", "New York City").
         location: String,
     ) -> ToolResult {
-        let url = format!(
-            "https://nominatim.openstreetmap.org/search?q={}&format=jsonv2",
-            location
-        );
+        let url = format!("https://nominatim.openstreetmap.org/search?q={location}&format=jsonv2");
 
         let client = reqwest::Client::new();
         let response = client

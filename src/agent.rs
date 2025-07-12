@@ -118,7 +118,7 @@ impl Agent {
         // TODO change returned type
         // Need to create new type that will provide not only response structure,
         // but also statistics and reasoning.
-        debug!("Agent Question: {}", prompt);
+        debug!("Agent Question: {prompt}");
         // Add new request to history
         // TODO: Create new history trait
         // This will allow on configuring behaviour of messages. When doing multi-agent
@@ -146,7 +146,7 @@ impl Agent {
         let max_iterations = 5;
 
         for iteration in 0..max_iterations {
-            debug!("Agent iteration: {}", iteration);
+            debug!("Agent iteration: {iteration}");
             // Create chat request
             let mut chat_req = ChatRequest::new(self.history.clone());
             if let Some(toolbox) = toolbox {
@@ -187,7 +187,7 @@ impl Agent {
                                 .await
                             {
                                 Ok(result) => {
-                                    trace!("Tool result: {}", result);
+                                    trace!("Tool result: {result}");
                                     self.history.push(ChatMessage::from(ToolResponse::new(
                                         tool_request.call_id.clone(),
                                         result,
@@ -200,7 +200,7 @@ impl Agent {
                                     // TODO: Allow user to configure this behaviour. Depending on MCP
                                     // server this may contain important information, or this may be
                                     // indication of unrecoverable failure
-                                    trace!("Error: {}", err);
+                                    trace!("Error: {err}");
                                     self.history.push(ChatMessage::from(ToolResponse::new(
                                         tool_request.call_id.clone(),
                                         err.to_string(),
