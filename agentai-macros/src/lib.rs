@@ -1,11 +1,11 @@
+use heck::ToUpperCamelCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens};
-use syn::{
-    parse_macro_input, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat
-};
 use std::collections::HashSet;
-use heck::ToUpperCamelCase;
+use syn::{
+    parse_macro_input, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat,
+};
 
 /// # Macro for Generating `ToolBox` Implementations
 ///
@@ -164,10 +164,18 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let struct_name = &item_impl.self_ty;
     let struct_ident = match &**struct_name {
-        syn::Type::Path(type_path) => {
-            type_path.path.get_ident().expect("Expected an identifier for the struct")
+        syn::Type::Path(type_path) => type_path
+            .path
+            .get_ident()
+            .expect("Expected an identifier for the struct"),
+        _ => {
+            return Error::new(
+                Span::call_site(),
+                "toolbox! macro only supports impl blocks for structs",
+            )
+            .to_compile_error()
+            .into()
         }
-        _ => return Error::new(Span::call_site(), "toolbox! macro only supports impl blocks for structs").to_compile_error().into(),
     };
 
     let mut generated_code = TokenStream2::new();
@@ -182,7 +190,12 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for item in item_impl.items.iter_mut() {
         if let ImplItem::Fn(ref mut method) = item {
             // Find the #[tool] attribute
-            if let Some(tool_attr) = method.attrs.clone().iter().find(|attr| attr.path().is_ident("tool")) {
+            if let Some(tool_attr) = method
+                .attrs
+                .clone()
+                .iter()
+                .find(|attr| attr.path().is_ident("tool"))
+            {
                 // Remove #[tool] attribute
                 // #[tool] is used only to mark functions that will be converted into tools
                 method.attrs.retain(|attr| !attr.path().is_ident("tool"));
@@ -201,22 +214,42 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                             Meta::NameValue(name_value) if name_value.path.is_ident("name") => {
                                 if name_arg_found {
                                     // Error: Duplicate 'name' argument
-                                    return Error::new_spanned(name_value.to_token_stream(), "Duplicate 'name' argument in tool attribute").to_compile_error().into();
+                                    return Error::new_spanned(
+                                        name_value.to_token_stream(),
+                                        "Duplicate 'name' argument in tool attribute",
+                                    )
+                                    .to_compile_error()
+                                    .into();
                                 }
                                 let Expr::Lit(expr_lit) = &name_value.value else {
                                     // Error: Expected literal value for name
-                                    return Error::new_spanned(name_value.value.to_token_stream(), "Expected literal value for tool name").to_compile_error().into();
+                                    return Error::new_spanned(
+                                        name_value.value.to_token_stream(),
+                                        "Expected literal value for tool name",
+                                    )
+                                    .to_compile_error()
+                                    .into();
                                 };
                                 let Lit::Str(lit_str) = &expr_lit.lit else {
                                     // Error: Expected string literal for name
-                                    return Error::new_spanned(expr_lit.to_token_stream(), "Expected string literal for tool name").to_compile_error().into();
+                                    return Error::new_spanned(
+                                        expr_lit.to_token_stream(),
+                                        "Expected string literal for tool name",
+                                    )
+                                    .to_compile_error()
+                                    .into();
                                 };
                                 tool_name = lit_str.value();
                                 name_arg_found = true;
-                            },
+                            }
                             _ => {
                                 // Error: If arguments are present, they must be 'name = "..."'
-                                return Error::new_spanned(arg_meta.to_token_stream(), "Expected name = \"...\" in tool attribute").to_compile_error().into();
+                                return Error::new_spanned(
+                                    arg_meta.to_token_stream(),
+                                    "Expected name = \"...\" in tool attribute",
+                                )
+                                .to_compile_error()
+                                .into();
                             }
                         };
                     }
@@ -224,25 +257,42 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 // Check for duplicate tool names AFTER determining the final tool_name
                 if !found_tools.insert(tool_name.clone()) {
-                     return Error::new_spanned(tool_attr.to_token_stream(), format!("Duplicate tool name found: {}", tool_name)).to_compile_error().into();
+                    return Error::new_spanned(
+                        tool_attr.to_token_stream(),
+                        format!("Duplicate tool name found: {tool_name}"),
+                    )
+                    .to_compile_error()
+                    .into();
                 }
 
                 // Extract doc comments for description from #[doc = "..."] attributes (handles /// and /* */) from method
-                let description = method.attrs.iter()
-                    .filter_map(|attr|
-                        match attr.meta.clone() {
-                            Meta::NameValue(MetaNameValue { path, value: Expr::Lit(expr_lit), .. }) if path.is_ident("doc") => {
-                                match expr_lit.lit {
-                                    Lit::Str(lit_str) => {
-                                        // Remove leading slashes, stars, and whitespace
-                                        Some(lit_str.value().trim().trim_start_matches(|c: char| c == '/' || c == '*' || c.is_whitespace()).to_string())
-                                    }
-                                    _ => None, // Not a string literal
+                let description = method
+                    .attrs
+                    .iter()
+                    .filter_map(|attr| match attr.meta.clone() {
+                        Meta::NameValue(MetaNameValue {
+                            path,
+                            value: Expr::Lit(expr_lit),
+                            ..
+                        }) if path.is_ident("doc") => {
+                            match expr_lit.lit {
+                                Lit::Str(lit_str) => {
+                                    // Remove leading slashes, stars, and whitespace
+                                    Some(
+                                        lit_str
+                                            .value()
+                                            .trim()
+                                            .trim_start_matches(|c: char| {
+                                                c == '/' || c == '*' || c.is_whitespace()
+                                            })
+                                            .to_string(),
+                                    )
                                 }
-                            },
-                            _ => None, // Not a #[doc = ...] attribute or error
+                                _ => None, // Not a string literal
+                            }
                         }
-                    )
+                        _ => None, // Not a #[doc = ...] attribute or error
+                    })
                     .collect::<Vec<String>>()
                     .join("\n");
 
@@ -254,7 +304,10 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 };
 
                 // Generate parameter struct
-                let params_struct_name = Ident::new(&format!("{}Params", fn_name.to_upper_camel_case()), fn_name_sig.span());
+                let params_struct_name = Ident::new(
+                    &format!("{}Params", fn_name.to_upper_camel_case()),
+                    fn_name_sig.span(),
+                );
                 let mut param_fields = TokenStream2::new();
                 let mut param_assignments = TokenStream2::new();
 
@@ -274,7 +327,12 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                         let Pat::Ident(ref pat_ident) = *pat_type.pat else {
                             // Handle other patterns if necessary, or return an error
-                            return Error::new_spanned(pat_type.pat.to_token_stream(), "Tool function parameters must be simple identifiers").to_compile_error().into();
+                            return Error::new_spanned(
+                                pat_type.pat.to_token_stream(),
+                                "Tool function parameters must be simple identifiers",
+                            )
+                            .to_compile_error()
+                            .into();
                         };
 
                         let arg_name = &pat_ident.ident;
@@ -291,14 +349,14 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 if !param_fields.is_empty() {
                     generated_code.extend(quote! {
-                        // Parameters struct for #original_fn_name_str
-                        #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-                        #[allow(dead_code)]
-                        #[allow(clippy::all)]
-                        struct #params_struct_name {
-                            #param_fields
-                        }
-                     });
+                       // Parameters struct for #original_fn_name_str
+                       #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+                       #[allow(dead_code)]
+                       #[allow(clippy::all)]
+                       struct #params_struct_name {
+                           #param_fields
+                       }
+                    });
                 }
 
                 // Add to tool definitions
@@ -328,7 +386,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // Add to match arms for call_tool
                 let mut method_call = TokenStream2::new();
 
-                if !param_fields.is_empty(){
+                if !param_fields.is_empty() {
                     method_call.extend(quote! {
                         let params: #params_struct_name = serde_json::from_value(parameters)
                             .map_err(|e| {
@@ -358,7 +416,9 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     if found_tools.is_empty() {
-        return Error::new(Span::call_site(), "No #[tool] definition in impl block").to_compile_error().into()
+        return Error::new(Span::call_site(), "No #[tool] definition in impl block")
+            .to_compile_error()
+            .into();
     }
 
     // Generate the ToolBox implementation

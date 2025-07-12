@@ -89,7 +89,8 @@ pub trait ToolBox {
     /// The arguments provided by the agent will conform to the JSON schema defined for the tool.
     ///
     /// For example, to deserialize the arguments:
-    /// ```rust
+    /// ```ignore
+    /// # This is only informational example, it represents what in theory is being generated
     /// let args: ToolArguments = serde_json::from_value(arguments)?;
     /// ```
     /// Replace `ToolArguments` with the actual struct type corresponding to your tool's schema.

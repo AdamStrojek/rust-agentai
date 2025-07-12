@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-clippy-
+      - name: Run Clippy
+        run: cargo clippy -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llm:
+          - name: gpt-4.1-mini
+            base_url: https://models.github.ai/inference/
+            model: openai/gpt-4.1-mini
+            key_secret: GITHUB_TOKEN
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+      - name: Run tests
+        env:
+          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
+          AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          RUST_BACKTRACE: 1
+        run: cargo test
+
+  run-examples:
+    if:
+      false
+      # Disable temprary, examples are runned with doc tests
+    permissions:
+      models: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llm:
+          - name: gpt-4.1-mini
+            base_url: https://models.github.ai/inference/
+            model: openai/gpt-4.1-mini
+            key_secret: GITHUB_TOKEN
+          # - name: gemini-2.5-flash
+          #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+          #   model: gemini-2.5-flash
+          #   key_secret: GOOGLE_API_KEY
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-examples-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-examples-
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run examples and collect logs
+        env:
+          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
+          AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          RUST_BACKTRACE: 1
+        run: ./scripts/run-examples.sh
+
+      - name: Upload example logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-logs-${{ matrix.llm.name }}
+          path: logs/*.log

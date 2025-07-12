@@ -4,8 +4,8 @@
 //! provided by the `agentai` crate. This tool will be used by the AI agent to fetch content from a URL.
 //!
 
+use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
 use agentai::Agent;
-use agentai::tool::{ToolBox, Tool, ToolError, ToolResult, toolbox};
 use anyhow::Error;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -72,13 +72,15 @@ impl UrlFetcherToolBox {
     async fn web_fetch(
         &self,
         /// Use this field to provide URL of file to download
-        url: String
+        url: String,
     ) -> ToolResult {
         // Use reqwest to fetch the content from the provided URL.
         // The `?` operator handles potential errors from the get and text methods.
-        Ok(
-            reqwest::get(url).await.map_err(|e| anyhow::Error::new(e))?
-                .text().await.map_err(|e| anyhow::Error::new(e))?
-        )
+        Ok(reqwest::get(url)
+            .await
+            .map_err(anyhow::Error::new)?
+            .text()
+            .await
+            .map_err(anyhow::Error::new)?)
     }
 }

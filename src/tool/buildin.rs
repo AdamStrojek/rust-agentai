@@ -157,10 +157,7 @@ impl LocationToolBox {
         /// The name of the location to search for (e.g., "Eiffel Tower", "New York City").
         location: String,
     ) -> ToolResult {
-        let url = format!(
-            "https://nominatim.openstreetmap.org/search?q={}&format=jsonv2",
-            location
-        );
+        let url = format!("https://nominatim.openstreetmap.org/search?q={location}&format=jsonv2");
 
         let client = reqwest::Client::new();
         let response = client
@@ -310,9 +307,13 @@ mod tests {
         let result = toolbox.get_location("Wrocław".to_string()).await;
         assert!(result.is_ok());
         let location_info = result.unwrap();
+        eprintln!("{location_info}");
         assert!(location_info.contains("Location: Wrocław"));
         assert!(location_info.contains("Latitude: 51."));
-        assert!(location_info.contains("Longitude: 16."));
+        // Depending on query it can return 16.9x or 17.0x
+        assert!(
+            location_info.contains("Longitude: 16.9") || location_info.contains("Longitude: 17.0")
+        );
     }
 
     #[tokio::test]

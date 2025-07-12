@@ -22,6 +22,7 @@ const BRAVE_API_URL: &str = "https://api.search.brave.com/res/v1/web/search";
 ///
 /// API Keys need to be provided when creating tool:
 /// ```rust
+///     # use agentai::tool::web::WebSearchToolBox;
 ///     let api_key = "<ENTER YOUR KEYS HERE>";
 ///     let tool = WebSearchToolBox::new(api_key);
 /// ```
@@ -68,9 +69,9 @@ impl WebSearchToolBox {
             .header("X-Subscription-Token", self.api_key.clone())
             .send()
             .await
-            .map_err(|e| anyhow::Error::new(e))?;
+            .map_err(anyhow::Error::new)?;
 
-        let json: Value = response.json().await.map_err(|e| anyhow::Error::new(e))?;
+        let json: Value = response.json().await.map_err(anyhow::Error::new)?;
 
         let mut results: Vec<String> = vec![];
 
@@ -133,7 +134,7 @@ impl WebFetchToolBox {
             .get(&url)
             .send()
             .await
-            .map_err(|e| ToolError::LLMError(format!("Request to {} failed: {}", url, e)))?;
+            .map_err(|e| ToolError::LLMError(format!("Request to {url} failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(ToolError::LLMError(format!(
@@ -143,7 +144,7 @@ impl WebFetchToolBox {
             )));
         }
 
-        let body = response.text().await.map_err(|e| anyhow::Error::new(e))?;
+        let body = response.text().await.map_err(anyhow::Error::new)?;
 
         // TODO: Add HTML2MD converter
 

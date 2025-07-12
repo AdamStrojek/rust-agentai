@@ -1,7 +1,11 @@
 use agentai::Agent;
-use genai::{adapter::AdapterKind, resolver::{AuthData, Endpoint, ServiceTargetResolver}, ClientBuilder, ModelIden, ServiceTarget};
 use anyhow::Result;
 use genai::chat::ChatOptions;
+use genai::{
+    adapter::AdapterKind,
+    resolver::{AuthData, Endpoint, ServiceTargetResolver},
+    ClientBuilder, ModelIden, ServiceTarget,
+};
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 
@@ -23,19 +27,26 @@ async fn main() -> Result<()> {
 
     let question = "Why sky is blue?";
 
-   	let target_resolver = ServiceTargetResolver::from_resolver_fn(
+    let target_resolver = ServiceTargetResolver::from_resolver_fn(
         |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
             let endpoint = Endpoint::from_static("https://models.github.ai/inference/");
             let auth = AuthData::from_env("AGENTAI_API_KEY");
             let ServiceTarget { model, .. } = service_target;
             let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
-            Ok(ServiceTarget { endpoint, auth, model })
+            Ok(ServiceTarget {
+                endpoint,
+                auth,
+                model,
+            })
         },
     );
-    let chat_options = ChatOptions::default().with_temperature(0.0).with_max_tokens(20);
+    let chat_options = ChatOptions::default()
+        .with_temperature(0.0)
+        .with_max_tokens(20);
     let client = ClientBuilder::default()
         .with_chat_options(chat_options)
-        .with_service_target_resolver(target_resolver).build();
+        .with_service_target_resolver(target_resolver)
+        .build();
 
     info!("Question: {}", question);
 
