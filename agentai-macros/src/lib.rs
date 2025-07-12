@@ -259,7 +259,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 if !found_tools.insert(tool_name.clone()) {
                     return Error::new_spanned(
                         tool_attr.to_token_stream(),
-                        format!("Duplicate tool name found: {}", tool_name),
+                        format!("Duplicate tool name found: {tool_name}"),
                     )
                     .to_compile_error()
                     .into();
