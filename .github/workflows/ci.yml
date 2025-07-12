@@ -88,6 +88,9 @@ jobs:
         run: cargo test
 
   run-examples:
+    if:
+      false
+      # Disable temprary, examples are runned with doc tests
     permissions:
       models: read
     runs-on: ubuntu-latest
