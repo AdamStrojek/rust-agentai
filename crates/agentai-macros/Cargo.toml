@@ -6,7 +6,7 @@ authors = ["Adam Strojek <adam@strojek.info>"]
 license = "MIT"
 repository = "https://github.com/AdamStrojek/rust-agentai"
 description = "AgentAI is a Rust library designed to simplify the creation of AI agents."
-readme = "../README.md"
+readme = "../../README.md"
 categories = ["text-processing"]
 keywords = ["generative-ai", "openai", "chatgpt", "gemini", "agent"]
 exclude = ["release-plz.toml", ".github"]
@@ -15,7 +15,7 @@ exclude = ["release-plz.toml", ".github"]
 proc-macro = true
 
 [dependencies]
-syn = {version = "2.0", features = ["full"]}
+syn = { version = "2.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 heck = "0.5"
