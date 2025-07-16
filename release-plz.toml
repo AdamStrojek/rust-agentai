@@ -27,7 +27,7 @@ body = """
     {% endif %} \
     - {{ timestamp | date(format="%Y-%m-%d") }}
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | slice(start=3) | upper_first }}
+### {{ group | upper_first }}
     {% for commit in commits %}
         {%- if commit.scope -%}
             - *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}\
