@@ -53,3 +53,11 @@ body = """
     {% if commit.remote.pr_number %} - #{{ commit.remote.pr_number }}{% endif -%}
 {% endmacro -%}
 """
+
+commit_parsers = [
+    { message = "^[Ff]eat", group = "1. New features" },     # Use this section when adding new functionality or peforming bigger change to it
+    { message = "^[Cc]hanged", group = "2. Changed" },       # Use this section when performing some "smaller" change to other "module"
+    { message = "^[Ff]ix", group = "3. Fixes" },             # Use this section when fixing reported issues
+    { message = "^[Dd]eprecated", group = "4. Deprecated" }, # Use this section for items that will be or was removed
+    { message = "^.*", group = "9. Miscellaneous" },         # Miscellanous items like chore, documentation update etc.
+]
