@@ -1,7 +1,7 @@
 [workspace]
-pr_branch_prefix = "release/candidate-"          # PR branch prefix
-pr_name = "Release {{ package }} v{{ version }}" # template for the PR name
-pr_labels = ["release"]                          # add the `release` label to the release Pull Request
+pr_branch_prefix = "release/candidate-"    # PR branch prefix
+pr_name = "Release agentai v{{ version }}" # template for the PR name
+pr_labels = ["release"]                    # add the `release` label to the release Pull Request
 pr_draft = false
 git_release_draft = false
 
@@ -61,3 +61,11 @@ commit_parsers = [
     { message = "^[Dd]eprecated", group = "4. Deprecated" }, # Use this section for items that will be or was removed
     { message = "^.*", group = "9. Miscellaneous" },         # Miscellanous items like chore, documentation update etc.
 ]
+
+[[package]]
+name = "agentai"
+version_group = "agentai"
+
+[[package]]
+name = "agentai-macros"
+version_group = "agentai"
