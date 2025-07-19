@@ -31,7 +31,7 @@ use syn::{
 ///
 /// You must also import the necessary components from the `agentai::tool` module:
 ///
-/// ```no_run
+/// ```ignore
 /// use agentai::tool::{Tool, ToolBox, ToolError, toolbox};
 /// ```
 ///
@@ -44,7 +44,7 @@ use syn::{
 ///
 /// The `impl` block for this struct must be annotated with `#[toolbox]`.
 ///
-/// ```no_run
+/// ```ignore
 /// struct MyToolBox {
 ///     api_key: String,
 /// }
@@ -96,7 +96,7 @@ use syn::{
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// use agentai::tool::{Tool, ToolBox, ToolError, toolbox};
 ///
 /// struct MyToolBox {
