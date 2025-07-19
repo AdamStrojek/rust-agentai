@@ -1,7 +1,7 @@
 [workspace]
-pr_branch_prefix = "release/candidate-"    # PR branch prefix
-pr_name = "Release agentai v{{ version }}" # template for the PR name
-pr_labels = ["release"]                    # add the `release` label to the release Pull Request
+pr_branch_prefix = "release/candidate-"      # PR branch prefix
+pr_name = "Release `agentai` v{{ version }}" # template for the PR name
+pr_labels = ["release"]                      # add the `release` label to the release Pull Request
 pr_draft = false
 git_release_draft = false
 
