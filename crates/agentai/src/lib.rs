@@ -3,77 +3,75 @@
 //! AgentAI is a Rust library designed to simplify the creation of AI agents. It leverages
 //! the [GenAI](https://crates.io/crates/genai) library to interface with a wide range of popular
 //! Large Language Models (LLMs), making it versatile and powerful. Written in Rust, AgentAI
-//! benefits from strong static typing and robust error handling, ensuring more reliable
+//! benefits from strong static typing and robust error handling, ensuring reliable
 //! and maintainable code. Whether you're developing simple or complex AI agents, AgentAI provides
 //! a streamlined and efficient development process.
 //!
 //! ## Warning
-//!
-//! This library is under heavy development. The interface can change at any moment without any notice.
+//! This library is under heavy development. The interface may change at any time without notice.
 //!
 //! ## Features
 //!
-//! - Use any major LLM API provider -- we support OpenAI, Anthropic, Gemini, Ollama and other OpenAI API Compatible.
-//! - You decide what model to use -- depending on step in agentic flow you can choose model that suits best!
-//! - Create your own tools with ease using [`ToolBox`es](crate::tool).
-//! - Support for MCP Server -- no need to write your own Agent Tools, you can leverage, already existing
-//!   solutions, based on Model Context Protocol.
+//! - **Connect to any major LLM provider**: Support for OpenAI, Anthropic, Gemini, Ollama, and other OpenAI-compatible APIs.
+//! - **Choose the right model for the job**: Flexibly select the best-suited model for each step in your agent's workflow.
+//! - **Build custom tools with ease**: A simple interface for creating and managing your own tools using the [`ToolBox`](crate::tool::ToolBox).
+//! - **MCP Server Support**: Leverage existing solutions based on the Model-Context-Protocol, eliminating the need to build agent tools from scratch.
+//! - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 //!
 //! ## What's New
 //!
 //! #### `ToolBox` (version 0.1.5)
 //!
-//! This release introduces the [`ToolBox`](crate::tool::ToolBox), a new feature that provides a easy-to-use interface for providing tools to AI agents.
+//! This release introduces the [`ToolBox`](crate::tool::ToolBox), a new feature providing an easy-to-use interface for supplying tools to AI agents.
 //!
 //! ## Future Plans
 //!
-//! We are continuously working on improving AgentAI. Here are some of the features we are planning to introduce in the near future:
+//! We are continuously working to improve AgentAI. Here are some of the features planned for the near future:
 //!
-//! - **Agent Memory** -- improve experiance and add new functionality around AI agent memory. Currently. user can't manage how memory should
-//!   behave, should it be stored, maybe limit amount of records, maybe each request should be started with clean
-//! - **User Input and Streaming Output** -- not every AI agent works silently in the background. Some requires additional interaction from user,
-//!   also returning response in streaming format improves comfort. This feature will introduce interface to enable that.
-//! - **Configurable Behaviour** -- introduce way of managing every aspect of agent configuration, starting from providing model parameters
-//!   to how behave on encountering errors from tools.
+//! - **Agent Memory**: Enhance the user experience by adding new functionality for AI agent memory. This will give users control over memory behavior, such as persistence, record limits, and context management for new requests.
+//! - **User Input and Streaming Output**: Not every AI agent works silently in the background. Some require additional interaction from the user. This feature will introduce an interface to handle user interactions and provide responses in a streaming format for a better user experience.
+//! - **Configurable Behavior**: Introduce a comprehensive way to manage every aspect of an agent's configuration, from model parameters to error-handling behavior for tools.
 //!
 //! ## Installation
-//! To start using AgentAI crate just enter in root directory for your project this command:
+//!
+//! To add the AgentAI crate to your project, run the following command in your project's root directory:
 //!
 //! ```bash
 //! cargo add agentai
 //! ```
 //!
-//! This will install this crate with all required dependencies.
+//! This command adds the crate and its dependencies to your project.
 //!
-//! ## Feature flags
+//! ## Feature Flags
 //! <!-- FEATURE FLAGS -->
 #![doc = document_features::document_features!()]
 //!
 //! ## Usage
+//!
 //! Here is a basic example of how to create an AI agent using AgentAI:
+//!
 //! ```no_run
 //! use agentai::Agent;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!     let mut agent = Agent::new("You are a useful assistant");
-//!     let answer: String = agent.run("gpt-4o", "Why sky is blue?", None).await?;
+//!     let answer: String = agent.run("gpt-4o", "Why is the sky blue?", None).await?;
 //!     println!("Answer: {}", answer);
 //!     Ok(())
 //! }
 //! ```
 //!
-//!## Examples
+//! ## Examples
 //!
 #![allow(rustdoc::redundant_explicit_links)]
-//! For more examples, check out the [examples](crate::examples) directory. You can build and run them using Cargo with the following command:
+//! For more examples, check out the [examples](crate::examples) directory. To run an example, use the following command, replacing `<example_name>` with the name of the example file (without the `.rs` extension):
 //!
 //! ```bash
 //! cargo run --example <example_name>
 //! ```
 //!
-//! The <example_name> should match the filename of the example you want to run (without the file extension).
-//! For example, to run the example that includes the essential parts required to implement an AI agent, use:
+//! For instance, to run the `simple` example:
 //!
 //! ```bash
 //! cargo run --example simple
@@ -82,7 +80,7 @@
 pub mod agent;
 pub mod tool;
 
-// This modules will be enabled only when generating documentation
+// These modules will be enabled only when generating documentation.
 #[cfg(doc)]
 pub mod examples;
 
