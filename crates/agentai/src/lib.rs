@@ -7,15 +7,34 @@
 //! and maintainable code. Whether you're developing simple or complex AI agents, AgentAI provides
 //! a streamlined and efficient development process.
 //!
+//! ## Warning
+//!
+//! This library is under heavy development. The interface can change at any moment without any notice.
+//!
 //! ## Features
 //!
-//! - Multi LLM -- we support most of LLM API (OpenAI, Anthropic, Gemini, Ollama and all OpenAI API Compatible)
-//! - Choose correct LLM for the task -- use many smaller specialized LLMs to save costs and choose best of all the worlds
+//! - Use any major LLM API provider -- we support OpenAI, Anthropic, Gemini, Ollama and other OpenAI API Compatible.
+//! - You decide what model to use -- depending on step in agentic flow you can choose model that suits best!
+//! - Create your own tools with ease using [`ToolBox`es](crate::tool).
 //! - Support for MCP Server -- no need to write your own Agent Tools, you can leverage, already existing
-//!   solutions, based on Model Context Protocol
+//!   solutions, based on Model Context Protocol.
 //!
-//! > **Warning**
-//! > This library is under heavy development. The interface can change at any moment without any notice.
+//! ## What's New
+//!
+//! #### `ToolBox` (version 0.1.5)
+//!
+//! This release introduces the [`ToolBox`](crate::tool::ToolBox), a new feature that provides a easy-to-use interface for providing tools to AI agents.
+//!
+//! ## Future Plans
+//!
+//! We are continuously working on improving AgentAI. Here are some of the features we are planning to introduce in the near future:
+//!
+//! - **Agent Memory** -- improve experiance and add new functionality around AI agent memory. Currently. user can't manage how memory should
+//!   behave, should it be stored, maybe limit amount of records, maybe each request should be started with clean
+//! - **User Input and Streaming Output** -- not every AI agent works silently in the background. Some requires additional interaction from user,
+//!   also returning response in streaming format improves comfort. This feature will introduce interface to enable that.
+//! - **Configurable Behaviour** -- introduce way of managing every aspect of agent configuration, starting from providing model parameters
+//!   to how behave on encountering errors from tools.
 //!
 //! ## Installation
 //! To start using AgentAI crate just enter in root directory for your project this command:
@@ -27,6 +46,7 @@
 //! This will install this crate with all required dependencies.
 //!
 //! ## Feature flags
+//! <!-- FEATURE FLAGS -->
 #![doc = document_features::document_features!()]
 //!
 //! ## Usage
