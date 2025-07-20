@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.5](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.4...agentai-v0.1.5) - 2025-07-20
+
+### New features
+- ToolBox ([#18](https://github.com/AdamStrojek/rust-agentai/pull/18)) (by @AdamStrojek) - #18
+
+### Miscellaneous
+- Update README.md (by @AdamStrojek) - #27
+- Update lib.rs (by @AdamStrojek) - #27
+- Update lib.rs (by @AdamStrojek) - #27
+- Move crates to separate folders (by @AdamStrojek) - #27
+- Update lib.rs (by @AdamStrojek) - #27
+
+### Contributors
+
+* @AdamStrojek
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.1.4](https://github.com/AdamStrojek/rust-agentai/compare/v0.1.3...v0.1.4) - 2025-05-21
 
 ### Changed
