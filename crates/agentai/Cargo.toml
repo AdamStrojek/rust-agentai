@@ -49,6 +49,7 @@ default = ["mcp-client", "macros", "tools-buildin", "tools-web"]
 #! ```
 #!
 #! Features list:
+#!
 
 ## Enables experimental support for Agent Tools based on MCP Servers
 mcp-client = ["dep:mcp_client_rs"]
