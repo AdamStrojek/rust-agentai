@@ -1,0 +1,61 @@
+[package]
+name = "agentai"
+version = "0.1.4"
+edition = "2021"
+authors = ["Adam Strojek <adam@strojek.info>"]
+license = "MIT"
+repository = "https://github.com/AdamStrojek/rust-agentai"
+description = "AgentAI is a Rust library designed to simplify the creation of AI agents."
+readme = "../../README.md"
+categories = ["text-processing"]
+keywords = ["generative-ai", "openai", "chatgpt", "gemini", "agent"]
+exclude = ["release-plz.toml", ".github"]
+
+[package.metadata.docs.rs]
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
+
+[dependencies]
+agentai-macros = { path = "../agentai-macros", version = "0.1", optional = true }
+genai = "0.3.5"
+anyhow = "1.0.98"
+thiserror = "2.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+schemars = { version = "0.9", features = ["derive"] }
+async-trait = "0.1.88"
+log = "0.4.27"
+reqwest = { version = "0.12.18", features = ["json"] }
+mcp_client_rs = { version = "0.1.7", optional = true }
+document-features = { version = "0.2" }
+time = { version = "0.3", features = [
+    "serde",
+    "formatting",
+    "parsing",
+    "local-offset",
+], optional = true }
+time-tz = { version = "2.0.0", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.45.0", features = ["full"] }
+simplelog = "0.12.2"
+
+[features]
+default = ["mcp-client", "macros", "tools-buildin", "tools-web"]
+#! Available features for `agentai` crate.
+#! To enable any of these features, you need to enter this command:
+#!
+#! ```bash
+#! cargo add agentai -F mcp-client
+#! ```
+#!
+#! Features list:
+#!
+
+## Enables experimental support for Agent Tools based on MCP Servers
+mcp-client = ["dep:mcp_client_rs"]
+## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
+macros = ["agentai-macros"]
+## Enables support for [buildin tools](crate::tool::buildin)
+tools-buildin = ["macros", "time", "time-tz"]
+## Enables support for [web tools](crate::tool::web)
+tools-web = ["macros"]
