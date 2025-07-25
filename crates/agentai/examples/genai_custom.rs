@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )?;
+    dotenvy::dotenv()?;
     info!("Starting AgentAI");
 
     // Remember about providing what model you want to use

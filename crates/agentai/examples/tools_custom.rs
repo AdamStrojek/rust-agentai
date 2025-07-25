@@ -20,6 +20,7 @@ async fn main() -> Result<(), Error> {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )?;
+    dotenvy::dotenv()?;
     info!("Starting AgentAI");
 
     let question =

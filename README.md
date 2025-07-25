@@ -86,6 +86,8 @@ async fn main() -> anyhow::Result<()> {
 
 For more examples, check out the [examples](https://docs.rs/agentai/latest/agentai/examples/) directory. To run an example, use the following command, replacing `<example_name>` with the name of the example file (without the `.rs` extension):
 
+Add a `.env` file to the root directory of your project and refer to the contents in [.env.examples](https://github.com/AdamStrojek/rust-agentai/blob/master/.env.examples).
+
 ```bash
 cargo run --example <example_name>
 ```

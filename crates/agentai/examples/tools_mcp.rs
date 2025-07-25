@@ -16,6 +16,7 @@ async fn main() -> Result<()> {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )?;
+    dotenvy::dotenv()?;
     info!("Starting AgentAI");
 
     let question = "What is current time in Poland??";
