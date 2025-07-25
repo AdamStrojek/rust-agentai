@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )?;
+    dotenvy::dotenv()?;
     info!("Starting AgentAI");
 
     let api_key = env::var("BRAVE_API_KEY")?;

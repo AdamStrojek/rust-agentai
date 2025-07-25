@@ -38,6 +38,7 @@ time-tz = { version = "2.0.0", optional = true }
 [dev-dependencies]
 tokio = { version = "1.45.0", features = ["full"] }
 simplelog = "0.12.2"
+dotenvy = "0.15.7"
 
 [features]
 default = ["mcp-client", "macros", "tools-buildin", "tools-web"]
