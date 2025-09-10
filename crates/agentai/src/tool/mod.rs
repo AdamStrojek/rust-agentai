@@ -69,7 +69,7 @@ pub use agentai_macros::toolbox;
 /// the [`#[toolbox]`](crate::tool::toolbox) attribute macro. This macro automatically
 /// generates the necessary `ToolBox` implementation for a struct based on its methods.
 #[async_trait::async_trait]
-pub trait ToolBox {
+pub trait ToolBox: Send + Sync + 'static {
     /// Returns a list of all `Tool` instances contained within this ToolBox.
     /// These definitions include the tool's name, description, and parameters,
     /// which are used by the language model to decide which tool to call.
@@ -161,7 +161,7 @@ impl ToolBoxSet {
     /// The order in which toolboxes are added is significant. When a tool call
     /// is made, the `ToolBoxSet` will search for the tool in the order the
     /// toolboxes were added.
-    pub fn add_tool(&mut self, toolbox: impl ToolBox + Send + Sync + 'static) {
+    pub fn add_tool(&mut self, toolbox: impl ToolBox) {
         self.toolboxes.push(Box::new(toolbox));
     }
 }
