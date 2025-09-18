@@ -1,19 +1,41 @@
+//! # Agent Memory Management
+//!
+//! This module provides traits and structs for managing the memory of an AI agent.
+//! The `Memory` trait defines a common interface for different memory implementations,
+//! allowing developers to customize how an agent stores and retrieves conversation history.
+//!
+//! ## Available Memory Implementations
+//!
+//! - `ConversationMemory`: Stores the entire conversation history. This is suitable for
+//!   most chat-based agents and multi-stage processes.
 use genai::chat::{ChatMessage, ChatRequest, ChatResponse, ChatRole, MessageContent, ToolResponse};
 
-/// This is abstraction of Agent's Memory
+/// An abstraction for an agent's memory.
+///
+/// The `Memory` trait defines the interface for an agent's memory. It provides methods
+/// for adding messages to the history and generating a chat request for the language model.
+/// This abstraction allows for different memory strategies to be implemented and used
+/// interchangeably with the `Agent`. For example, you could have a memory that stores
+/// the full conversation, a summary of it, or only the most recent messages.
 pub trait Memory: Send + Sync {
+    /// Adds a `ChatMessage` to the memory.
     fn add_message(&mut self, message: ChatMessage);
 
+    /// Generates a `ChatRequest` based on the current state of the memory.
+    /// This is used to send the conversation history to the language model.
     fn generate_chat_request(&self) -> ChatRequest;
 
+    /// A convenience method to add a user message to the memory.
     fn add_user_message(&mut self, content: MessageContent) {
         self.add_message(ChatMessage::user(content));
     }
 
+    /// A convenience method to add an assistant's message to the memory.
     fn add_assistant_message(&mut self, content: MessageContent) {
         self.add_message(ChatMessage::assistant(content));
     }
 
+    /// A convenience method to add a tool response message to the memory.
     fn add_tool_response_message(&mut self, value: ToolResponse) {
         self.add_message(ChatMessage {
             role: ChatRole::Tool, // Tool responses have separate role!
@@ -22,6 +44,7 @@ pub trait Memory: Send + Sync {
         });
     }
 
+    /// A convenience method to add a `ChatResponse` from the assistant to the memory.
     fn add_response(&mut self, response: &ChatResponse) {
         match response.content.as_ref() {
             Some(content) => {
@@ -34,19 +57,28 @@ pub trait Memory: Send + Sync {
     }
 }
 
-/// Memory dedicated to be used in Conversation Mode with Agent
+/// A `Memory` implementation that stores the entire conversation history.
 ///
-/// In most cases this is type of memory that you want to use in your agent. This type of Memory
-/// will store whole conversation
+/// This is the most straightforward memory type and is suitable for most use cases,
+/// such as chat agents or multi-step tasks where the full context is important.
+/// It accumulates messages in a `ChatRequest` and provides the full history
+/// for each new request to the language model.
 ///
-/// Usage:
-/// - multistage process
-/// - chat agents
+/// ## Usage
+///
+/// This memory is ideal for:
+/// - Chatbots that need to remember the entire conversation.
+/// - Agents performing multi-stage processes that rely on previous steps.
 pub struct ConversationMemory {
     chat_request: ChatRequest,
 }
 
 impl ConversationMemory {
+    /// Creates a new `ConversationMemory` instance with a system prompt.
+    ///
+    /// # Arguments
+    ///
+    /// * `system_prompt` - The initial system message to set the context for the agent.
     pub fn new(system_prompt: &str) -> Self {
         Self {
             chat_request: ChatRequest::from_system(system_prompt),
