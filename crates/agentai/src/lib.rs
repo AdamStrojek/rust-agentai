@@ -78,6 +78,7 @@
 //! ```
 
 pub mod agent;
+pub mod memory; // TODO: Ensure to add info to README, add examples, add documentation
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.

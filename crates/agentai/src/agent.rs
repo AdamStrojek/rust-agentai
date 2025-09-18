@@ -8,12 +8,13 @@
 //!
 //! To read more about tool look into [crate::tool]
 
+use crate::memory::{ConversationMemory, Memory};
 use crate::tool::ToolBox;
 use anyhow::{anyhow, Result};
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
+use genai::chat::{ChatOptions, JsonSpec, MessageContent, ToolResponse};
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client, ClientBuilder, ModelIden, ServiceTarget};
+use genai::{Client as GenAIClient, ClientBuilder, ModelIden, ServiceTarget};
 use log::{debug, trace};
 use schemars::{schema_for, JsonSchema};
 use serde::de::DeserializeOwned;
@@ -27,13 +28,12 @@ use std::sync::Arc;
 /// As `Context` you can provide any structure. Such object will not be used by
 /// `Agent` itself, but it will be passed in unmodified state as reference to any
 /// `AgentTool` trait, that was registered to be used.
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct Agent {
-    /// Reference to GenAI Client
-    client: Client,
+    /// GenAI Client
+    client: GenAIClient,
 
-    // tool_box: impl ToolBox,
-    history: Vec<ChatMessage>,
+    memory: Box<dyn Memory>,
 }
 
 impl Agent {
@@ -49,7 +49,7 @@ impl Agent {
     ///
     /// A new `Agent` instance.
     pub fn new(system: &str) -> Self {
-        let client = Client::default();
+        let client = GenAIClient::default();
 
         Self::new_with_client(client, system)
     }
@@ -64,10 +64,10 @@ impl Agent {
     /// # Returns
     ///
     /// A new `Agent` instance.
-    pub fn new_with_client(client: Client, system: &str) -> Self {
+    pub fn new_with_client(client: GenAIClient, system: &str) -> Self {
         Self {
             client,
-            history: vec![ChatMessage::system(system.trim())],
+            memory: Box::new(ConversationMemory::new(system)),
         }
     }
 
@@ -124,7 +124,7 @@ impl Agent {
         // This will allow on configuring behaviour of messages. When doing multi-agent
         // approach we could decide what history is being used, should we save all messages etc.
         // TODO: What to do when message have images? Should we send them only once?
-        self.history.push(ChatMessage::user(prompt));
+        self.memory.add_user_message(prompt.into());
 
         // Prepare chat options
         // TODO: Allow to provide chat options to GenAI
@@ -148,20 +148,32 @@ impl Agent {
         for iteration in 0..max_iterations {
             debug!("Agent iteration: {iteration}");
             // Create chat request
-            let mut chat_req = ChatRequest::new(self.history.clone());
+            let mut chat_req = self.memory.generate_chat_request();
+            debug!("Chat Req: {chat_req:#?}");
+            // TODO: Should this be moved to Memory trait?
             if let Some(toolbox) = toolbox {
                 chat_req = chat_req.with_tools(toolbox.tools_definitions()?);
             }
+
+            // ---------------
+            // Sending request to LLM
             let chat_resp = self
                 .client
                 .exec_chat(model, chat_req, Some(&chat_opts))
                 .await?;
 
+            debug!("Chat Resp: {chat_resp:#?}");
+
+            // ---------------
+            // Saving LLM response in memory
+            self.memory.add_response(&chat_resp);
+
+            // ---------------
+            // Should I return message or perform additional calls?
             match chat_resp.content {
                 Some(MessageContent::Text(text)) => {
                     let mut resp = text;
                     debug!("Agent Answer: {resp}");
-                    self.history.push(ChatMessage::assistant(resp.clone()));
                     if is_answer_string {
                         // TODO: Workaround when choosing String as response type. Because we are
                         // expecting D: DeserializeOwned then we can't return String directly.
@@ -169,11 +181,12 @@ impl Agent {
                         // serde_json::from_str to correct "struct" (String)
                         resp = Value::String(resp).to_string();
                     }
+
+                    // Performing deserialization, LLM always deliver message as stringify JSON
                     let resp = from_str(&resp)?;
                     return Ok(resp);
                 }
                 Some(MessageContent::ToolCalls(tools_call)) => {
-                    self.history.push(ChatMessage::from(tools_call.clone()));
                     // Go through tool use
                     for tool_request in tools_call {
                         trace!(
@@ -182,31 +195,19 @@ impl Agent {
                             tool_request.fn_arguments
                         );
                         if let Some(tool) = toolbox {
-                            match tool
+                            let tool_response_content = match tool
                                 .call_tool(tool_request.fn_name, tool_request.fn_arguments)
                                 .await
                             {
-                                Ok(result) => {
-                                    trace!("Tool result: {result}");
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        result,
-                                    )));
-                                }
-                                Err(err) => {
-                                    // If MCP Server fails we need to redirect this information to model
-                                    // this will allow to react on what happens. Some MCP Servers returns
-                                    // important information as error for Agent
-                                    // TODO: Allow user to configure this behaviour. Depending on MCP
-                                    // server this may contain important information, or this may be
-                                    // indication of unrecoverable failure
-                                    trace!("Error: {err}");
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        err.to_string(),
-                                    )));
-                                }
+                                Ok(content) => content,
+                                Err(err) => err.to_string(),
                             };
+                            trace!("Tool result: {tool_response_content}");
+                            let tool_response = ToolResponse::new(
+                                tool_request.call_id.clone(),
+                                tool_response_content,
+                            );
+                            self.memory.add_tool_response_message(tool_response);
                         } else {
                             todo!("No tool found for {}", tool_request.fn_name);
                         }
