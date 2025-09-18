@@ -1,4 +1,4 @@
-use genai::chat::{ChatMessage, ChatRequest, ChatResponse, MessageContent, ToolResponse};
+use genai::chat::{ChatMessage, ChatRequest, ChatResponse, ChatRole, MessageContent, ToolResponse};
 
 /// This is abstraction of Agent's Memory
 pub trait Memory: Send + Sync {
@@ -15,7 +15,11 @@ pub trait Memory: Send + Sync {
     }
 
     fn add_tool_response_message(&mut self, value: ToolResponse) {
-        self.add_message(ChatMessage::assistant(MessageContent::from(value)));
+        self.add_message(ChatMessage {
+            role: ChatRole::Tool, // Tool responses have separate role!
+            content: value.into(),
+            options: None,
+        });
     }
 
     fn add_response(&mut self, response: &ChatResponse) {
