@@ -22,7 +22,10 @@ pub trait Memory: Send + Sync {
     fn add_message(&mut self, message: ChatMessage);
 
     /// Generates a `ChatRequest` based on the current state of the memory.
-    /// This is used to send the conversation history to the language model.
+    ///
+    /// This method can also be used to signal that the user has finished their turn.
+    /// This is a good place to add logic for summarizing or clearing the memory
+    /// before the next turn.
     fn generate_chat_request(&self) -> ChatRequest;
 
     /// A convenience method to add a user message to the memory.

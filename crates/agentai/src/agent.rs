@@ -21,6 +21,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{from_str, json, Value};
 use std::any::TypeId;
 use std::sync::Arc;
+use type_state_builder::TypeStateBuilder;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
 /// It maintains a history of chat messages, a set of tools, and a context.
@@ -29,11 +30,53 @@ use std::sync::Arc;
 /// `Agent` itself, but it will be passed in unmodified state as reference to any
 /// `AgentTool` trait, that was registered to be used.
 // #[derive(Clone)]
+#[derive(TypeStateBuilder)]
+#[builder(setter_prefix = "with_")]
 pub struct Agent {
     /// GenAI Client
     client: GenAIClient,
 
+    #[builder(required)]
     memory: Box<dyn Memory>,
+}
+
+fn genai_client_with_url(base_url: &str, api_key: &str) -> GenAIClient {
+    let endpoint = Endpoint::from_owned(Arc::from(base_url));
+    let auth = AuthData::from_single(api_key);
+    let target_resolver = ServiceTargetResolver::from_resolver_fn(
+        |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
+            let ServiceTarget { model, .. } = service_target;
+            let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
+            Ok(ServiceTarget {
+                endpoint,
+                auth,
+                model,
+            })
+        },
+    );
+    ClientBuilder::default()
+        .with_service_target_resolver(target_resolver)
+        .build()
+}
+
+impl AgentBuilder_MissingMemory {
+    /// Sets system prompt for agent using `ConversationMemory` struct
+    ///
+    /// You need to choose do you want to initialize your memory using `with_memory`
+    /// or `with_system_prompt` function
+    pub fn with_system_prompt(self, system_prompt: &str) -> AgentBuilder_HasMemory {
+        self.with_memory(Box::new(ConversationMemory::new(system_prompt)))
+    }
+
+    pub fn with_url(self, base_url: &str, api_key: &str) -> Self {
+        self.with_client(genai_client_with_url(base_url, api_key))
+    }
+}
+
+impl AgentBuilder_HasMemory {
+    pub fn with_url(self, base_url: &str, api_key: &str) -> Self {
+        self.with_client(genai_client_with_url(base_url, api_key))
+    }
 }
 
 impl Agent {
@@ -69,26 +112,6 @@ impl Agent {
             client,
             memory: Box::new(ConversationMemory::new(system)),
         }
-    }
-
-    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Self {
-        let endpoint = Endpoint::from_owned(Arc::from(base_url));
-        let auth = AuthData::from_single(api_key);
-        let target_resolver = ServiceTargetResolver::from_resolver_fn(
-            |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-                let ServiceTarget { model, .. } = service_target;
-                let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
-                Ok(ServiceTarget {
-                    endpoint,
-                    auth,
-                    model,
-                })
-            },
-        );
-        let client = ClientBuilder::default()
-            .with_service_target_resolver(target_resolver)
-            .build();
-        Self::new_with_client(client, system)
     }
 
     /// Runs the agent with the given model and prompt.
@@ -149,7 +172,6 @@ impl Agent {
             debug!("Agent iteration: {iteration}");
             // Create chat request
             let mut chat_req = self.memory.generate_chat_request();
-            debug!("Chat Req: {chat_req:#?}");
             // TODO: Should this be moved to Memory trait?
             if let Some(toolbox) = toolbox {
                 chat_req = chat_req.with_tools(toolbox.tools_definitions()?);

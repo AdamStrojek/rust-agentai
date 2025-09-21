@@ -35,7 +35,10 @@ async fn main() -> Result<(), Error> {
     let api_key = std::env::var("AGENTAI_API_KEY")?;
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
+    let mut agent = Agent::builder()
+        .with_url(&base_url, &api_key)
+        .with_system_prompt(SYSTEM)
+        .build();
 
     let answer: String = agent.run(&model, question, Some(&toolbox)).await?;
 

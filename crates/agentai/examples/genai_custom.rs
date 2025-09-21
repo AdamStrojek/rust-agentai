@@ -50,7 +50,10 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new_with_client(client, SYSTEM);
+    let mut agent = Agent::builder()
+        .with_client(client)
+        .with_system_prompt(SYSTEM)
+        .build();
 
     let answer: String = agent.run(&model, question, None).await?;
 
