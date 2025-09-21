@@ -17,14 +17,14 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 [dependencies]
 agentai-macros = { path = "../agentai-macros", version = "0.1", optional = true }
 genai = "0.3.5"
-anyhow = "1.0.98"
+anyhow = "1.0.100"
 thiserror = "2.0"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde = { version = "1.0.226", features = ["derive"] }
+serde_json = "1.0.145"
 schemars = { version = "0.9", features = ["derive"] }
-async-trait = "0.1.88"
-log = "0.4.27"
-reqwest = { version = "0.12.18", features = ["json"] }
+async-trait = "0.1.89"
+log = "0.4.28"
+reqwest = { version = "0.12.23", features = ["json"] }
 mcp_client_rs = { version = "0.1.7", optional = true }
 document-features = { version = "0.2" }
 time = { version = "0.3", features = [
@@ -37,7 +37,7 @@ time-tz = { version = "2.0.0", optional = true }
 type-state-builder = "0.3.1"
 
 [dev-dependencies]
-tokio = { version = "1.45.0", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 simplelog = "0.12.2"
 
 [features]
