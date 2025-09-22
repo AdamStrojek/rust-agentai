@@ -24,11 +24,10 @@ use std::sync::Arc;
 use type_state_builder::TypeStateBuilder;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
-/// It maintains a history of chat messages, a set of tools, and a context.
+/// It maintains a history of chat messages, and a set of tools.
 ///
-/// As `Context` you can provide any structure. Such object will not be used by
-/// `Agent` itself, but it will be passed in unmodified state as reference to any
-/// `AgentTool` trait, that was registered to be used.
+/// You can construct a new `Agent` instance using the `AgentBuilder`, which is accessible
+/// via the `builder()` method.
 // #[derive(Clone)]
 #[derive(TypeStateBuilder)]
 #[builder(setter_prefix = "with_")]
@@ -80,40 +79,6 @@ impl AgentBuilder_HasMemory {
 }
 
 impl Agent {
-    /// Creates a new `Agent` instance.
-    ///
-    /// This creation method will create a new agent instance with a default GenAI client
-    ///
-    /// # Arguments
-    ///
-    /// * `system` - The system message to initialize the chat history.
-    ///
-    /// # Returns
-    ///
-    /// A new `Agent` instance.
-    pub fn new(system: &str) -> Self {
-        let client = GenAIClient::default();
-
-        Self::new_with_client(client, system)
-    }
-
-    /// Creates a new `Agent` instance with provided GenAI Client
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - User provided GenAI Client
-    /// * `system` - The system message to initialize the chat history.
-    ///
-    /// # Returns
-    ///
-    /// A new `Agent` instance.
-    pub fn new_with_client(client: GenAIClient, system: &str) -> Self {
-        Self {
-            client,
-            memory: Box::new(ConversationMemory::new(system)),
-        }
-    }
-
     /// Runs the agent with the given model and prompt.
     ///
     /// # Arguments
