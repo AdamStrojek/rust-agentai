@@ -16,4 +16,5 @@ pub mod simple;
 pub mod struct_output;
 pub mod tools_custom;
 pub mod tools_mcp;
+pub mod tools_parallel;
 pub mod tools_web;
