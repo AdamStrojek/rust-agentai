@@ -1,0 +1,35 @@
+# agentai
+
+> `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` keeps a conversation history, calls a model, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`.
+
+Key facts for code generation:
+
+- The crate is pre-1.0 and the API changes between minor versions. This file describes `agentai` 0.1.5 (the `master` branch).
+- The library is async. Examples use `tokio` with `#[tokio::main]` and return `anyhow::Result`.
+- Create an agent with `Agent::new(system)`, `Agent::new_with_url(base_url, api_key, system)` or `Agent::new_with_client(genai_client, system)`.
+- Ask with `agent.run::<T>(model, prompt, toolbox)`. Use `T = String` for plain text. Any other `T` turns on structured output.
+- Tools are grouped in a `ToolBox`. Write your own with the `#[toolbox]` attribute on an `impl` block and `#[tool]` on its methods. Combine toolboxes with `ToolBoxSet`.
+- Ready toolboxes: `CurrentDateAndTimeToolBox` and `LocationToolBox` (`tools-buildin`), `WebSearchToolBox` and `WebFetchToolBox` (`tools-web`), `McpToolBox` (`mcp-client`). All features are on by default.
+
+## Docs
+
+- [Full usage guide](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/llms-full.txt): every topic below in one file, with code
+- [Crate documentation](https://docs.rs/agentai/latest/agentai/): API reference on docs.rs
+- [Agent](https://docs.rs/agentai/latest/agentai/agent/struct.Agent.html): constructors and the `run` loop
+- [Tools and toolboxes](https://docs.rs/agentai/latest/agentai/tool/index.html): `ToolBox`, `ToolBoxSet`, `ToolError`, `ToolResult`
+- [`#[toolbox]` macro](https://docs.rs/agentai/latest/agentai/tool/attr.toolbox.html): how methods become tools
+
+## Examples
+
+- [simple.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/simple.rs): plain text answer from an OpenAI-compatible endpoint
+- [struct_output.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/struct_output.rs): answer deserialized into a struct
+- [tools_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_custom.rs): custom tool written with `#[toolbox]`
+- [tools_web.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_web.rs): Brave web search plus page fetch combined in a `ToolBoxSet`
+- [tools_mcp.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_mcp.rs): tools from an MCP server started over stdio
+- [genai_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/genai_custom.rs): agent with a hand-configured `genai` client
+
+## Optional
+
+- [README](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/README.md): project overview and roadmap
+- [CHANGELOG](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/CHANGELOG.md): changes between releases
+- [genai crate](https://docs.rs/genai/latest/genai/): the LLM client `agentai` is built on
