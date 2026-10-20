@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
-    <img src="assets/logo.png" alt="AgentAI logo" width="160">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/assets/logo-dark.png">
+    <img src="https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/assets/logo-docs.png" alt="AgentAI logo" width="160">
   </picture>
 </p>
 
