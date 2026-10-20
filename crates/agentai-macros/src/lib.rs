@@ -25,7 +25,7 @@ use syn::{
 /// ```toml
 /// serde = { version = "1.0", features = ["derive"] }
 /// serde_json = "1.0"
-/// schemars = { version = "0.9", features = ["derive"] }
+/// schemars = { version = "1.2", features = ["derive"] }
 /// async-trait = "0.1"
 /// ```
 ///

@@ -12,7 +12,7 @@ cargo add tokio --features full
 cargo add anyhow
 ```
 
-Add `serde` (with `derive`) and `schemars` 0.9 (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
+Add `serde` (with `derive`) and `schemars` 1.x (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
 
 ### Feature flags
 
