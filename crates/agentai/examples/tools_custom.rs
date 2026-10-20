@@ -75,12 +75,15 @@ impl UrlFetcherToolBox {
         url: String,
     ) -> ToolResult {
         // Use reqwest to fetch the content from the provided URL.
-        // The `?` operator handles potential errors from the get and text methods.
-        Ok(reqwest::get(url)
+        // Errors the model can react to, such as a bad URL, are `ToolError::Failed` or
+        // `ToolError::InvalidArguments`: the agent sends them to the model, which can then try
+        // again. Use `ToolError::Configuration` or `ToolError::fatal(..)` for problems that
+        // retrying cannot fix: `Agent::run` then stops and returns `AgentError::Tool`.
+        reqwest::get(&url)
             .await
-            .map_err(anyhow::Error::new)?
+            .map_err(|e| ToolError::Failed(format!("Request to {url} failed: {e}")))?
             .text()
             .await
-            .map_err(anyhow::Error::new)?)
+            .map_err(|e| ToolError::Failed(format!("Reading {url} failed: {e}")))
     }
 }

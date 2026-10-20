@@ -391,21 +391,18 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     method_call.extend(quote! {
                         let params: #params_struct_name = serde_json::from_value(parameters)
                             .map_err(|e| {
-                                eprintln!("Tool parameter deserialization error for '{}': {:?}", #tool_name, e);
-                                ToolError::ExecutionError
+                                ToolError::InvalidArguments(format!(
+                                    "invalid arguments for tool '{}': {}", #tool_name, e
+                                ))
                             })?;
                     });
                 }
 
+                // Errors returned by the method pass through unchanged
                 method_call.extend(quote! { self.#fn_name_sig(#param_assignments) });
                 if method.sig.asyncness.is_some() {
                     method_call.extend(quote! {.await});
                 }
-
-                method_call.extend(quote! { .map_err(|e| {
-                    eprintln!("Tool execution error for '{}': {:?}", #tool_name, e);
-                    ToolError::ExecutionError
-                }) });
 
                 match_arms.extend(quote! {
                     #tool_name => {
@@ -437,7 +434,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                  match tool_name.as_str() {
                      #match_arms
                      _ => {
-                         Err(ToolError::NoToolFound(tool_name))
+                         Err(ToolError::NotFound(tool_name))
                      }
                  }
             }

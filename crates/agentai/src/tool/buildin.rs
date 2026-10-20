@@ -10,7 +10,6 @@
 //!
 //! For a practical demonstration of how to use these tools, please refer to the `examples/tool_buildin.rs` file.
 use crate::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
-use anyhow::anyhow;
 use time::format_description::well_known::{Iso8601, Rfc3339};
 use time::macros::format_description;
 use time::{Date, OffsetDateTime, Time};
@@ -30,11 +29,11 @@ impl CurrentDateAndTimeToolBox {
     /// The date is based on the local timezone of the system.
     #[tool]
     pub fn get_today_date(&self) -> ToolResult {
-        let today = OffsetDateTime::now_local().map_err(|err| ToolError::Other(anyhow!(err)))?;
+        let today = OffsetDateTime::now_local().map_err(ToolError::fatal)?;
         today
             .date()
             .format(&Iso8601::DATE)
-            .map_err(|err| ToolError::Other(anyhow!(err)))
+            .map_err(ToolError::fatal)
     }
 
     /// Use this tool to answer questions like: "What time is it?".
@@ -42,10 +41,9 @@ impl CurrentDateAndTimeToolBox {
     /// The time is based on the local timezone of the system.
     #[tool]
     pub fn get_current_time(&self) -> ToolResult {
-        let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let now = OffsetDateTime::now_local().map_err(ToolError::fatal)?;
         let format = format_description!("[hour]:[minute]:[second]");
-        now.format(&format)
-            .map_err(|e| ToolError::Other(anyhow!(e)))
+        now.format(&format).map_err(ToolError::fatal)
     }
 
     /// Use this tool to get the complete current date and time for precise and unambiguous time-stamping.
@@ -53,10 +51,8 @@ impl CurrentDateAndTimeToolBox {
     /// Returns a timestamp in the standard ISO 8601 format (e.g., "2023-10-27T10:30:00+00:00").
     #[tool]
     pub fn get_current_datetime(&self) -> ToolResult {
-        let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
-        now.format(&Rfc3339)
-            .map_err(|e| ToolError::Other(anyhow!(e)))
-        // Ok(now.to_string())
+        let now = OffsetDateTime::now_local().map_err(ToolError::fatal)?;
+        now.format(&Rfc3339).map_err(ToolError::fatal)
     }
 
     /// Use this tool to find the day of the week for a given date. For example, to answer "What day of the week was 2024-01-01?".
@@ -66,8 +62,11 @@ impl CurrentDateAndTimeToolBox {
         /// Date in `YYYY-MM-DD` format
         date: String,
     ) -> ToolResult {
-        let parsed_date =
-            Date::parse(&date, &Iso8601::DEFAULT).map_err(|err| ToolError::Other(anyhow!(err)))?;
+        let parsed_date = Date::parse(&date, &Iso8601::DEFAULT).map_err(|err| {
+            ToolError::InvalidArguments(format!(
+                "Invalid date '{date}', expected YYYY-MM-DD: {err}"
+            ))
+        })?;
         Ok(parsed_date.weekday().to_string())
     }
 
@@ -81,13 +80,11 @@ impl CurrentDateAndTimeToolBox {
         timezone: String,
     ) -> ToolResult {
         let tz = timezones::get_by_name(&timezone)
-            .ok_or_else(|| ToolError::Other(anyhow!("Unknown timezone: {}", timezone)))?;
+            .ok_or_else(|| ToolError::InvalidArguments(format!("Unknown timezone: {timezone}")))?;
         let now_utc = OffsetDateTime::now_utc();
         let now_in_tz = now_utc.to_timezone(tz);
         let format = format_description!("[hour]:[minute]:[second]");
-        now_in_tz
-            .format(&format)
-            .map_err(|e| ToolError::Other(anyhow!(e)))
+        now_in_tz.format(&format).map_err(ToolError::fatal)
     }
 
     /// Use this tool to convert time between different timezones. For example, to answer "What is 14:00 in New York in Tokyo time?".
@@ -103,15 +100,16 @@ impl CurrentDateAndTimeToolBox {
         target_timezone: String,
     ) -> ToolResult {
         let source_tz = timezones::get_by_name(&source_timezone).ok_or_else(|| {
-            ToolError::Other(anyhow!("Unknown source timezone: {}", source_timezone))
+            ToolError::InvalidArguments(format!("Unknown source timezone: {source_timezone}"))
         })?;
         let target_tz = timezones::get_by_name(&target_timezone).ok_or_else(|| {
-            ToolError::Other(anyhow!("Unknown target timezone: {}", target_timezone))
+            ToolError::InvalidArguments(format!("Unknown target timezone: {target_timezone}"))
         })?;
 
         let time_format = format_description!("[hour]:[minute]");
-        let parsed_time = Time::parse(&time, &time_format)
-            .map_err(|e| ToolError::Other(anyhow!("Invalid time format for '{}': {}", time, e)))?;
+        let parsed_time = Time::parse(&time, &time_format).map_err(|e| {
+            ToolError::InvalidArguments(format!("Invalid time format for '{time}': {e}"))
+        })?;
 
         let now_in_source_tz = OffsetDateTime::now_utc().to_timezone(source_tz);
         let source_datetime = now_in_source_tz.replace_time(parsed_time);
@@ -120,7 +118,7 @@ impl CurrentDateAndTimeToolBox {
 
         target_datetime
             .format(&time_format)
-            .map_err(|e| ToolError::Other(anyhow!(e)))
+            .map_err(ToolError::fatal)
     }
 }
 
@@ -164,11 +162,11 @@ impl LocationToolBox {
             .header("User-Agent", "rust-agentai-client")
             .send()
             .await
-            .map_err(|e| ToolError::Other(anyhow!("Failed to send request: {}", e)))?;
+            .map_err(|e| ToolError::Failed(format!("Failed to send request: {e}")))?;
 
         if !response.status().is_success() {
             // TODO: Unify way of API Error
-            return Err(ToolError::Other(anyhow!(
+            return Err(ToolError::Failed(format!(
                 "API request failed with status: {}",
                 response.status()
             )));
@@ -177,7 +175,7 @@ impl LocationToolBox {
         let locations: Vec<LocationResponse> = response
             .json()
             .await
-            .map_err(|e| ToolError::Other(anyhow!("Failed to parse JSON response: {}", e)))?;
+            .map_err(|e| ToolError::Failed(format!("Failed to parse JSON response: {e}")))?;
 
         if let Some(first_location) = locations.first() {
             Ok(format!(
@@ -185,9 +183,8 @@ impl LocationToolBox {
                 first_location.display_name, first_location.lat, first_location.lon
             ))
         } else {
-            Err(ToolError::Other(anyhow!(
-                "No location found for '{}'",
-                location
+            Err(ToolError::Failed(format!(
+                "No location found for '{location}'"
             )))
         }
     }
@@ -228,7 +225,7 @@ mod tests {
     fn test_get_day_of_week_invalid_date() {
         let toolbox = CurrentDateAndTimeToolBox {};
         let result = toolbox.get_day_of_week("invalid-date".to_string());
-        assert!(result.is_err());
+        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
     }
 
     #[test]
@@ -255,7 +252,7 @@ mod tests {
     fn test_get_time_in_invalid_timezone() {
         let toolbox = CurrentDateAndTimeToolBox {};
         let result = toolbox.get_time_in_timezone("Invalid/Timezone".to_string());
-        assert!(result.is_err());
+        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
     }
 
     #[test]

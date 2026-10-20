@@ -98,6 +98,28 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+## Error handling
+
+`Agent::run` returns an `AgentError` that you can match on. Provider failures that may
+succeed on a second try report it with `AgentError::is_transient`:
+
+```rust
+use agentai::{Agent, AgentError};
+
+match agent.run::<String>("gpt-4o", "Why is the sky blue?", None).await {
+    Ok(answer) => println!("Answer: {answer}"),
+    Err(err) if err.is_transient() => println!("Try again later: {err}"),
+    Err(AgentError::InvalidAnswer { raw, .. }) => println!("Unexpected answer: {raw}"),
+    Err(err) => println!("Failed: {err}"),
+}
+```
+
+Tools report failures with [`ToolError`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolError.html). Recoverable errors
+(`NotFound`, `InvalidArguments`, `Failed`) are sent to the model as the tool result and the
+run continues. Fatal errors (`Configuration`, `Fatal`) stop the run with
+`AgentError::Tool`. [`ToolError::is_recoverable`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolError.html#method.is_recoverable)
+tells the two groups apart.
+
 ## Examples
 
 For more examples, check out the [examples](https://docs.rs/agentai/latest/agentai/examples/) directory. To run an example, use the following command, replacing `<example_name>` with the name of the example file (without the `.rs` extension):

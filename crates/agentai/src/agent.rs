@@ -8,8 +8,7 @@
 //!
 //! To read more about tool look into [crate::tool]
 
-use crate::tool::ToolBox;
-use anyhow::{Result, anyhow};
+use crate::tool::{ToolBox, ToolError};
 use genai::Client;
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, ToolCall, ToolResponse};
@@ -19,6 +18,72 @@ use schemars::{JsonSchema, schema_for};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, from_str, json};
 use std::any::TypeId;
+use thiserror::Error;
+
+#[cfg(test)]
+mod tests;
+
+/// Errors returned by [`Agent`].
+///
+/// Match on the variants to decide what to do: retry a transient provider failure (see
+/// [`AgentError::is_transient`]), show the raw answer of the model for
+/// [`InvalidAnswer`](AgentError::InvalidAnswer), and so on.
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum AgentError {
+    /// The genai client could not be built (TLS, configuration).
+    #[error("failed to create the LLM client: {0}")]
+    ClientInit(#[source] genai::Error),
+    /// The request to the model failed (network, HTTP status, provider error).
+    #[error("LLM request failed: {0}")]
+    Llm(#[source] genai::Error),
+    /// The JSON schema of the answer type could not be generated or is not an object.
+    #[error("invalid answer schema: {0}")]
+    Schema(String),
+    /// The final answer of the model could not be parsed into the requested type.
+    #[error("failed to parse the model answer: {source}")]
+    InvalidAnswer {
+        /// Text returned by the model.
+        raw: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The loop ended without a final answer. Holds the number of iterations.
+    #[error("no final answer after {0} iterations")]
+    MaxIterationsReached(usize),
+    /// A tool failed with a fatal error ([`ToolError::is_recoverable`] is `false`),
+    /// which stops the run.
+    #[error("tool '{tool}' failed: {source}")]
+    Tool {
+        /// Name of the tool that failed. For errors raised before a call, such as
+        /// [`ToolBox::tools_definitions`], it is empty.
+        tool: String,
+        #[source]
+        source: ToolError,
+    },
+}
+
+impl AgentError {
+    /// Returns `true` when trying again may succeed: the provider answered with HTTP 408, 425,
+    /// 429 or 5xx, or the request failed because of a timeout or a connection problem.
+    pub fn is_transient(&self) -> bool {
+        let Self::Llm(err) = self else {
+            return false;
+        };
+        if let Some(status) = err.status() {
+            return status.is_server_error() || matches!(status.as_u16(), 408 | 425 | 429);
+        }
+        match err {
+            genai::Error::WebModelCall { webc_error, .. }
+            | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
+                genai::webc::Error::Reqwest(err) => err.is_timeout() || err.is_connect(),
+                _ => false,
+            },
+            genai::Error::WebStream { .. } => true,
+            _ => false,
+        }
+    }
+}
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
 /// It maintains a history of chat messages, a set of tools, and a context.
@@ -49,8 +114,8 @@ impl Agent {
     /// # Errors
     ///
     /// Returns an error when the GenAI client cannot be created.
-    pub fn new(system: &str) -> Result<Self> {
-        let client = Client::new()?;
+    pub fn new(system: &str) -> Result<Self, AgentError> {
+        let client = Client::new().map_err(AgentError::ClientInit)?;
 
         Ok(Self::new_with_client(client, system))
     }
@@ -89,7 +154,7 @@ impl Agent {
     /// # Errors
     ///
     /// Returns an error when the GenAI client cannot be created.
-    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self> {
+    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self, AgentError> {
         let client = Client::builder()
             .with_adapter_kind(AdapterKind::OpenAI)
             .append_provider_config(
@@ -99,7 +164,8 @@ impl Agent {
                     AuthData::from_single(api_key),
                 ),
             )
-            .build()?;
+            .build()
+            .map_err(AgentError::ClientInit)?;
         Ok(Self::new_with_client(client, system))
     }
 
@@ -114,6 +180,17 @@ impl Agent {
     ///
     /// A result containing the deserialized response.
     ///
+    /// # Errors
+    ///
+    /// Returns an [`AgentError`]:
+    /// - [`Llm`](AgentError::Llm) when the request to the model fails (see
+    ///   [`AgentError::is_transient`]);
+    /// - [`Schema`](AgentError::Schema) when the schema of `D` cannot be generated;
+    /// - [`InvalidAnswer`](AgentError::InvalidAnswer) when the answer does not match `D`;
+    /// - [`MaxIterationsReached`](AgentError::MaxIterationsReached) when there is no final answer;
+    /// - [`Tool`](AgentError::Tool) when a tool fails with a fatal error. Recoverable tool errors
+    ///   ([`ToolError::is_recoverable`]) are sent to the model instead.
+    ///
     /// ## Structured Output
     /// Type returned by this function is responsible for setting LLM response into structured output
     ///
@@ -123,7 +200,7 @@ impl Agent {
         model: &str,
         prompt: &str,
         toolbox: Option<&dyn ToolBox>,
-    ) -> Result<D>
+    ) -> Result<D, AgentError>
     where
         D: DeserializeOwned + JsonSchema + 'static,
     {
@@ -146,10 +223,11 @@ impl Agent {
         let is_answer_string = TypeId::of::<String>() == TypeId::of::<D>();
         if !is_answer_string {
             // If answer type is more complex then add response format to request options
-            let mut response_schema = serde_json::to_value(schema_for!(D))?;
-            let obj = response_schema
-                .as_object_mut()
-                .ok_or_else(|| anyhow!("JSON schema of the answer type is not an object"))?;
+            let mut response_schema = serde_json::to_value(schema_for!(D))
+                .map_err(|err| AgentError::Schema(err.to_string()))?;
+            let obj = response_schema.as_object_mut().ok_or_else(|| {
+                AgentError::Schema("JSON schema of the answer type is not an object".to_string())
+            })?;
             // Schemars attaches additional fields and not every LLM accepts them (Gemini)
             obj.remove("$schema");
             obj.remove("title");
@@ -164,12 +242,20 @@ impl Agent {
             // Create chat request
             let mut chat_req = ChatRequest::new(self.history.clone());
             if let Some(toolbox) = toolbox {
-                chat_req = chat_req.with_tools(toolbox.tools_definitions()?);
+                let definitions =
+                    toolbox
+                        .tools_definitions()
+                        .map_err(|source| AgentError::Tool {
+                            tool: String::new(),
+                            source,
+                        })?;
+                chat_req = chat_req.with_tools(definitions);
             }
             let chat_resp = self
                 .client
                 .exec_chat(model, chat_req, Some(&chat_opts))
-                .await?;
+                .await
+                .map_err(AgentError::Llm)?;
 
             // Collect tool calls before the response is consumed. Some models return text
             // (e.g. "Let me check...") together with tool calls; the tool calls win.
@@ -180,7 +266,21 @@ impl Agent {
                 if let Some(assistant_msg) = chat_resp.into_assistant_message_for_tool_use() {
                     self.history.push(assistant_msg);
                 }
+                let mut fatal: Option<AgentError> = None;
                 for tool_call in tool_calls {
+                    if fatal.is_some() {
+                        // The run is stopping. Every tool call still needs a response, or the
+                        // history would be rejected by the provider on the next `run`.
+                        self.history.push(
+                            ToolResponse::from_tool_call(
+                                &tool_call,
+                                "Tool was not executed because an earlier tool call failed"
+                                    .to_string(),
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
                     trace!(
                         "Tool request: {} with arguments: {}",
                         tool_call.fn_name, tool_call.fn_arguments
@@ -198,13 +298,22 @@ impl Agent {
                                     trace!("Tool result: {result}");
                                     result
                                 }
-                                Err(err) => {
-                                    // Tool errors go back to the model, so it can react to them.
-                                    // Some MCP servers return important information as errors.
-                                    // TODO: Allow user to configure this behaviour. Depending on
-                                    // the tool this may also mean an unrecoverable failure
+                                Err(err) if err.is_recoverable() => {
+                                    // Recoverable errors go back to the model, so it can react
+                                    // to them. Some MCP servers return important information
+                                    // as errors.
                                     trace!("Tool error: {err}");
                                     err.to_string()
+                                }
+                                Err(source) => {
+                                    // Retrying cannot help, so the run stops
+                                    debug!("Fatal error in tool '{}': {source}", tool_call.fn_name);
+                                    let message = format!("Tool failed: {source}");
+                                    fatal = Some(AgentError::Tool {
+                                        tool: tool_call.fn_name.clone(),
+                                        source,
+                                    });
+                                    message
                                 }
                             }
                         }
@@ -222,6 +331,9 @@ impl Agent {
                     self.history
                         .push(ToolResponse::from_tool_call(&tool_call, content).into());
                 }
+                if let Some(err) = fatal {
+                    return Err(err);
+                }
                 continue;
             }
 
@@ -232,22 +344,21 @@ impl Agent {
                 continue;
             }
             // Structured output may be split across several text parts
-            let mut resp = texts.join("");
-            debug!("Agent Answer: {resp}");
-            self.history.push(ChatMessage::assistant(resp.clone()));
-            if is_answer_string {
+            let raw = texts.join("");
+            debug!("Agent Answer: {raw}");
+            self.history.push(ChatMessage::assistant(raw.clone()));
+            let resp = if is_answer_string {
                 // TODO: Workaround when choosing String as response type. Because we are
                 // expecting D: DeserializeOwned then we can't return String directly.
                 // To workaround this I escape content and later deserialize it using
                 // serde_json::from_str to correct "struct" (String)
-                resp = Value::String(resp).to_string();
-            }
-            let resp = from_str(&resp)?;
-            return Ok(resp);
+                Value::String(raw.clone()).to_string()
+            } else {
+                raw.clone()
+            };
+            return from_str(&resp).map_err(|source| AgentError::InvalidAnswer { raw, source });
         }
 
-        Err(anyhow!(format!(
-            "Unable to get response in {max_iterations} tries"
-        )))
+        Err(AgentError::MaxIterationsReached(max_iterations))
     }
 }

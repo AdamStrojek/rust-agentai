@@ -71,6 +71,30 @@
 //! }
 //! ```
 //!
+//! ## Error handling
+//!
+//! [`Agent::run`] returns an [`AgentError`] that you can match on. Provider failures that may
+//! succeed on a second try report it with [`AgentError::is_transient`]:
+//!
+//! ```no_run
+//! use agentai::{Agent, AgentError};
+//!
+//! # async fn run(agent: &mut Agent) {
+//! match agent.run::<String>("gpt-4o", "Why is the sky blue?", None).await {
+//!     Ok(answer) => println!("Answer: {answer}"),
+//!     Err(err) if err.is_transient() => println!("Try again later: {err}"),
+//!     Err(AgentError::InvalidAnswer { raw, .. }) => println!("Unexpected answer: {raw}"),
+//!     Err(err) => println!("Failed: {err}"),
+//! }
+//! # }
+//! ```
+//!
+//! Tools report failures with [`ToolError`](crate::tool::ToolError). Recoverable errors
+//! (`NotFound`, `InvalidArguments`, `Failed`) are sent to the model as the tool result and the
+//! run continues. Fatal errors (`Configuration`, `Fatal`) stop the run with
+//! [`AgentError::Tool`]. [`ToolError::is_recoverable`](crate::tool::ToolError::is_recoverable)
+//! tells the two groups apart.
+//!
 //! ## Examples
 //!
 #![allow(rustdoc::redundant_explicit_links)]

@@ -15,11 +15,10 @@
 //! not forwarded: each one is replaced by a short placeholder such as `[image omitted]`.
 
 use crate::tool::{Tool, ToolBox, ToolError};
-use anyhow::{Result as AnyhowResult, anyhow};
 use async_trait::async_trait;
 use log::trace;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
-use rmcp::service::RunningService;
+use rmcp::service::{RunningService, ServiceError};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
@@ -33,6 +32,11 @@ pub struct McpToolBox {
     tools: Vec<Tool>,
 }
 
+/// Error for a server that cannot be started or reached. Retrying the model call cannot help.
+fn connect_error(err: impl std::fmt::Display) -> ToolError {
+    ToolError::Configuration(format!("cannot connect to the MCP server: {err}"))
+}
+
 impl McpToolBox {
     /// Starts an MCP server as a child process and connects to it over stdio.
     ///
@@ -44,13 +48,13 @@ impl McpToolBox {
     ///
     /// # Errors
     ///
-    /// Returns an error when the process cannot be started, the MCP handshake fails,
-    /// or the tool list cannot be read.
+    /// Returns [`ToolError::Configuration`] when the process cannot be started, the MCP
+    /// handshake fails, or the tool list cannot be read.
     pub async fn new(
         cmd: &str,
         args: impl IntoIterator<Item = impl AsRef<str>>,
         envs: Option<HashMap<String, String>>,
-    ) -> AnyhowResult<Self> {
+    ) -> Result<Self, ToolError> {
         trace!("McpToolBox::new for cmd: {cmd}");
         let args: Vec<String> = args.into_iter().map(|a| a.as_ref().to_string()).collect();
         let command = Command::new(cmd).configure(|command| {
@@ -59,8 +63,8 @@ impl McpToolBox {
                 command.envs(envs);
             }
         });
-        let transport = TokioChildProcess::new(command)?;
-        let client = ().serve(transport).await?;
+        let transport = TokioChildProcess::new(command).map_err(connect_error)?;
+        let client = ().serve(transport).await.map_err(connect_error)?;
         trace!("McpToolBox::new client initialized");
 
         Self::from_client(client).await
@@ -74,11 +78,12 @@ impl McpToolBox {
     ///
     /// # Errors
     ///
-    /// Returns an error when the MCP handshake fails or the tool list cannot be read.
-    pub async fn new_http(url: &str) -> AnyhowResult<Self> {
+    /// Returns [`ToolError::Configuration`] when the MCP handshake fails or the tool list
+    /// cannot be read.
+    pub async fn new_http(url: &str) -> Result<Self, ToolError> {
         trace!("McpToolBox::new_http for url: {url}");
         let transport = StreamableHttpClientTransport::from_uri(url.to_string());
-        let client = ().serve(transport).await?;
+        let client = ().serve(transport).await.map_err(connect_error)?;
         trace!("McpToolBox::new_http client initialized");
 
         Self::from_client(client).await
@@ -94,22 +99,24 @@ impl McpToolBox {
     ///
     /// # Errors
     ///
-    /// Returns an error when the MCP handshake fails or the tool list cannot be read.
-    pub async fn new_http_with_bearer(url: &str, token: &str) -> AnyhowResult<Self> {
+    /// Returns [`ToolError::Configuration`] when the MCP handshake fails or the tool list
+    /// cannot be read.
+    pub async fn new_http_with_bearer(url: &str, token: &str) -> Result<Self, ToolError> {
         trace!("McpToolBox::new_http_with_bearer for url: {url}");
         let config =
             StreamableHttpClientTransportConfig::with_uri(url.to_string()).auth_header(token);
         let transport = StreamableHttpClientTransport::from_config(config);
-        let client = ().serve(transport).await?;
+        let client = ().serve(transport).await.map_err(connect_error)?;
         trace!("McpToolBox::new_http_with_bearer client initialized");
 
         Self::from_client(client).await
     }
 
-    async fn from_client(client: RunningService<RoleClient, ()>) -> AnyhowResult<Self> {
+    async fn from_client(client: RunningService<RoleClient, ()>) -> Result<Self, ToolError> {
         let tools = client
             .list_all_tools()
-            .await?
+            .await
+            .map_err(connect_error)?
             .into_iter()
             .map(|mcp_tool| {
                 let mut tool = Tool::new(mcp_tool.name.to_string())
@@ -156,14 +163,14 @@ impl ToolBox for McpToolBox {
     async fn call_tool(&self, tool_name: String, arguments: Value) -> Result<String, ToolError> {
         // Lets `ToolBoxSet` try the next toolbox for tools this server does not have
         if !self.tools.iter().any(|t| t.name.as_str() == tool_name) {
-            return Err(ToolError::NoToolFound(tool_name));
+            return Err(ToolError::NotFound(tool_name));
         }
 
         let arguments = match arguments {
             Value::Object(map) => Some(map),
             Value::Null => None,
             other => {
-                return Err(ToolError::LLMError(format!(
+                return Err(ToolError::InvalidArguments(format!(
                     "Arguments for tool '{tool_name}' must be a JSON object, got: {other}"
                 )));
             }
@@ -178,12 +185,20 @@ impl ToolBox for McpToolBox {
             .client
             .call_tool(params)
             .await
-            .map_err(|err| ToolError::Other(anyhow!(err)))?;
+            .map_err(|err| match err {
+                // The server answered with a protocol error, or the call was cut short; the
+                // model may try again
+                ServiceError::McpError(_)
+                | ServiceError::Timeout { .. }
+                | ServiceError::Cancelled { .. } => ToolError::Failed(err.to_string()),
+                // Closed or broken transport: the server is gone
+                err => ToolError::fatal(err),
+            })?;
 
         let text = result_to_text(&result);
         if result.is_error == Some(true) {
             // The server reports a tool-level failure; pass its message to the model
-            return Err(ToolError::LLMError(text));
+            return Err(ToolError::Failed(text));
         }
         Ok(text)
     }
@@ -197,7 +212,7 @@ mod tests {
 
     // Helper function to create a McpToolBox for testing
     async fn create_test_toolbox() -> AnyhowResult<McpToolBox> {
-        McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await
+        Ok(McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?)
     }
 
     #[tokio::test]
@@ -264,8 +279,8 @@ mod tests {
             .call_tool("non_existent_tool".to_string(), arguments)
             .await;
 
-        // Unknown tools return NoToolFound, so ToolBoxSet can try the next toolbox
-        assert!(matches!(result, Err(ToolError::NoToolFound(_))));
+        // Unknown tools return NotFound, so ToolBoxSet can try the next toolbox
+        assert!(matches!(result, Err(ToolError::NotFound(_))));
 
         Ok(())
     }
@@ -281,8 +296,8 @@ mod tests {
             .await;
 
         match result {
-            Err(ToolError::LLMError(message)) => assert!(!message.is_empty()),
-            other => panic!("Expected ToolError::LLMError, got {other:?}"),
+            Err(ToolError::Failed(message)) => assert!(!message.is_empty()),
+            other => panic!("Expected ToolError::Failed, got {other:?}"),
         }
 
         Ok(())
@@ -316,7 +331,7 @@ mod tests {
             .call_tool("get_current_time".to_string(), json!("Europe/Warsaw"))
             .await;
 
-        assert!(matches!(result, Err(ToolError::LLMError(_))));
+        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
 
         Ok(())
     }

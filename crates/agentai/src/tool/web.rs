@@ -8,7 +8,6 @@
 //! [examples/tools_web.rs](crate::examples::tools_web).
 
 use crate::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
-use anyhow::Context;
 use reqwest::Client;
 use serde_json::Value;
 
@@ -62,6 +61,11 @@ impl WebSearchToolBox {
             ("count", "5"),
             ("result_filter", "web"),
         ];
+        if self.api_key.trim().is_empty() {
+            return Err(ToolError::Configuration(
+                "the Brave Search API key is empty".to_string(),
+            ));
+        }
         let response = self
             .client
             .get(BRAVE_API_URL)
@@ -69,23 +73,40 @@ impl WebSearchToolBox {
             .header("X-Subscription-Token", self.api_key.clone())
             .send()
             .await
-            .map_err(anyhow::Error::new)?;
+            .map_err(|e| ToolError::Failed(format!("Web search request failed: {e}")))?;
 
-        let json: Value = response.json().await.map_err(anyhow::Error::new)?;
+        let status = response.status();
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(ToolError::Configuration(format!(
+                "the Brave Search API rejected the API key (status {status})"
+            )));
+        }
+        if !status.is_success() {
+            return Err(ToolError::Failed(format!(
+                "Web search failed with status: {status}"
+            )));
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|e| ToolError::Failed(format!("Invalid web search response: {e}")))?;
 
         let mut results: Vec<String> = vec![];
 
-        let response = json["web"]["results"]
-            .as_array()
-            .ok_or(ToolError::ExecutionError)?;
+        // Brave leaves out "web" when nothing was found
+        let Some(response) = json["web"]["results"].as_array() else {
+            return Ok("No results found".to_string());
+        };
         for item in response {
-            let title = item["title"]
-                .as_str()
-                .context("web title is not a string")?;
-            let description = item["description"]
-                .as_str()
-                .context("web description is not a string")?;
-            let url = item["url"].as_str().context("web url is not a string")?;
+            let field = |name: &str| {
+                item[name].as_str().ok_or_else(|| {
+                    ToolError::Failed(format!("Web search result has no string field '{name}'"))
+                })
+            };
+            let title = field("title")?;
+            let description = field("description")?;
+            let url = field("url")?;
             results.push(format!(
                 "Title: {title}\nDescription: {description}\nURL: {url}"
             ));
@@ -134,17 +155,20 @@ impl WebFetchToolBox {
             .get(&url)
             .send()
             .await
-            .map_err(|e| ToolError::LLMError(format!("Request to {url} failed: {e}")))?;
+            .map_err(|e| ToolError::Failed(format!("Request to {url} failed: {e}")))?;
 
         if !response.status().is_success() {
-            return Err(ToolError::LLMError(format!(
+            return Err(ToolError::Failed(format!(
                 "Request to {} failed with status: {}",
                 url,
                 response.status()
             )));
         }
 
-        let body = response.text().await.map_err(anyhow::Error::new)?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ToolError::Failed(format!("Reading the response of {url} failed: {e}")))?;
 
         // TODO: Add HTML2MD converter
 
