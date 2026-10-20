@@ -26,7 +26,7 @@ This library is under heavy development. The interface may change at any time wi
 - **Connect to any major LLM provider**: Support for OpenAI, Anthropic, Gemini, Ollama, and other OpenAI-compatible APIs.
 - **Choose the right model for the job**: Flexibly select the best-suited model for each step in your agent's workflow.
 - **Build custom tools with ease**: A simple interface for creating and managing your own tools using the [`ToolBox`](https://docs.rs/agentai/latest/agentai/tool/trait.ToolBox.html).
-- **MCP Server Support**: Leverage existing solutions based on the Model-Context-Protocol, eliminating the need to build agent tools from scratch.
+- **MCP Server Support, local and remote**: Use tools from any Model Context Protocol server, whether you start it locally over **stdio** or connect to a running or hosted server over **Streamable HTTP** (with optional bearer token). Built on the official MCP Rust SDK.
 - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 
 ## What's New
@@ -39,9 +39,10 @@ This library is under heavy development. The interface may change at any time wi
   `Agent::new_with_url` now return `Result`, and the agent reports typed errors
   (`AgentError`). Tool errors are either recoverable (sent back to the model, which can
   try again) or fatal (they stop the run).
-- **MCP on the official SDK**: `McpToolBox` is now built on `rmcp`, the
-  official MCP Rust SDK. Besides servers started over stdio, it connects to running servers over
-  Streamable HTTP, with or without a bearer token (`McpToolBox::new_http`, `McpToolBox::new_http_with_bearer`).
+- **Remote MCP servers, not only stdio**: `McpToolBox` now connects to MCP
+  servers over **Streamable HTTP**, so agents can use running and hosted servers, including ones that need a
+  bearer token (`McpToolBox::new_http`, `McpToolBox::new_http_with_bearer`). Starting a local server over
+  **stdio** (`McpToolBox::new`) works as before. MCP support is now built on `rmcp`, the official MCP Rust SDK.
 - **Agent configuration**: `Agent::with_max_iterations` and
   `Agent::with_chat_options` set the loop limit and the model options
   (temperature, max tokens, tool choice, reasoning effort, ...).

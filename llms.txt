@@ -11,7 +11,7 @@ Key facts for code generation:
 - Configure with `.with_max_iterations(n)` (default 5) and `.with_chat_options(ChatOptions)` (default temperature 0.2). `agentai::genai` re-exports genai for `ChatOptions`, `ToolChoice`, `ReasoningEffort`.
 - Errors are typed: `run` returns `AgentError` (match on variants, `is_transient()` for retryable provider failures). Tools return `ToolError`; recoverable ones (`NotFound`, `InvalidArguments`, `Failed`) go back to the model, fatal ones (`Configuration`, `Fatal`) stop the run as `AgentError::Tool`. `ToolError::is_recoverable()` tells them apart.
 - Tools are grouped in a `ToolBox`. Write your own with the `#[toolbox]` attribute on an `impl` block and `#[tool]` on its methods. Options: `#[tool(name = "...")]`, `#[tool(strict)]` for strict argument schemas. Combine toolboxes with `ToolBoxSet`.
-- Ready toolboxes: `CurrentDateAndTimeToolBox` and `LocationToolBox` (`tools-buildin`), `WebSearchToolBox` and `WebFetchToolBox` (`tools-web`), `McpToolBox` (`mcp-client`). All features are on by default.
+- Ready toolboxes: `CurrentDateAndTimeToolBox` and `LocationToolBox` (`tools-buildin`), `WebSearchToolBox` and `WebFetchToolBox` (`tools-web`), `McpToolBox` (`mcp-client`) for MCP servers over stdio (`McpToolBox::new`) or Streamable HTTP (`new_http`, `new_http_with_bearer`). All features are on by default.
 
 ## Docs
 
