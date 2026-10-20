@@ -81,7 +81,7 @@ use agentai::Agent;
 async fn main() -> anyhow::Result<()> {
     let base_url = std::env::var("AGENTAI_BASE_URL")?;
     let api_key = std::env::var("AGENTAI_API_KEY")?;
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("minimax/minimax-m3.1-flash:free".to_string());
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3-super-120b-a12b:free".to_string());
 
     let mut agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant");
     let answer: String = agent.run(&model, "Why is the sky blue?", None).await?;
@@ -296,7 +296,7 @@ The server's tool list is read once in `new`. Only stdio servers are supported.
 
 ## Custom genai client
 
-Build a `genai::Client` yourself to change routing, authentication or default chat options, then pass it to `Agent::new_with_client`. This example sends every model to OpenRouter through the OpenAI adapter and limits the answer length:
+Build a `genai::Client` yourself to change routing, authentication or default chat options, then pass it to `Agent::new_with_client`. This example sends every model to OpenRouter through the OpenAI adapter and limits the answer length (reasoning models count their thinking towards this limit):
 
 ```rust
 use agentai::Agent;
@@ -316,7 +316,7 @@ let target_resolver = ServiceTargetResolver::from_resolver_fn(
 );
 
 let client = ClientBuilder::default()
-    .with_chat_options(ChatOptions::default().with_max_tokens(200))
+    .with_chat_options(ChatOptions::default().with_max_tokens(2000))
     .with_service_target_resolver(target_resolver)
     .build();
 

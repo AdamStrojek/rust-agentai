@@ -37,8 +37,8 @@ async fn main() -> Result<()> {
 
     let base_url = std::env::var("AGENTAI_BASE_URL")?;
     let api_key = std::env::var("AGENTAI_API_KEY")?;
-    let model =
-        std::env::var("AGENTAI_MODEL").unwrap_or("minimax/minimax-m3.1-flash:free".to_string());
+    let model = std::env::var("AGENTAI_MODEL")
+        .unwrap_or("nvidia/nemotron-3-super-120b-a12b:free".to_string());
 
     let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
 

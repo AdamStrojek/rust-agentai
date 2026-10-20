@@ -23,8 +23,8 @@ async fn main() -> Result<()> {
 
     // Remember about providing what model you want to use
     // Some models may require providing authorization details
-    let model =
-        std::env::var("AGENTAI_MODEL").unwrap_or("minimax/minimax-m3.1-flash:free".to_string());
+    let model = std::env::var("AGENTAI_MODEL")
+        .unwrap_or("nvidia/nemotron-3-super-120b-a12b:free".to_string());
 
     let question = "Why sky is blue?";
 
@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
     );
     let chat_options = ChatOptions::default()
         .with_temperature(0.0)
-        .with_max_tokens(20);
+        // Reasoning models spend part of this budget on thinking, so keep it generous
+        .with_max_tokens(2000);
     let client = ClientBuilder::default()
         .with_chat_options(chat_options)
         .with_service_target_resolver(target_resolver)

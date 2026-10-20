@@ -54,9 +54,9 @@ jobs:
       fail-fast: false
       matrix:
         llm:
-          - name: minimax-m3.1-flash
+          - name: nemotron-3-super
             base_url: https://openrouter.ai/api/v1/
-            model: minimax/minimax-m3.1-flash:free
+            model: nvidia/nemotron-3-super-120b-a12b:free
             key_secret: OPENROUTER_API_KEY
     steps:
       - name: Checkout repository
@@ -95,9 +95,9 @@ jobs:
       fail-fast: false
       matrix:
         llm:
-          - name: minimax-m3.1-flash
+          - name: nemotron-3-super
             base_url: https://openrouter.ai/api/v1/
-            model: minimax/minimax-m3.1-flash:free
+            model: nvidia/nemotron-3-super-120b-a12b:free
             key_secret: OPENROUTER_API_KEY
           # - name: gemini-2.5-flash
           #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
