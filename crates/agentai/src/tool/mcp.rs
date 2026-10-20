@@ -12,8 +12,8 @@ use anyhow::Result as AnyhowResult;
 use async_trait::async_trait;
 use log::trace;
 use mcp_client_rs::{
-    client::{Client, ClientBuilder},
     MessageContent,
+    client::{Client, ClientBuilder},
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -45,11 +45,11 @@ impl McpToolBox {
         let mut tools = vec![];
 
         for tool_desc in client.list_tools().await?.tools {
-            tools.push(Tool {
-                name: tool_desc.name,
-                description: Some(tool_desc.description),
-                schema: Some(tool_desc.input_schema),
-            });
+            tools.push(
+                Tool::new(tool_desc.name)
+                    .with_description(tool_desc.description)
+                    .with_schema(tool_desc.input_schema),
+            );
         }
 
         Ok(Self {
@@ -108,22 +108,24 @@ mod tests {
         assert!(tool_defs.len() >= 2);
 
         // Assert that the "get_current_time" tool exists
-        let get_time_tool = tool_defs.iter().find(|t| t.name == "get_current_time");
+        let get_time_tool = tool_defs
+            .iter()
+            .find(|t| t.name.as_str() == "get_current_time");
         assert!(
             get_time_tool.is_some(),
             "Expected tool 'get_current_time' not found"
         );
-        assert_eq!(get_time_tool.unwrap().name, "get_current_time");
+        assert_eq!(get_time_tool.unwrap().name.as_str(), "get_current_time");
         assert!(get_time_tool.unwrap().description.is_some());
         assert!(get_time_tool.unwrap().schema.is_some());
 
         // Assert that the "convert_time" tool exists
-        let convert_time_tool = tool_defs.iter().find(|t| t.name == "convert_time");
+        let convert_time_tool = tool_defs.iter().find(|t| t.name.as_str() == "convert_time");
         assert!(
             convert_time_tool.is_some(),
             "Expected tool 'convert_time' not found"
         );
-        assert_eq!(convert_time_tool.unwrap().name, "convert_time");
+        assert_eq!(convert_time_tool.unwrap().name.as_str(), "convert_time");
         assert!(convert_time_tool.unwrap().description.is_some());
         assert!(convert_time_tool.unwrap().schema.is_some());
 

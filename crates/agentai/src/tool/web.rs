@@ -7,7 +7,7 @@
 //! For a practical demonstration of these tools, please refer to the example located at
 //! [examples/tools_web.rs](crate::examples::tools_web).
 
-use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+use crate::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
 use anyhow::Context;
 use reqwest::Client;
 use serde_json::Value;

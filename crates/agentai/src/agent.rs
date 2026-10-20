@@ -9,17 +9,16 @@
 //! To read more about tool look into [crate::tool]
 
 use crate::tool::ToolBox;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use genai::Client;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
-use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client, ClientBuilder, ModelIden, ServiceTarget};
+use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, ToolCall, ToolResponse};
+use genai::resolver::{AuthData, Endpoint};
 use log::{debug, trace};
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::de::DeserializeOwned;
-use serde_json::{from_str, json, Value};
+use serde_json::{Value, from_str, json};
 use std::any::TypeId;
-use std::sync::Arc;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
 /// It maintains a history of chat messages, a set of tools, and a context.
@@ -39,19 +38,21 @@ pub struct Agent {
 impl Agent {
     /// Creates a new `Agent` instance.
     ///
-    /// This creation method will create a new agent instance with a default GenAI client
+    /// This creation method will create a new agent instance with a default GenAI client.
+    /// genai picks the provider from the model name and reads the provider's API key
+    /// from its usual environment variable.
     ///
     /// # Arguments
     ///
     /// * `system` - The system message to initialize the chat history.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A new `Agent` instance.
-    pub fn new(system: &str) -> Self {
-        let client = Client::default();
+    /// Returns an error when the GenAI client cannot be created.
+    pub fn new(system: &str) -> Result<Self> {
+        let client = Client::new()?;
 
-        Self::new_with_client(client, system)
+        Ok(Self::new_with_client(client, system))
     }
 
     /// Creates a new `Agent` instance with provided GenAI Client
@@ -71,24 +72,35 @@ impl Agent {
         }
     }
 
-    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Self {
-        let endpoint = Endpoint::from_owned(Arc::from(base_url));
-        let auth = AuthData::from_single(api_key);
-        let target_resolver = ServiceTargetResolver::from_resolver_fn(
-            |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-                let ServiceTarget { model, .. } = service_target;
-                let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
-                Ok(ServiceTarget {
-                    endpoint,
-                    auth,
-                    model,
-                })
-            },
-        );
-        let client = ClientBuilder::default()
-            .with_service_target_resolver(target_resolver)
-            .build();
-        Self::new_with_client(client, system)
+    /// Creates a new `Agent` instance that talks to an OpenAI-compatible endpoint
+    /// (OpenAI, OpenRouter, LiteLLM, Ollama, ...).
+    ///
+    /// Every model name is sent through genai's OpenAI adapter to `base_url`, authenticated
+    /// with `api_key`. Model names are passed as they are, so names like `openai/gpt-4.1-mini`
+    /// or `vendor/model:free` work. A name with another genai namespace, such as
+    /// `anthropic::claude-sonnet-4-5`, fails with an adapter mismatch error.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL of the API, for example `https://openrouter.ai/api/v1/`.
+    /// * `api_key` - API key sent with every request.
+    /// * `system` - The system message to initialize the chat history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the GenAI client cannot be created.
+    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self> {
+        let client = Client::builder()
+            .with_adapter_kind(AdapterKind::OpenAI)
+            .append_provider_config(
+                AdapterKind::OpenAI,
+                (
+                    Endpoint::from_owned(base_url.to_string()),
+                    AuthData::from_single(api_key),
+                ),
+            )
+            .build()?;
+        Ok(Self::new_with_client(client, system))
     }
 
     /// Runs the agent with the given model and prompt.
@@ -135,7 +147,9 @@ impl Agent {
         if !is_answer_string {
             // If answer type is more complex then add response format to request options
             let mut response_schema = serde_json::to_value(schema_for!(D))?;
-            let obj = response_schema.as_object_mut().unwrap();
+            let obj = response_schema
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("JSON schema of the answer type is not an object"))?;
             // Schemars attaches additional fields and not every LLM accepts them (Gemini)
             obj.remove("$schema");
             obj.remove("title");
@@ -157,69 +171,79 @@ impl Agent {
                 .exec_chat(model, chat_req, Some(&chat_opts))
                 .await?;
 
-            match chat_resp.content {
-                Some(MessageContent::Text(text)) => {
-                    let mut resp = text;
-                    debug!("Agent Answer: {resp}");
-                    self.history.push(ChatMessage::assistant(resp.clone()));
-                    if is_answer_string {
-                        // TODO: Workaround when choosing String as response type. Because we are
-                        // expecting D: DeserializeOwned then we can't return String directly.
-                        // To workaround this I escape content and later deserialize it using
-                        // serde_json::from_str to correct "struct" (String)
-                        resp = Value::String(resp).to_string();
-                    }
-                    let resp = from_str(&resp)?;
-                    return Ok(resp);
+            // Collect tool calls before the response is consumed. Some models return text
+            // (e.g. "Let me check...") together with tool calls; the tool calls win.
+            let tool_calls: Vec<ToolCall> = chat_resp.tool_calls().into_iter().cloned().collect();
+
+            if !tool_calls.is_empty() {
+                // Keeps text, reasoning and provider continuation data next to the tool calls
+                if let Some(assistant_msg) = chat_resp.into_assistant_message_for_tool_use() {
+                    self.history.push(assistant_msg);
                 }
-                Some(MessageContent::ToolCalls(tools_call)) => {
-                    self.history.push(ChatMessage::from(tools_call.clone()));
-                    // Go through tool use
-                    for tool_request in tools_call {
-                        trace!(
-                            "Tool request: {} with arguments: {}",
-                            tool_request.fn_name,
-                            tool_request.fn_arguments
-                        );
-                        if let Some(tool) = toolbox {
-                            match tool
-                                .call_tool(tool_request.fn_name, tool_request.fn_arguments)
+                for tool_call in tool_calls {
+                    trace!(
+                        "Tool request: {} with arguments: {}",
+                        tool_call.fn_name, tool_call.fn_arguments
+                    );
+                    let content = match toolbox {
+                        Some(toolbox) => {
+                            match toolbox
+                                .call_tool(
+                                    tool_call.fn_name.clone(),
+                                    tool_call.fn_arguments.clone(),
+                                )
                                 .await
                             {
                                 Ok(result) => {
                                     trace!("Tool result: {result}");
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        result,
-                                    )));
+                                    result
                                 }
                                 Err(err) => {
-                                    // If MCP Server fails we need to redirect this information to model
-                                    // this will allow to react on what happens. Some MCP Servers returns
-                                    // important information as error for Agent
-                                    // TODO: Allow user to configure this behaviour. Depending on MCP
-                                    // server this may contain important information, or this may be
-                                    // indication of unrecoverable failure
-                                    trace!("Error: {err}");
-                                    self.history.push(ChatMessage::from(ToolResponse::new(
-                                        tool_request.call_id.clone(),
-                                        err.to_string(),
-                                    )));
+                                    // Tool errors go back to the model, so it can react to them.
+                                    // Some MCP servers return important information as errors.
+                                    // TODO: Allow user to configure this behaviour. Depending on
+                                    // the tool this may also mean an unrecoverable failure
+                                    trace!("Tool error: {err}");
+                                    err.to_string()
                                 }
-                            };
-                        } else {
-                            todo!("No tool found for {}", tool_request.fn_name);
+                            }
                         }
-                    }
+                        None => {
+                            debug!(
+                                "Model requested tool '{}' but no toolbox was provided",
+                                tool_call.fn_name
+                            );
+                            format!(
+                                "Tool '{}' is not available: no tools were provided",
+                                tool_call.fn_name
+                            )
+                        }
+                    };
+                    self.history
+                        .push(ToolResponse::from_tool_call(&tool_call, content).into());
                 }
-                Some(msg_content) => {
-                    return Err(anyhow!(format!(
-                        "Unsupported message content {:?}",
-                        msg_content
-                    )));
-                }
-                None => {}
-            };
+                continue;
+            }
+
+            let texts = chat_resp.content.into_texts();
+            if texts.is_empty() {
+                // Nothing usable in this response (for example only reasoning), ask again
+                debug!("Agent iteration {iteration}: response has no text and no tool calls");
+                continue;
+            }
+            // Structured output may be split across several text parts
+            let mut resp = texts.join("");
+            debug!("Agent Answer: {resp}");
+            self.history.push(ChatMessage::assistant(resp.clone()));
+            if is_answer_string {
+                // TODO: Workaround when choosing String as response type. Because we are
+                // expecting D: DeserializeOwned then we can't return String directly.
+                // To workaround this I escape content and later deserialize it using
+                // serde_json::from_str to correct "struct" (String)
+                resp = Value::String(resp).to_string();
+            }
+            let resp = from_str(&resp)?;
+            return Ok(resp);
         }
 
         Err(anyhow!(format!(

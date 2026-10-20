@@ -9,12 +9,12 @@
 //! - `LocationToolBox`: A tool for retrieving geographical information (latitude and longitude) for a given location using the OpenStreetMap Nominatim API.
 //!
 //! For a practical demonstration of how to use these tools, please refer to the `examples/tool_buildin.rs` file.
-use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+use crate::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
 use anyhow::anyhow;
 use time::format_description::well_known::{Iso8601, Rfc3339};
 use time::macros::format_description;
 use time::{Date, OffsetDateTime, Time};
-use time_tz::{timezones, OffsetDateTimeExt};
+use time_tz::{OffsetDateTimeExt, timezones};
 
 /// # Current Date and Time Toolbox
 ///

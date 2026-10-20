@@ -32,10 +32,10 @@ Examples and tests that hit an LLM need `AGENTAI_BASE_URL`, `AGENTAI_API_KEY`, a
 
 ## Architecture
 
-**Agent loop** (`crates/agentai/src/agent.rs`): `Agent` holds a genai `Client` and its conversation history as a plain `Vec<ChatMessage>` that starts with the system prompt. Constructors: `Agent::new(system)` uses the default genai client, `new_with_client(client, system)` takes your own, and `new_with_url(base_url, api_key, system)` builds a client that forces every model through the OpenAI adapter at that endpoint. `Agent::run::<D>(model, prompt, Option<&dyn ToolBox>)`:
+**Agent loop** (`crates/agentai/src/agent.rs`): `Agent` holds a genai `Client` and its conversation history as a plain `Vec<ChatMessage>` that starts with the system prompt. Constructors: `Agent::new(system)` uses the default genai client, `new_with_client(client, system)` takes your own, and `new_with_url(base_url, api_key, system)` builds a client bound to the OpenAI adapter (`with_adapter_kind` + `append_provider_config`) at that endpoint. `new` and `new_with_url` return `anyhow::Result` because genai 0.7 client construction is fallible. `Agent::run::<D>(model, prompt, Option<&dyn ToolBox>)`:
 1. pushes the user prompt into the history;
 2. if `D != String`, generates a JSON schema with schemars, strips `$schema`/`title` (Gemini rejects them), and sets it as the response format. This is how structured output works;
-3. loops up to 5 iterations (hard-coded). Each iteration sends the whole history plus the toolbox definitions to the LLM. Tool calls and tool results are appended to the history; tool errors are sent back to the LLM as text. A text reply is appended and deserialized into `D` (a `String` result is JSON-quoted first so that `serde_json::from_str` works).
+3. loops up to 5 iterations (hard-coded). Each iteration sends the whole history plus the toolbox definitions to the LLM. If the reply has tool calls (genai 0.7 keeps them next to any text), `into_assistant_message_for_tool_use()` is stored and every call gets a `ToolResponse::from_tool_call`; tool errors, and calls made without a toolbox, are sent back to the LLM as text. Otherwise all text parts are joined, stored and deserialized into `D` (a `String` result is JSON-quoted first so that `serde_json::from_str` works).
 
 History is kept across `run` calls on the same `Agent`, so reusing an agent continues the conversation. Configurable memory and iteration limits live on the unmerged `feature/memory` branch.
 

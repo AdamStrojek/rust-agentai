@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` keeps a conversation history, calls a model, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`.
 
-This guide was written for `agentai` 0.1.5. The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.2.0 (genai 0.7, schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -12,7 +12,7 @@ cargo add tokio --features full
 cargo add anyhow
 ```
 
-Add `serde` (with `derive`) and `schemars` 0.9 (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
+Add `serde` (with `derive`) and `schemars` 1.x (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
 
 ### Feature flags
 
@@ -25,11 +25,11 @@ All features are on by default.
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server over stdio (experimental) |
 
-For a minimal build: `agentai = { version = "0.1", default-features = false, features = ["macros"] }`.
+For a minimal build: `agentai = { version = "0.2", default-features = false, features = ["macros"] }`.
 
 ## Creating an agent
 
-`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument.
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new` and `new_with_url` return `anyhow::Result<Agent>`, because building a genai client can fail.
 
 ```rust
 use agentai::Agent;
@@ -37,19 +37,22 @@ use agentai::Agent;
 // 1. Default genai client. genai picks the provider from the model name
 //    and reads its API key from the provider's usual environment variable
 //    (for example OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
-let mut agent = Agent::new("You are a useful assistant");
+let mut agent = Agent::new("You are a useful assistant")?;
 
 // 2. Any OpenAI-compatible endpoint (OpenAI, GitHub Models, OpenRouter,
 //    LiteLLM, Ollama, ...). Every model name is sent through the OpenAI
-//    adapter to this URL with this key.
+//    adapter to this URL with this key. Names such as "openai/gpt-4.1-mini"
+//    or "vendor/model:free" are passed as they are; only "::" is a genai
+//    namespace, and a foreign one ("anthropic::...") fails with an
+//    adapter mismatch error.
 let mut agent = Agent::new_with_url(
-    "https://models.github.ai/inference/",
-    &std::env::var("GITHUB_TOKEN")?,
+    "https://openrouter.ai/api/v1/",
+    &std::env::var("OPENROUTER_API_KEY")?,
     "You are a useful assistant",
-);
+)?;
 
 // 3. Your own genai::Client, for custom resolvers or default chat options.
-let client = genai::Client::default();
+let client = genai::Client::new()?;
 let mut agent = Agent::new_with_client(client, "You are a useful assistant");
 ```
 
@@ -83,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let api_key = std::env::var("AGENTAI_API_KEY")?;
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant");
+    let mut agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?;
     let answer: String = agent.run(&model, "Why is the sky blue?", None).await?;
     println!("{answer}");
     Ok(())
@@ -95,8 +98,9 @@ async fn main() -> anyhow::Result<()> {
 1. The prompt is appended to the agent's history as a user message.
 2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
 3. The agent loops at most 5 times. This limit is fixed. Each round sends the whole history and the toolbox's tool definitions to the model.
-   - If the model asks for tools, each call is run through `ToolBox::call_tool`. The calls and their results are appended to the history, and the loop continues. When a tool returns an error, its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run.
-   - If the model replies with text, the reply is appended to the history and parsed into `D`.
+   - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are appended to the history, and the loop continues. When a tool returns an error, its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. If `run` got `None` as the toolbox, the model gets a "tool is not available" result instead.
+   - If the reply has only text, all text parts are joined, appended to the history and parsed into `D`.
+   - An empty reply starts the next round.
 4. If there is still no text answer after 5 rounds, `run` returns an error: `Unable to get response in 5 tries`.
 
 The history is kept between `run` calls, so a second `run` on the same agent continues the same conversation. There is no API yet to clear or trim the history: create a new `Agent` (or keep a clone made before the conversation) to start fresh.
@@ -211,15 +215,13 @@ struct EchoToolBox;
 #[async_trait::async_trait]
 impl ToolBox for EchoToolBox {
     fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
-        Ok(vec![Tool {
-            name: "echo".into(),
-            description: Some("Returns the given text".into()),
-            schema: Some(json!({
+        Ok(vec![Tool::new("echo")
+            .with_description("Returns the given text")
+            .with_schema(json!({
                 "type": "object",
                 "properties": { "text": { "type": "string" } },
                 "required": ["text"]
-            })),
-        }])
+            }))])
     }
 
     async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
@@ -234,7 +236,7 @@ impl ToolBox for EchoToolBox {
 }
 ```
 
-Return `ToolError::NoToolFound` for names you do not handle. `ToolBoxSet` relies on it.
+Build `Tool` with `Tool::new(name)` and its `with_*` methods: it is genai's type, its `name` is a `ToolName` (compare with `tool.name.as_str()`), and it has more optional fields. Return `ToolError::NoToolFound` for names you do not handle. `ToolBoxSet` relies on it.
 
 ### Combining toolboxes
 
@@ -303,7 +305,7 @@ use agentai::Agent;
 use genai::adapter::AdapterKind;
 use genai::chat::ChatOptions;
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{ClientBuilder, ModelIden, ServiceTarget};
+use genai::{Client, ModelIden, ServiceTarget};
 
 let target_resolver = ServiceTargetResolver::from_resolver_fn(
     |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
@@ -315,23 +317,22 @@ let target_resolver = ServiceTargetResolver::from_resolver_fn(
     },
 );
 
-let client = ClientBuilder::default()
+let client = Client::builder()
     .with_chat_options(ChatOptions::default().with_max_tokens(2000))
     .with_service_target_resolver(target_resolver)
-    .build();
+    .build()?;
 
 let mut agent = Agent::new_with_client(client, "You are a useful assistant");
 ```
 
-`agentai` 0.1.5 uses genai 0.3, so use genai 0.3 types.
+`agentai` 0.2 uses genai 0.7, so use genai 0.7 types. In genai 0.7 `Client::builder().build()` returns a `Result`. For a fixed endpoint and key, `Client::builder().append_provider_config(AdapterKind::OpenAI, (endpoint, auth))` is simpler than a resolver.
 
 ## Logging
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.1.5
+## Limits in 0.2.0
 
 - The loop limit (5) and the temperature (0.2) cannot be changed.
 - No streaming, and no API to read or reset the history.
-- If the model asks for a tool but `run` got `None` as the toolbox, the agent panics (`todo!`). Pass a toolbox whenever the model might call tools.
-- Only text replies are supported. Other reply kinds return an error.
+- Only text and tool calls are used from a reply. Images or other binary parts returned by the model are ignored.

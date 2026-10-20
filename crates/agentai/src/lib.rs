@@ -20,6 +20,13 @@
 //!
 //! ## What's New
 //!
+//! #### genai 0.7 (version 0.2.0)
+//!
+//! AgentAI now uses [genai](https://crates.io/crates/genai) 0.7, schemars 1.x and Rust edition 2024 (MSRV 1.88).
+//! Models that return text together with tool calls now work: the tool calls are no longer dropped.
+//! `Agent::new` and `Agent::new_with_url` now return `Result`, and a tool call without a toolbox
+//! is answered with an error message to the model instead of a panic.
+//!
 //! #### `ToolBox` (version 0.1.5)
 //!
 //! This release introduces the [`ToolBox`](crate::tool::ToolBox), a new feature providing an easy-to-use interface for supplying tools to AI agents.
@@ -55,7 +62,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let mut agent = Agent::new("You are a useful assistant");
+//!     let mut agent = Agent::new("You are a useful assistant")?;
 //!     let answer: String = agent.run("gpt-4o", "Why is the sky blue?", None).await?;
 //!     println!("Answer: {}", answer);
 //!     Ok(())

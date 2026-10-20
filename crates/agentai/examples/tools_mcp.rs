@@ -1,7 +1,7 @@
-use agentai::tool::mcp::McpToolBox;
 use agentai::Agent;
+use agentai::tool::mcp::McpToolBox;
 use anyhow::Result;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let model =
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
 
     let mcp_tools =
         McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
