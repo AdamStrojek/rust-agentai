@@ -28,6 +28,8 @@
 //! is answered with an error message to the model instead of a panic.
 //! [`McpToolBox`](crate::tool::mcp::McpToolBox) now uses the official MCP SDK (`rmcp`) and can also
 //! connect to running servers over Streamable HTTP.
+//! [`Agent::new_with_provider`](crate::Agent::new_with_provider) binds an agent to any genai provider,
+//! for example the native OpenRouter adapter (`AdapterKind::OpenRouter`), with an explicit API key.
 //!
 //! #### `ToolBox` (version 0.1.5)
 //!

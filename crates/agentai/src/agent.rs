@@ -10,7 +10,8 @@
 
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
-use genai::adapter::AdapterKind;
+/// Provider (genai adapter) selector used by [`Agent::new_with_provider`], re-exported from genai.
+pub use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, ToolCall, ToolResponse};
 use genai::resolver::{AuthData, Endpoint};
 use log::{debug, trace};
@@ -155,17 +156,56 @@ impl Agent {
     ///
     /// Returns an error when the GenAI client cannot be created.
     pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self, AgentError> {
-        let client = Client::builder()
-            .with_adapter_kind(AdapterKind::OpenAI)
-            .append_provider_config(
-                AdapterKind::OpenAI,
-                (
-                    Endpoint::from_owned(base_url.to_string()),
-                    AuthData::from_single(api_key),
-                ),
-            )
-            .build()
-            .map_err(AgentError::ClientInit)?;
+        Self::new_with_provider(AdapterKind::OpenAI, Some(base_url), api_key, system)
+    }
+
+    /// Creates a new `Agent` instance bound to one genai provider (adapter), with an explicit
+    /// API key and, optionally, a custom endpoint.
+    ///
+    /// Every model name is sent through the adapter for `provider`, so bare names work without a
+    /// genai namespace. For example, with [`AdapterKind::OpenRouter`] the model
+    /// `nvidia/nemotron-3.5-super-vl:free` goes to OpenRouter as is. A name with another genai
+    /// namespace, such as `anthropic::claude-sonnet-4-5`, fails with an adapter mismatch error.
+    ///
+    /// ```no_run
+    /// use agentai::{AdapterKind, Agent};
+    ///
+    /// # fn main() -> Result<(), agentai::AgentError> {
+    /// let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    /// // Native OpenRouter adapter with its default endpoint
+    /// let agent = Agent::new_with_provider(AdapterKind::OpenRouter, None, &api_key, "You are helpful")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - genai adapter to use, for example [`AdapterKind::OpenRouter`],
+    ///   [`AdapterKind::Anthropic`] or [`AdapterKind::OpenAI`].
+    /// * `base_url` - Endpoint override. `None` keeps the provider's default endpoint, for
+    ///   example `https://openrouter.ai/api/v1/` for OpenRouter.
+    /// * `api_key` - API key sent with every request.
+    /// * `system` - The system message to initialize the chat history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the GenAI client cannot be created.
+    pub fn new_with_provider(
+        provider: AdapterKind,
+        base_url: Option<&str>,
+        api_key: &str,
+        system: &str,
+    ) -> Result<Self, AgentError> {
+        let auth = AuthData::from_single(api_key);
+        let builder = Client::builder().with_adapter_kind(provider);
+        let builder = match base_url {
+            Some(base_url) => builder.append_provider_config(
+                provider,
+                (Endpoint::from_owned(base_url.to_string()), auth),
+            ),
+            None => builder.append_provider_config(provider, auth),
+        };
+        let client = builder.build().map_err(AgentError::ClientInit)?;
         Ok(Self::new_with_client(client, system))
     }
 
