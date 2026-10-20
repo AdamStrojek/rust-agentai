@@ -112,11 +112,11 @@ async fn main() -> anyhow::Result<()> {
 
 1. The prompt is appended to the agent's history as a user message.
 2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
-3. The agent loops at most 5 times. This limit is fixed. Each round sends the whole history and the toolbox's tool definitions to the model.
+3. The agent calls the model at most `max_iterations` times (5 by default, see Configuration). Each round sends the whole history and the toolbox's tool definitions to the model, with the agent's `ChatOptions`.
    - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are appended to the history, and the loop continues. When a tool returns a recoverable error (`ToolError::is_recoverable()`), its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. A fatal tool error stops the run and `run` returns `AgentError::Tool`; the history stays valid, because every tool call still gets a result. If `run` got `None` as the toolbox, the model gets a "tool is not available" result instead.
    - If the reply has only text, all text parts are joined, appended to the history and parsed into `D`.
    - An empty reply starts the next round.
-4. If there is still no text answer after 5 rounds, `run` returns `AgentError::MaxIterationsReached(5)`.
+4. If there is still no text answer after `max_iterations` rounds, `run` returns `AgentError::MaxIterationsReached(max_iterations)`.
 
 ### Errors
 
@@ -142,7 +142,29 @@ match agent.run::<String>(&model, question, Some(&tools)).await {
 
 The history is kept between `run` calls, so a second `run` on the same agent continues the same conversation. There is no API yet to clear or trim the history: create a new `Agent` (or keep a clone made before the conversation) to start fresh.
 
-Temperature is fixed at 0.2. Other model options can be set as default chat options on a genai client passed to `new_with_client` (see Custom genai client).
+## Configuration
+
+Every constructor returns an agent with the defaults: at most 5 model calls per `run` (`DEFAULT_MAX_ITERATIONS`) and temperature 0.2 (`DEFAULT_TEMPERATURE`). Change them with the builder methods:
+
+```rust
+use agentai::Agent;
+use agentai::genai::chat::{ChatOptions, ReasoningEffort, ToolChoice};
+
+let mut agent = Agent::new("You are a useful assistant")?
+    .with_max_iterations(10)
+    .with_chat_options(
+        ChatOptions::default()
+            .with_temperature(0.0)
+            .with_max_tokens(2000)
+            .with_reasoning_effort(ReasoningEffort::Low)
+            .with_tool_choice(ToolChoice::Auto),
+    );
+```
+
+- `with_max_iterations(n)`: maximum model calls in one `run`. Every reply with tool calls uses one, so raise it for tasks with many tool rounds. `0` makes `run` fail at once with `MaxIterationsReached(0)`.
+- `with_chat_options(options)`: `ChatOptions` sent with every request. They replace the defaults, including temperature 0.2. For structured output, `run` always sets the response format itself. Options set on a custom genai client still apply to the fields these options leave unset.
+- `max_iterations()` and `chat_options()` return the current values.
+- `agentai::genai` re-exports the genai crate, and `agentai::ChatOptions` its options type. You do not need your own `genai` dependency for them.
 
 ## Structured output
 
@@ -383,6 +405,5 @@ let mut agent = Agent::new_with_client(client, "You are a useful assistant");
 
 ## Limits in 0.2.0
 
-- The loop limit (5) and the temperature (0.2) cannot be changed.
 - No streaming, and no API to read or reset the history.
 - Only text and tool calls are used from a reply. Images or other binary parts returned by the model are ignored.

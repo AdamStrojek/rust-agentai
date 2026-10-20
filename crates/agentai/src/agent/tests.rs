@@ -234,3 +234,103 @@ fn recoverable_and_fatal_tool_errors() {
     assert!(!ToolError::Configuration("x".into()).is_recoverable());
     assert!(!ToolError::fatal("x").is_recoverable());
 }
+
+fn request_json(llm: &MockLlm, index: usize) -> Value {
+    serde_json::from_str(&llm.requests()[index]).unwrap()
+}
+
+#[tokio::test]
+async fn max_iterations_can_be_configured() {
+    let llm = MockLlm::start(vec![tool_call_reply(); 2]).await;
+    let toolbox = FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    };
+
+    let err = llm
+        .agent()
+        .with_max_iterations(2)
+        .run::<String>("m", "question", Some(&toolbox))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentError::MaxIterationsReached(2)));
+    assert_eq!(llm.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn zero_iterations_do_not_call_the_model() {
+    let llm = MockLlm::start(vec![]).await;
+
+    let err = llm
+        .agent()
+        .with_max_iterations(0)
+        .run::<String>("m", "question", None)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentError::MaxIterationsReached(0)));
+    assert!(llm.requests().is_empty());
+}
+
+#[tokio::test]
+async fn default_options_send_the_default_temperature() {
+    let llm = MockLlm::start(vec![text_reply("hi")]).await;
+
+    let agent = llm.agent();
+    assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
+    let _: String = agent.clone().run("m", "question", None).await.unwrap();
+
+    assert_eq!(
+        request_json(&llm, 0)["temperature"],
+        json!(DEFAULT_TEMPERATURE)
+    );
+}
+
+#[tokio::test]
+async fn chat_options_are_sent_with_every_request() {
+    use genai::chat::ToolChoice;
+
+    let llm = MockLlm::start(vec![text_reply("hi")]).await;
+    let options = ChatOptions::default()
+        .with_temperature(0.7)
+        .with_max_tokens(123)
+        .with_tool_choice(ToolChoice::Required);
+
+    let _: String = llm
+        .agent()
+        .with_chat_options(options)
+        .run("m", "question", None)
+        .await
+        .unwrap();
+
+    let request = request_json(&llm, 0);
+    assert_eq!(request["temperature"], json!(0.7));
+    let max_tokens = request
+        .get("max_tokens")
+        .or_else(|| request.get("max_completion_tokens"));
+    assert_eq!(max_tokens, Some(&json!(123)));
+    assert_eq!(request["tool_choice"], json!("required"));
+}
+
+#[tokio::test]
+async fn structured_output_keeps_custom_options() {
+    #[derive(Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct Answer {
+        value: u32,
+    }
+
+    let llm = MockLlm::start(vec![text_reply(r#"{"value": 7}"#)]).await;
+
+    let answer: Answer = llm
+        .agent()
+        .with_chat_options(ChatOptions::default().with_temperature(0.0))
+        .run("m", "question", None)
+        .await
+        .unwrap();
+
+    assert_eq!(answer.value, 7);
+    let request = request_json(&llm, 0);
+    assert_eq!(request["temperature"], json!(0.0));
+    assert!(request.get("response_format").is_some());
+}

@@ -30,6 +30,10 @@
 //! connect to running servers over Streamable HTTP.
 //! [`Agent::new_with_provider`](crate::Agent::new_with_provider) binds an agent to any genai provider,
 //! for example the native OpenRouter adapter (`AdapterKind::OpenRouter`), with an explicit API key.
+//! [`Agent::with_max_iterations`](crate::Agent::with_max_iterations) and
+//! [`Agent::with_chat_options`](crate::Agent::with_chat_options) configure the loop limit and the model
+//! options (temperature, max tokens, tool choice, reasoning effort, ...). The `genai` crate is
+//! re-exported as `agentai::genai`.
 //!
 //! #### `ToolBox` (version 0.1.5)
 //!
@@ -118,6 +122,10 @@
 )]
 
 pub mod agent;
+/// The [genai](https://crates.io/crates/genai) crate `agentai` is built on, re-exported so you can use
+/// its types (`ChatOptions`, `ToolChoice`, `ReasoningEffort`, custom clients, ...) without
+/// adding a matching `genai` dependency.
+pub use genai;
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.

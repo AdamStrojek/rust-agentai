@@ -43,6 +43,10 @@ is answered with an error message to the model instead of a panic.
 connect to running servers over Streamable HTTP.
 `Agent::new_with_provider` binds an agent to any genai provider,
 for example the native OpenRouter adapter (`AdapterKind::OpenRouter`), with an explicit API key.
+`Agent::with_max_iterations` and
+`Agent::with_chat_options` configure the loop limit and the model
+options (temperature, max tokens, tool choice, reasoning effort, ...). The `genai` crate is
+re-exported as `agentai::genai`.
 
 #### `ToolBox` (version 0.1.5)
 
