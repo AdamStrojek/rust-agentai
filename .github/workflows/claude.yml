@@ -46,7 +46,8 @@ jobs:
           label_trigger: claude
           claude_args: |
             --model claude-sonnet-5-5
-            --allowedTools "Bash(cargo build:*),Bash(cargo check:*),Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo doc:*),Bash(cargo run --example:*)"
+            --allowedTools "Bash(cargo build:*),Bash(cargo check:*),Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo doc:*),Bash(cargo run --example:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr view:*)"
+            --append-system-prompt "Pull requests: never open one on your own. When you finish work on a branch, end your comment with a short summary of the changes and verification and ask the maintainer to review the branch, then stop. Open a pull request with gh pr create only when the triggering comment from the maintainer explicitly approves it (for example '@claude open PR' or '@claude create the pull request'). First check with gh pr list --head <branch> that no PR exists for that branch. Use the <type>(<scope>): <message> title format from CONTRIBUTING.md, write the description in English, and include 'Closes #<issue>' when the work comes from an issue."
         env:
           AGENTAI_BASE_URL: https://openrouter.ai/api/v1/
           AGENTAI_MODEL: nvidia/nemotron-3.5-super-vl:free
