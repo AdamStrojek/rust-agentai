@@ -1,0 +1,337 @@
+# agentai
+
+> `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` keeps a conversation history, calls a model, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`.
+
+This guide was written for `agentai` 0.1.5. The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+
+## Installation
+
+```bash
+cargo add agentai
+cargo add tokio --features full
+cargo add anyhow
+```
+
+Add `serde` (with `derive`) and `schemars` 0.9 (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
+
+### Feature flags
+
+All features are on by default.
+
+| Feature | Enables |
+|---|---|
+| `macros` | the `#[toolbox]` attribute (`agentai::tool::toolbox`) |
+| `tools-buildin` | `agentai::tool::buildin`: date, time, timezone and location tools (turns on `macros`) |
+| `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
+| `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server over stdio (experimental) |
+
+For a minimal build: `agentai = { version = "0.1", default-features = false, features = ["macros"] }`.
+
+## Creating an agent
+
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument.
+
+```rust
+use agentai::Agent;
+
+// 1. Default genai client. genai picks the provider from the model name
+//    and reads its API key from the provider's usual environment variable
+//    (for example OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+let mut agent = Agent::new("You are a useful assistant");
+
+// 2. Any OpenAI-compatible endpoint (OpenAI, GitHub Models, OpenRouter,
+//    LiteLLM, Ollama, ...). Every model name is sent through the OpenAI
+//    adapter to this URL with this key.
+let mut agent = Agent::new_with_url(
+    "https://models.github.ai/inference/",
+    &std::env::var("GITHUB_TOKEN")?,
+    "You are a useful assistant",
+);
+
+// 3. Your own genai::Client, for custom resolvers or default chat options.
+let client = genai::Client::default();
+let mut agent = Agent::new_with_client(client, "You are a useful assistant");
+```
+
+`Agent` implements `Clone`. A clone copies the conversation history so far, so you can branch a conversation.
+
+## Asking a question
+
+```rust
+pub async fn run<D>(
+    &mut self,
+    model: &str,
+    prompt: &str,
+    toolbox: Option<&dyn ToolBox>,
+) -> anyhow::Result<D>
+where
+    D: serde::de::DeserializeOwned + schemars::JsonSchema + 'static;
+```
+
+- `model` is passed to genai as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `new_with_url`, the endpoint's own name such as `"openai/gpt-4.1-mini"`. You can pick a different model on every call.
+- The return type selects the output mode, so always annotate it: `let answer: String = ...` or `agent.run::<String>(...)`.
+- Pass `None` when no tools are needed.
+
+Complete program:
+
+```rust
+use agentai::Agent;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let base_url = std::env::var("AGENTAI_BASE_URL")?;
+    let api_key = std::env::var("AGENTAI_API_KEY")?;
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("openai/gpt-4.1-mini".to_string());
+
+    let mut agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant");
+    let answer: String = agent.run(&model, "Why is the sky blue?", None).await?;
+    println!("{answer}");
+    Ok(())
+}
+```
+
+### How `run` works
+
+1. The prompt is appended to the agent's history as a user message.
+2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
+3. The agent loops at most 5 times. This limit is fixed. Each round sends the whole history and the toolbox's tool definitions to the model.
+   - If the model asks for tools, each call is run through `ToolBox::call_tool`. The calls and their results are appended to the history, and the loop continues. When a tool returns an error, its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run.
+   - If the model replies with text, the reply is appended to the history and parsed into `D`.
+4. If there is still no text answer after 5 rounds, `run` returns an error: `Unable to get response in 5 tries`.
+
+The history is kept between `run` calls, so a second `run` on the same agent continues the same conversation. There is no API yet to clear or trim the history: create a new `Agent` (or keep a clone made before the conversation) to start fresh.
+
+Temperature is fixed at 0.2. Other model options can be set as default chat options on a genai client passed to `new_with_client` (see Custom genai client).
+
+## Structured output
+
+Any type that implements `Deserialize` and `JsonSchema` can be the answer type. `agentai` generates its JSON schema with schemars, removes the top-level `$schema` and `title` keys (Gemini rejects them), and asks the model to answer in that format. The reply is then parsed with `serde_json`.
+
+```rust
+use agentai::Agent;
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+#[derive(Deserialize, JsonSchema, Debug)]
+struct Answer {
+    /// In this field provide your thinking steps
+    #[serde(rename = "_thinking")]
+    thinking: String,
+
+    /// In this field provide answer
+    answer: String,
+}
+
+let answer: Answer = agent.run(&model, "Why is the sky blue?", None).await?;
+println!("{}", answer.answer);
+```
+
+Tips:
+
+- Doc comments on fields become field descriptions in the schema, and the model reads them as instructions.
+- A first field for reasoning (here `_thinking`) tends to give better answers and helps debugging.
+- The model and provider must support JSON-schema response formats. If the reply does not match the type, `run` returns a `serde_json` error.
+
+## Tools
+
+Tools let the model call your code. They are grouped in toolboxes. Everything lives in `agentai::tool`:
+
+- `ToolBox`: a trait with `tools_definitions()` and `call_tool(name, arguments)`.
+- `Tool`: a tool definition (`name`, optional `description`, optional JSON `schema`), re-exported from `genai::chat::Tool`.
+- `ToolResult`: `Result<String, ToolError>`. A tool always returns text for the model.
+- `ToolError`: `ToolsDefinitionNotReady`, `NoToolFound(String)`, `LLMError(String)` (a message meant for the model, such as a bad argument), `ExecutionError`, and `Other(anyhow::Error)`.
+- `ToolBoxSet`: combines several toolboxes into one.
+- `toolbox`: the attribute macro that writes the `ToolBox` impl for you.
+
+### Writing tools with `#[toolbox]`
+
+Put `#[toolbox]` on an `impl` block and `#[tool]` on each method to expose:
+
+```rust
+use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+
+struct WeatherToolBox {
+    default_unit: String,
+}
+
+#[toolbox]
+impl WeatherToolBox {
+    pub fn new() -> Self {
+        Self { default_unit: "celsius".into() }
+    }
+
+    /// Returns the current temperature for a city.
+    /// Use it to answer questions like "How warm is it in Paris?".
+    #[tool]
+    async fn get_temperature(
+        &self,
+        /// City name, for example "Paris"
+        city: String,
+    ) -> ToolResult {
+        Ok(format!("It is 21 degrees {} in {city}", self.default_unit))
+    }
+
+    /// Converts Celsius to Fahrenheit.
+    #[tool(name = "celsius_to_fahrenheit")]
+    fn convert(
+        &self,
+        /// Temperature in Celsius
+        celsius: f64,
+    ) -> ToolResult {
+        Ok(format!("{}", celsius * 9.0 / 5.0 + 32.0))
+    }
+}
+
+let tools = WeatherToolBox::new();
+let answer: String = agent.run(&model, "How warm is it in Paris in Fahrenheit?", Some(&tools)).await?;
+```
+
+Rules:
+
+- The tool name is the method name. Override it with `#[tool(name = "...")]`. Names must be unique in the toolbox.
+- The method's doc comment is the tool description. Parameter doc comments become parameter descriptions. Write them for the model: say when to use the tool and what each argument means.
+- Each tool must take `&self` and return `ToolResult`. Both `fn` and `async fn` work.
+- Every parameter must implement `serde::Deserialize` and `schemars::JsonSchema`. Attributes on parameters, such as `#[serde(...)]` or `#[schemars(...)]`, are kept.
+- Methods without `#[tool]` (constructors, helpers) stay ordinary methods. An `impl` block with no `#[tool]` method does not compile.
+- `Tool`, `ToolBox`, `ToolError` and `ToolResult` must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
+- The type must be `Send + Sync + 'static`.
+
+Error handling in generated toolboxes: if the arguments do not deserialize, or the method returns any `Err` (including `ToolError::LLMError`), the generated code prints the details to stderr and returns `ToolError::ExecutionError`. The model then sees only `Tool execution failed`, not your message. This also applies to the ready-made toolboxes below, which are written with `#[toolbox]`. To give the model a useful explanation (for example "unknown city"), return `Ok` with that text, or implement `ToolBox` by hand.
+
+### Implementing `ToolBox` by hand
+
+Do this when tools are only known at run time or you need full control over errors. The trait uses `async_trait`.
+
+```rust
+use agentai::tool::{Tool, ToolBox, ToolError, ToolResult};
+use serde_json::{json, Value};
+
+struct EchoToolBox;
+
+#[async_trait::async_trait]
+impl ToolBox for EchoToolBox {
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        Ok(vec![Tool {
+            name: "echo".into(),
+            description: Some("Returns the given text".into()),
+            schema: Some(json!({
+                "type": "object",
+                "properties": { "text": { "type": "string" } },
+                "required": ["text"]
+            })),
+        }])
+    }
+
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+        match tool_name.as_str() {
+            "echo" => match arguments["text"].as_str() {
+                Some(text) => Ok(text.to_string()),
+                None => Err(ToolError::LLMError("Argument `text` must be a string".into())),
+            },
+            _ => Err(ToolError::NoToolFound(tool_name)),
+        }
+    }
+}
+```
+
+Return `ToolError::NoToolFound` for names you do not handle. `ToolBoxSet` relies on it.
+
+### Combining toolboxes
+
+```rust
+use agentai::tool::ToolBoxSet;
+
+let mut tools = ToolBoxSet::new();
+tools.add_tool(WebSearchToolBox::new(&brave_api_key));
+tools.add_tool(WebFetchToolBox::new());
+
+let answer: String = agent.run(&model, question, Some(&tools)).await?;
+```
+
+`tools_definitions` joins the definitions of all toolboxes. `call_tool` tries the toolboxes in the order they were added and uses the first one that does not return `NoToolFound`. If two toolboxes define the same tool name, the first one wins.
+
+## Ready-made toolboxes
+
+### Date, time and location (`tools-buildin`)
+
+```rust
+use agentai::tool::buildin::{CurrentDateAndTimeToolBox, LocationToolBox};
+```
+
+`CurrentDateAndTimeToolBox {}` gives the model these tools:
+
+- `get_today_date`: today's date as `YYYY-MM-DD`, in the system's local timezone.
+- `get_current_time`: the local time as `HH:MM:SS`.
+- `get_current_datetime`: the local date and time in RFC 3339.
+- `get_day_of_week(date)`: the weekday of a `YYYY-MM-DD` date.
+- `get_time_in_timezone(timezone)`: the current time in an IANA timezone such as `Europe/Warsaw`.
+- `convert_time(source_timezone, time, target_timezone)`: converts an `HH:MM` time between IANA timezones.
+
+`LocationToolBox` has `get_location(location)`, which looks up a place or address with the OpenStreetMap Nominatim API and returns its display name, latitude and longitude. Follow the Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/
+
+### Web (`tools-web`)
+
+```rust
+use agentai::tool::web::{WebFetchToolBox, WebSearchToolBox};
+
+let search = WebSearchToolBox::new(&std::env::var("BRAVE_API_KEY")?); // tool: web_search(query)
+let fetch = WebFetchToolBox::new();                                    // tool: web_fetch(url)
+```
+
+`web_search` queries the Brave Search API and returns result titles, URLs and descriptions. `web_fetch` downloads a URL and returns the body as text.
+
+### MCP servers (`mcp-client`, experimental)
+
+`McpToolBox` starts an MCP server as a child process, talks to it over stdio, and exposes all of its tools.
+
+```rust
+use agentai::tool::mcp::McpToolBox;
+
+// command, arguments, optional environment variables (Option<HashMap<String, String>>)
+let mcp_tools = McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
+let answer: String = agent.run(&model, "What time is it in Poland?", Some(&mcp_tools)).await?;
+```
+
+The server's tool list is read once in `new`. Only stdio servers are supported.
+
+## Custom genai client
+
+Build a `genai::Client` yourself to change routing, authentication or default chat options, then pass it to `Agent::new_with_client`. This example sends every model to GitHub Models through the OpenAI adapter and limits the answer length:
+
+```rust
+use agentai::Agent;
+use genai::adapter::AdapterKind;
+use genai::chat::ChatOptions;
+use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
+use genai::{ClientBuilder, ModelIden, ServiceTarget};
+
+let target_resolver = ServiceTargetResolver::from_resolver_fn(
+    |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
+        let endpoint = Endpoint::from_static("https://models.github.ai/inference/");
+        let auth = AuthData::from_env("AGENTAI_API_KEY");
+        let ServiceTarget { model, .. } = service_target;
+        let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
+        Ok(ServiceTarget { endpoint, auth, model })
+    },
+);
+
+let client = ClientBuilder::default()
+    .with_chat_options(ChatOptions::default().with_max_tokens(200))
+    .with_service_target_resolver(target_resolver)
+    .build();
+
+let mut agent = Agent::new_with_client(client, "You are a useful assistant");
+```
+
+`agentai` 0.1.5 uses genai 0.3, so use genai 0.3 types.
+
+## Logging
+
+`agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
+
+## Limits in 0.1.5
+
+- The loop limit (5) and the temperature (0.2) cannot be changed.
+- No streaming, and no API to read or reset the history.
+- If the model asks for a tool but `run` got `None` as the toolbox, the agent panics (`todo!`). Pass a toolbox whenever the model might call tools.
+- Only text replies are supported. Other reply kinds return an error.
