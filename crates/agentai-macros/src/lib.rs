@@ -376,10 +376,11 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 };
 
                 tool_definitions.extend(quote! {
-                    Tool {
-                        name: #tool_name.to_string(),
-                        description: #description_token,
-                        schema: #schema_token,
+                    {
+                        let mut tool = Tool::new(#tool_name);
+                        tool.description = #description_token;
+                        tool.schema = #schema_token;
+                        tool
                     },
                 });
 

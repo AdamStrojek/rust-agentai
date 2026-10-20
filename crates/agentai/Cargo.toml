@@ -17,7 +17,7 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
 agentai-macros = { path = "../agentai-macros", version = "0.1", optional = true }
-genai = "0.3.5"
+genai = "0.7"
 anyhow = "1.0.104"
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }

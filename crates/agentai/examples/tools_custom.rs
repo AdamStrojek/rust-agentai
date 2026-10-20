@@ -35,7 +35,7 @@ async fn main() -> Result<(), Error> {
     let model =
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM);
+    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
 
     let answer: String = agent.run(&model, question, Some(&toolbox)).await?;
 

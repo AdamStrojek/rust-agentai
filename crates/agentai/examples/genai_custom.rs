@@ -2,7 +2,7 @@ use agentai::Agent;
 use anyhow::Result;
 use genai::chat::ChatOptions;
 use genai::{
-    ClientBuilder, ModelIden, ServiceTarget,
+    Client, ModelIden, ServiceTarget,
     adapter::AdapterKind,
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
 };
@@ -45,10 +45,10 @@ async fn main() -> Result<()> {
         .with_temperature(0.0)
         // Reasoning models spend part of this budget on thinking, so keep it generous
         .with_max_tokens(2000);
-    let client = ClientBuilder::default()
+    let client = Client::builder()
         .with_chat_options(chat_options)
         .with_service_target_resolver(target_resolver)
-        .build();
+        .build()?;
 
     info!("Question: {}", question);
 
