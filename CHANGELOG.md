@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.5...agentai-v0.2.0) - 2026-10-20
+
+### Breaking changes
+
+Steps to migrate from 0.1.x:
+
+- **Toolchain and dependencies**
+  - Minimum Rust version is 1.88, and the crates use edition 2024.
+  - `genai` 0.3 → 0.7 (also re-exported as `agentai::genai`). Code that builds its own genai client must follow genai's migration guides; for example, `Client::builder().build()` now returns `Result` and `Client::default()` is gone.
+  - Answer types and tool parameter types must derive `JsonSchema` from `schemars` 1.x (was 0.9).
+  - `reqwest` 0.13 with rustls by default (was native-tls).
+- **`Agent` constructors and `run`**
+  - `Agent::new` and `Agent::new_with_url` return `Result<Agent, AgentError>`. Add `?`.
+  - `Agent::run` returns `Result<D, AgentError>` instead of `anyhow::Result<D>`. `?` inside an `anyhow` function keeps working. To handle errors, match on `AgentError` (`ClientInit`, `Llm`, `Schema`, `InvalidAnswer`, `MaxIterationsReached`, `Tool`), and use `is_transient()` to decide on retries.
+  - With `new_with_url`, model names with a foreign genai namespace (for example `anthropic::...`) now fail with an adapter mismatch error. Plain names such as `vendor/model:free` work as before.
+- **Tools**
+  - `agentai::tool::Tool` is genai 0.7's `Tool`: `name` is a `ToolName` (compare with `.as_str()`), and the struct has more fields. Build it with `Tool::new(name).with_description(..).with_schema(..)` instead of a struct literal.
+  - `ToolError` variants:
+    - `NoToolFound` is renamed to `NotFound`;
+    - `LLMError` is replaced by `InvalidArguments` or `Failed`;
+    - `ExecutionError`, `ToolsDefinitionNotReady` and `Other(anyhow::Error)` are removed. Use `Configuration`, `Fatal`, or `ToolError::fatal(err)`.
+  - `ToolError` is `#[non_exhaustive]`, and there is no `From<anyhow::Error>` any more. Map errors inside tool methods to a `ToolError`.
+  - Fatal tool errors (`Configuration`, `Fatal`) now stop `Agent::run` with `AgentError::Tool`. Recoverable errors (`NotFound`, `InvalidArguments`, `Failed`) are still sent to the model.
+  - `#[toolbox]` no longer replaces errors with `ExecutionError`. Errors returned by a tool reach the model as they are, and invalid arguments become `InvalidArguments`.
+  - `McpToolBox::call_tool` returns `NotFound` for tools the server does not have, and `Failed` for errors the server reports (`isError`). Before, it returned `Ok` with the error text.
+
+### New features
+- *(macros)* add #[tool(strict)] for strict tool schemas ([#61](https://github.com/AdamStrojek/rust-agentai/pull/61)) (by @AdamStrojek)
+- *(agent)* configurable max_iterations and ChatOptions ([#59](https://github.com/AdamStrojek/rust-agentai/pull/59)) (by @AdamStrojek)
+- *(agent)* add Agent::new_with_provider and native OpenRouter support ([#58](https://github.com/AdamStrojek/rust-agentai/pull/58)) (by @AdamStrojek)
+- *(error)* [**breaking**] replace anyhow with typed AgentError and ToolError ([#56](https://github.com/AdamStrojek/rust-agentai/pull/56)) (by @AdamStrojek)
+- *(mcp)* replace mcp_client_rs with the official rmcp SDK ([#53](https://github.com/AdamStrojek/rust-agentai/pull/53)) (by @AdamStrojek)
+- [**breaking**] upgrade genai to 0.7, schemars 1, reqwest 0.13 and edition 2024 ([#52](https://github.com/AdamStrojek/rust-agentai/pull/52)) (by @AdamStrojek) - #52
+- mark Send and Sync on Toolbox trait ([#32](https://github.com/AdamStrojek/rust-agentai/pull/32)) (by @fvanzee) - #32
+
+### Fixes
+- *(tools)* replace deprecated time format parsing in buildin tools ([#41](https://github.com/AdamStrojek/rust-agentai/pull/41)) (by @AdamStrojek)
+
+### Miscellaneous
+- add project logo ([#54](https://github.com/AdamStrojek/rust-agentai/pull/54)) (by @AdamStrojek) - #54
+- run LLM tests against a free OpenRouter model ([#43](https://github.com/AdamStrojek/rust-agentai/pull/43)) (by @AdamStrojek) - #43
+- *(deps)* upgrade agentai-macros to syn 3 ([#60](https://github.com/AdamStrojek/rust-agentai/pull/60)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+* @fvanzee
+
 ## [0.1.5](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.4...agentai-v0.1.5) - 2025-07-20
 
 ### New features
