@@ -147,7 +147,9 @@ impl Agent {
         if !is_answer_string {
             // If answer type is more complex then add response format to request options
             let mut response_schema = serde_json::to_value(schema_for!(D))?;
-            let obj = response_schema.as_object_mut().unwrap();
+            let obj = response_schema
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("JSON schema of the answer type is not an object"))?;
             // Schemars attaches additional fields and not every LLM accepts them (Gemini)
             obj.remove("$schema");
             obj.remove("title");
@@ -225,7 +227,8 @@ impl Agent {
 
             let texts = chat_resp.content.into_texts();
             if texts.is_empty() {
-                // Nothing usable in this response, ask again
+                // Nothing usable in this response (for example only reasoning), ask again
+                debug!("Agent iteration {iteration}: response has no text and no tool calls");
                 continue;
             }
             // Structured output may be split across several text parts
