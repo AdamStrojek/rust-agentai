@@ -29,7 +29,7 @@ For a minimal build: `agentai = { version = "0.2", default-features = false, fea
 
 ## Creating an agent
 
-`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new` and `new_with_url` return `anyhow::Result<Agent>`, because building a genai client can fail.
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new` and `new_with_url` return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building a genai client can fail.
 
 ```rust
 use agentai::Agent;
@@ -66,7 +66,7 @@ pub async fn run<D>(
     model: &str,
     prompt: &str,
     toolbox: Option<&dyn ToolBox>,
-) -> anyhow::Result<D>
+) -> Result<D, AgentError>
 where
     D: serde::de::DeserializeOwned + schemars::JsonSchema + 'static;
 ```
@@ -98,10 +98,32 @@ async fn main() -> anyhow::Result<()> {
 1. The prompt is appended to the agent's history as a user message.
 2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
 3. The agent loops at most 5 times. This limit is fixed. Each round sends the whole history and the toolbox's tool definitions to the model.
-   - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are appended to the history, and the loop continues. When a tool returns an error, its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. If `run` got `None` as the toolbox, the model gets a "tool is not available" result instead.
+   - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are appended to the history, and the loop continues. When a tool returns a recoverable error (`ToolError::is_recoverable()`), its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. A fatal tool error stops the run and `run` returns `AgentError::Tool`; the history stays valid, because every tool call still gets a result. If `run` got `None` as the toolbox, the model gets a "tool is not available" result instead.
    - If the reply has only text, all text parts are joined, appended to the history and parsed into `D`.
    - An empty reply starts the next round.
-4. If there is still no text answer after 5 rounds, `run` returns an error: `Unable to get response in 5 tries`.
+4. If there is still no text answer after 5 rounds, `run` returns `AgentError::MaxIterationsReached(5)`.
+
+### Errors
+
+`Agent` returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built with `thiserror`):
+
+- `ClientInit(genai::Error)`: the genai client could not be built (`new`, `new_with_url`).
+- `Llm(genai::Error)`: the request to the model failed (network, HTTP status, provider error).
+- `Schema(String)`: the JSON schema of `D` could not be generated or is not an object.
+- `InvalidAnswer { raw, source }`: the final answer could not be parsed into `D`; `raw` is the text of the model.
+- `MaxIterationsReached(usize)`: no final answer after that many rounds.
+- `Tool { tool, source }`: a tool failed with a fatal `ToolError`.
+
+`AgentError::is_transient()` is true for `Llm` errors that may succeed on a retry: HTTP 408, 425, 429 and 5xx, timeouts and connection failures.
+
+```rust
+match agent.run::<String>(&model, question, Some(&tools)).await {
+    Ok(answer) => println!("{answer}"),
+    Err(err) if err.is_transient() => { /* retry later */ }
+    Err(AgentError::InvalidAnswer { raw, .. }) => eprintln!("unexpected answer: {raw}"),
+    Err(err) => return Err(err.into()),
+}
+```
 
 The history is kept between `run` calls, so a second `run` on the same agent continues the same conversation. There is no API yet to clear or trim the history: create a new `Agent` (or keep a clone made before the conversation) to start fresh.
 
@@ -143,7 +165,9 @@ Tools let the model call your code. They are grouped in toolboxes. Everything li
 - `ToolBox`: a trait with `tools_definitions()` and `call_tool(name, arguments)`.
 - `Tool`: a tool definition (`name`, optional `description`, optional JSON `schema`), re-exported from `genai::chat::Tool`.
 - `ToolResult`: `Result<String, ToolError>`. A tool always returns text for the model.
-- `ToolError`: `ToolsDefinitionNotReady`, `NoToolFound(String)`, `LLMError(String)` (a message meant for the model, such as a bad argument), `ExecutionError`, and `Other(anyhow::Error)`.
+- `ToolError` (`#[non_exhaustive]`) separates errors the model can fix from errors that end the run. `is_recoverable()` tells them apart.
+  - Recoverable, sent to the model as the tool result while the loop continues: `NotFound(String)` (the tool is not in this toolbox), `InvalidArguments(String)` (missing, malformed or invalid arguments), `Failed(String)` (the tool ran but failed in a way the model can react to, such as an HTTP 404).
+  - Fatal, `Agent::run` stops and returns `AgentError::Tool`: `Configuration(String)` (missing API key, server not running, definitions not ready), `Fatal(Box<dyn Error + Send + Sync>)` (anything else; build it with `ToolError::fatal(err)`).
 - `ToolBoxSet`: combines several toolboxes into one.
 - `toolbox`: the attribute macro that writes the `ToolBox` impl for you.
 
@@ -200,7 +224,7 @@ Rules:
 - `Tool`, `ToolBox`, `ToolError` and `ToolResult` must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
 - The type must be `Send + Sync + 'static`.
 
-Error handling in generated toolboxes: if the arguments do not deserialize, or the method returns any `Err` (including `ToolError::LLMError`), the generated code prints the details to stderr and returns `ToolError::ExecutionError`. The model then sees only `Tool execution failed`, not your message. This also applies to the ready-made toolboxes below, which are written with `#[toolbox]`. To give the model a useful explanation (for example "unknown city"), return `Ok` with that text, or implement `ToolBox` by hand.
+Error handling in generated toolboxes: if the arguments do not deserialize, the generated code returns `ToolError::InvalidArguments`, so the model can fix them. Errors returned by your method pass through unchanged: return `ToolError::InvalidArguments` or `ToolError::Failed` with a helpful message (for example "unknown city") to let the model retry, or `ToolError::Configuration` / `ToolError::fatal(err)` to stop the run.
 
 ### Implementing `ToolBox` by hand
 
@@ -228,15 +252,15 @@ impl ToolBox for EchoToolBox {
         match tool_name.as_str() {
             "echo" => match arguments["text"].as_str() {
                 Some(text) => Ok(text.to_string()),
-                None => Err(ToolError::LLMError("Argument `text` must be a string".into())),
+                None => Err(ToolError::InvalidArguments("`text` must be a string".into())),
             },
-            _ => Err(ToolError::NoToolFound(tool_name)),
+            _ => Err(ToolError::NotFound(tool_name)),
         }
     }
 }
 ```
 
-Build `Tool` with `Tool::new(name)` and its `with_*` methods: it is genai's type, its `name` is a `ToolName` (compare with `tool.name.as_str()`), and it has more optional fields. Return `ToolError::NoToolFound` for names you do not handle. `ToolBoxSet` relies on it.
+Build `Tool` with `Tool::new(name)` and its `with_*` methods: it is genai's type, its `name` is a `ToolName` (compare with `tool.name.as_str()`), and it has more optional fields. Return `ToolError::NotFound` for names you do not handle. `ToolBoxSet` relies on it.
 
 ### Combining toolboxes
 
@@ -250,7 +274,7 @@ tools.add_tool(WebFetchToolBox::new());
 let answer: String = agent.run(&model, question, Some(&tools)).await?;
 ```
 
-`tools_definitions` joins the definitions of all toolboxes. `call_tool` tries the toolboxes in the order they were added and uses the first one that does not return `NoToolFound`. If two toolboxes define the same tool name, the first one wins.
+`tools_definitions` joins the definitions of all toolboxes. `call_tool` tries the toolboxes in the order they were added and uses the first one that does not return `NotFound`. If two toolboxes define the same tool name, the first one wins.
 
 ## Ready-made toolboxes
 
@@ -302,8 +326,9 @@ let answer: String = agent.run(&model, "What time is it in Poland?", Some(&mcp_t
 
 The server's tool list is read once, when the toolbox is created.
 
-- **Unknown tools:** a tool name the server does not offer returns `ToolError::NoToolFound`, so an `McpToolBox` can sit anywhere in a `ToolBoxSet`.
-- **Tool errors:** when the server reports a tool error (`isError`), the call returns `ToolError::LLMError` with the server's message, which the agent passes to the model.
+- **Unknown tools:** a tool name the server does not offer returns `ToolError::NotFound`, so an `McpToolBox` can sit anywhere in a `ToolBoxSet`.
+- **Tool errors:** when the server reports a tool error (`isError`), the call returns `ToolError::Failed` with the server's message, which the agent passes to the model. A closed or broken transport returns `ToolError::Fatal` and stops the run.
+- **Connecting:** `new`, `new_http` and `new_http_with_bearer` return `Result<McpToolBox, ToolError>`; a server that cannot be started or reached is `ToolError::Configuration`.
 - **Results:** text blocks of the result are joined with newlines. If there is no text, the structured content is returned as JSON. Images, audio and embedded resources are not forwarded; each becomes a placeholder such as `[image omitted]`.
 
 ## Custom genai client

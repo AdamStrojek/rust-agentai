@@ -106,36 +106,60 @@ pub trait ToolBox: Send + Sync + 'static {
     async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult;
 }
 
-#[derive(Error, Debug)]
-/// Represents potential errors that can occur when working with `ToolBox`es and tools.
+/// Errors that can occur when working with `ToolBox`es and tools.
 ///
-/// These errors cover scenarios like failing to retrieve tool definitions, attempting to call
-/// a non-existent tool, or encountering an issue during tool execution.
+/// Variants fall into two groups, and [`ToolError::is_recoverable`] tells them apart:
+///
+/// - **Recoverable** errors ([`NotFound`](ToolError::NotFound),
+///   [`InvalidArguments`](ToolError::InvalidArguments), [`Failed`](ToolError::Failed)) are
+///   something the model can react to, for example by calling the tool again with fixed
+///   arguments. [`Agent::run`](crate::agent::Agent::run) sends their message to the model as the
+///   tool result and the loop continues.
+/// - **Fatal** errors ([`Configuration`](ToolError::Configuration), [`Fatal`](ToolError::Fatal))
+///   cannot be fixed by calling again, for example a missing API key or a dead MCP server.
+///   `Agent::run` stops and returns them as [`AgentError::Tool`](crate::agent::AgentError::Tool).
+#[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ToolError {
-    /// Indicates that the `ToolBox`'s tool definitions are not yet available or ready to be retrieved.
-    /// This could happen if the definitions are generated on the fly and required information is missing,
-    /// or if the toolbox was not properly initialized or created.
-    #[error("Tool definitions are not ready")]
-    ToolsDefinitionNotReady,
-    /// Indicates that a requested tool could not be found within the `ToolBox`.
-    /// This occurs when the `tool_name` provided to `call_tool` does not match any
-    /// registered tool in the box.
-    #[error("Tool named '{0}' not found")]
-    NoToolFound(String),
-    /// Indicates that returned error should be handled by LLM, for example it may be
-    /// missing parameter or malformed data. Tool is responsible to provide
-    /// human readable error message, this message will be passed to the LLM
+    // -- Recoverable: sent to the model as the tool result; the loop continues
+    /// The requested tool does not exist in this `ToolBox`. This is the signal for
+    /// [`ToolBoxSet`] to try the next toolbox.
+    #[error("tool '{0}' not found")]
+    NotFound(String),
+    /// Arguments are missing, malformed or invalid (wrong timezone, bad date format, ...).
+    /// The message is passed to the model, so it should explain what to fix.
+    #[error("invalid arguments: {0}")]
+    InvalidArguments(String),
+    /// The tool ran but failed in a way the model can react to (HTTP 404, an MCP `isError`
+    /// result, ...). The message is passed to the model.
     #[error("{0}")]
-    LLMError(String),
-    /// Indicates a failure occurred during the execution of a specific tool.
-    /// This is a general error variant that can encapsulate various runtime issues
-    /// encountered while the tool's logic is running.
-    #[error("Tool execution failed")]
-    ExecutionError,
-    /// Represents any other underlying error that occurred, wrapped from the `anyhow::Error` type.
-    /// This allows for propagating errors from dependencies or other parts of the system.
+    Failed(String),
+
+    // -- Fatal: `Agent::run` stops and returns `AgentError::Tool`
+    /// Configuration problem that retrying cannot fix: a missing API key, a server that is
+    /// not running, tool definitions that are not ready.
+    #[error("tool is not configured correctly: {0}")]
+    Configuration(String),
+    /// Any other unexpected error.
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Fatal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl ToolError {
+    /// Creates a [`ToolError::Fatal`] from any error.
+    pub fn fatal(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self::Fatal(err.into())
+    }
+
+    /// Returns `true` when the model can react to the error, so
+    /// [`Agent::run`](crate::agent::Agent::run) sends it back as the tool result and continues.
+    /// Returns `false` for errors that end the run.
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            Self::NotFound(_) | Self::InvalidArguments(_) | Self::Failed(_)
+        )
+    }
 }
 
 /// A collection of `ToolBox` instances.
@@ -191,7 +215,7 @@ impl ToolBox for ToolBoxSet {
                 .call_tool(tool_name.clone(), arguments.clone())
                 .await
             {
-                Err(ToolError::NoToolFound(_)) => {
+                Err(ToolError::NotFound(_)) => {
                     // No tool in this toolbox, we can check others
                     continue;
                 }
@@ -200,6 +224,6 @@ impl ToolBox for ToolBoxSet {
                 }
             };
         }
-        Err(ToolError::NoToolFound(tool_name))
+        Err(ToolError::NotFound(tool_name))
     }
 }
