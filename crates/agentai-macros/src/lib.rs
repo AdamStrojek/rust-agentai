@@ -215,8 +215,13 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut name_arg_found = false;
                 let mut strict: Option<bool> = None;
                 let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
-                if let Ok(args) = tool_attr.parse_args_with(parser) {
-                    // Iterate over the parsed Meta items to find 'name'. #[tool(name = "...")]
+                // A bare #[tool] has no arguments; #[tool(...)] must parse, so typos are reported
+                if let Meta::List(_) = &tool_attr.meta {
+                    let args = match tool_attr.parse_args_with(parser) {
+                        Ok(args) => args,
+                        Err(err) => return err.to_compile_error().into(),
+                    };
+                    // Iterate over the parsed options: name = "...", strict, strict = <bool>
                     for arg_meta in args {
                         match arg_meta {
                             Meta::NameValue(name_value) if name_value.path.is_ident("name") => {

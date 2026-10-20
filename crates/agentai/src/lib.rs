@@ -181,7 +181,20 @@ pub use agent::*;
 /// }
 /// ```
 ///
-/// The same toolbox with a valid option compiles:
+/// Malformed options are reported instead of being ignored (missing comma here):
+///
+/// ```compile_fail
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(name = "a" strict)]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+///
+/// The same toolbox with valid options compiles:
 ///
 /// ```
 /// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
@@ -189,7 +202,7 @@ pub use agent::*;
 /// #[toolbox]
 /// impl T {
 ///     /// Tool
-///     #[tool(strict)]
+///     #[tool(name = "a", strict)]
 ///     fn a(&self) -> ToolResult { Ok(String::new()) }
 /// }
 /// ```
