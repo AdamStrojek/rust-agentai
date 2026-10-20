@@ -58,22 +58,6 @@ jobs:
             base_url: https://openrouter.ai/api/v1/
             model: nvidia/nemotron-3.5-super-vl:free
             key_secret: OPENROUTER_API_KEY
-          - name: dots-3-note-preview
-            base_url: https://openrouter.ai/api/v1/
-            model: dots-studio/dots-3-note-preview:free
-            key_secret: OPENROUTER_API_KEY
-          - name: xing4.0-29b-a4b
-            base_url: https://openrouter.ai/api/v1/
-            model: xingchen-agi/xing4.0-29b-a4b:free
-            key_secret: OPENROUTER_API_KEY
-          - name: lfm-2.5-2.6b
-            base_url: https://openrouter.ai/api/v1/
-            model: liquid/lfm-2.5-2.6b:free
-            key_secret: OPENROUTER_API_KEY
-          - name: nemotron-3-super-120b-a12b
-            base_url: https://openrouter.ai/api/v1/
-            model: nvidia/nemotron-3-super-120b-a12b:free
-            key_secret: OPENROUTER_API_KEY
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -111,9 +95,9 @@ jobs:
       fail-fast: false
       matrix:
         llm:
-          - name: nemotron-3-super
+          - name: nemotron-3.5-super-vl
             base_url: https://openrouter.ai/api/v1/
-            model: nvidia/nemotron-3-super-120b-a12b:free
+            model: nvidia/nemotron-3.5-super-vl:free
             key_secret: OPENROUTER_API_KEY
           # - name: gemini-2.5-flash
           #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/

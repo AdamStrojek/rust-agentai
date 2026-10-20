@@ -23,8 +23,8 @@ async fn main() -> Result<()> {
 
     // Remember about providing what model you want to use
     // Some models may require providing authorization details
-    let model = std::env::var("AGENTAI_MODEL")
-        .unwrap_or("nvidia/nemotron-3-super-120b-a12b:free".to_string());
+    let model =
+        std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
     let question = "Why sky is blue?";
 

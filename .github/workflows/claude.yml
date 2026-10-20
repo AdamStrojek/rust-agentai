@@ -49,5 +49,5 @@ jobs:
             --allowedTools "Bash(cargo build:*),Bash(cargo check:*),Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo doc:*),Bash(cargo run --example:*)"
         env:
           AGENTAI_BASE_URL: https://openrouter.ai/api/v1/
-          AGENTAI_MODEL: nvidia/nemotron-3-super-120b-a12b:free
+          AGENTAI_MODEL: nvidia/nemotron-3.5-super-vl:free
           AGENTAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
