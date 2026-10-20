@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
         McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
 
     // The toolbox can also be set for one run only
-    let result: RunResult<Answer> = agent.run(question).toolbox(mcp_tools).await?;
+    let result: RunResult<Answer> = agent.run(question).with_toolbox(mcp_tools).await?;
 
     info!("{:#?}", result.answer);
 

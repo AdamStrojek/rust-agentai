@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 /// Settings that replace the [`Agent`] configuration for one run.
 ///
+/// Like [`Agent`] and [`AgentRun`], it is configured with `with_*` methods.
+///
 /// Every field left as `None` keeps the agent's setting. Keep a `RunOptions` around to reuse
 /// the same overrides, for example a cheaper model for simple questions, and pass it to
 /// [`AgentRun::with_options`].
@@ -131,37 +133,36 @@ impl<'a, D> AgentRun<'a, D> {
     ///
     /// The history is only read, never changed. Add [`RunResult::new_messages`] to it yourself
     /// once the run succeeds. Do not put the system prompt in it: the agent sends its own.
-    pub fn history(mut self, history: &'a [ChatMessage]) -> Self {
+    pub fn with_history(mut self, history: &'a [ChatMessage]) -> Self {
         self.history = history;
         self
     }
 
     /// Uses this model instead of the agent's model.
-    pub fn model(mut self, model: impl Into<String>) -> Self {
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.options.model = Some(model.into());
         self
     }
 
     /// Uses this toolbox instead of the agent's toolbox.
-    pub fn toolbox(mut self, toolbox: impl ToolBox) -> Self {
-        self.options.toolbox = Some(Arc::new(toolbox));
-        self
+    pub fn with_toolbox(self, toolbox: impl ToolBox) -> Self {
+        self.with_toolbox_arc(Arc::new(toolbox))
     }
 
     /// Uses this toolbox, shared in an [`Arc`], instead of the agent's toolbox.
-    pub fn toolbox_arc(mut self, toolbox: Arc<dyn ToolBox>) -> Self {
+    pub fn with_toolbox_arc(mut self, toolbox: Arc<dyn ToolBox>) -> Self {
         self.options.toolbox = Some(toolbox);
         self
     }
 
     /// Uses this iteration limit instead of the agent's limit.
-    pub fn max_iterations(mut self, max_iterations: usize) -> Self {
+    pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
         self.options.max_iterations = Some(max_iterations);
         self
     }
 
     /// Sends these [`ChatOptions`] instead of the agent's options.
-    pub fn chat_options(mut self, chat_options: ChatOptions) -> Self {
+    pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {
         self.options.chat_options = Some(chat_options);
         self
     }
@@ -184,7 +185,7 @@ impl<'a, D> AgentRun<'a, D> {
     /// use futures_util::StreamExt;
     ///
     /// # async fn example(agent: Agent, mut history: Vec<ChatMessage>) -> Result<(), agentai::AgentError> {
-    /// let mut stream = agent.run::<String>("Tell me a story").history(&history).stream();
+    /// let mut stream = agent.run::<String>("Tell me a story").with_history(&history).stream();
     /// while let Some(event) = stream.next().await {
     ///     match event? {
     ///         AgentEvent::TextDelta(text) => print!("{text}"),

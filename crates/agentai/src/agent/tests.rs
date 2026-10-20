@@ -494,7 +494,7 @@ async fn run_returns_only_the_new_messages() {
         .agent()
         .with_toolbox(EchoToolBox)
         .run("question")
-        .history(&history)
+        .with_history(&history)
         .await
         .unwrap();
 
@@ -523,9 +523,9 @@ async fn appended_messages_continue_the_conversation() {
     let agent = llm.agent();
     let mut history = Vec::new();
 
-    let result: RunResult<String> = agent.run("one").history(&history).await.unwrap();
+    let result: RunResult<String> = agent.run("one").with_history(&history).await.unwrap();
     history.extend(result.new_messages);
-    let result: RunResult<String> = agent.run("two").history(&history).await.unwrap();
+    let result: RunResult<String> = agent.run("two").with_history(&history).await.unwrap();
     history.extend(result.new_messages);
 
     assert_eq!(history.len(), 4);
@@ -585,7 +585,7 @@ async fn a_run_without_a_model_fails_before_calling_the_model() {
     // A model set for the run is enough
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
     let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
-    let result: RunResult<String> = agent.run("question").model("m").await.unwrap();
+    let result: RunResult<String> = agent.run("question").with_model("m").await.unwrap();
     assert_eq!(result.answer, "hi");
 }
 
@@ -737,9 +737,10 @@ fn runs_and_streams_can_be_moved_to_other_tasks() {
     fn assert_send_static<T: Send + 'static>(_: &T) {}
     let agent = Agent::new_with_url("http://localhost/", "key", "system").unwrap();
     let history = vec![ChatMessage::user("hi")];
-    let stream = agent.run::<String>("q").history(&history).stream();
+    let stream = agent.run::<String>("q").with_history(&history).stream();
     assert_send_static(&stream);
-    let future = std::future::IntoFuture::into_future(agent.run::<String>("q").history(&history));
+    let future =
+        std::future::IntoFuture::into_future(agent.run::<String>("q").with_history(&history));
     assert_send_static(&future);
     fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
     assert_send_sync_clone::<Agent>();

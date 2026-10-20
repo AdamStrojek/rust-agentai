@@ -86,8 +86,8 @@ impl Agent {
 
 `run` returns an `AgentRun` builder. Nothing is sent until you `.await` it (it implements `IntoFuture`, the future is `Send + 'static`) or call `.stream()`. Builder methods:
 
-- `.history(&history)`: the conversation so far, as `&[ChatMessage]`. Default: empty.
-- `.model(name)`, `.toolbox(toolbox)`, `.toolbox_arc(arc)`, `.max_iterations(n)`, `.chat_options(options)`: replace the agent's setting for this run only.
+- `.with_history(&history)`: the conversation so far, as `&[ChatMessage]`. Default: empty.
+- `.with_model(name)`, `.with_toolbox(toolbox)`, `.with_toolbox_arc(arc)`, `.with_max_iterations(n)`, `.with_chat_options(options)`: replace the agent's setting for this run only.
 - `.with_options(RunOptions)`: apply a reusable set of overrides (`RunOptions::default().with_model(..).with_max_iterations(..)`, fields left `None` keep the agent's setting).
 
 Awaiting returns `Result<RunResult<D>, AgentError>`:
@@ -121,11 +121,11 @@ async fn main() -> anyhow::Result<()> {
     let agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?.with_model(&model);
 
     let mut history: Vec<ChatMessage> = Vec::new();
-    let result: RunResult<String> = agent.run("Why is the sky blue?").history(&history).await?;
+    let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     println!("{}", result.answer);
     history.extend(result.new_messages);
 
-    let result: RunResult<String> = agent.run("Say it in one sentence.").history(&history).await?;
+    let result: RunResult<String> = agent.run("Say it in one sentence.").with_history(&history).await?;
     println!("{}", result.answer);
     history.extend(result.new_messages);
     Ok(())
@@ -136,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
 
 You own the conversation history; the agent never stores it.
 
-- Pass it with `.history(&history)`. It is only read.
+- Pass it with `.with_history(&history)`. It is only read.
 - `result.new_messages` holds only the messages of this run, in order: your prompt, the assistant messages with tool calls, the tool results and the final answer. Append them to continue: `history.extend(result.new_messages)`. This matches `new_messages()` in pydantic-ai.
 - The system prompt is not in the history: the agent sends its own with every request. Do not put a system message in the history. The same history can therefore be used with a different agent.
 - A failed or cancelled run (an error, or a dropped stream) leaves your history unchanged and never leaves a tool call without a result. You can retry with the same history.
@@ -148,7 +148,7 @@ You own the conversation history; the agent never stores it.
 use agentai::{Agent, AgentEvent};
 use futures_util::StreamExt;
 
-let mut stream = agent.run::<String>("Tell me a story").history(&history).stream();
+let mut stream = agent.run::<String>("Tell me a story").with_history(&history).stream();
 while let Some(event) = stream.next().await {
     match event? {
         AgentEvent::TextDelta(text) => print!("{text}"),
@@ -195,7 +195,7 @@ A run returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built wi
 `AgentError::is_transient()` is true for `Llm` errors that may succeed on a retry: HTTP 408, 425, 429 and 5xx, timeouts and connection failures.
 
 ```rust
-match agent.run::<String>(question).history(&history).await {
+match agent.run::<String>(question).with_history(&history).await {
     Ok(result) => println!("{}", result.answer),
     Err(err) if err.is_transient() => { /* retry later with the same history */ }
     Err(AgentError::InvalidAnswer { raw, .. }) => eprintln!("unexpected answer: {raw}"),
@@ -423,7 +423,7 @@ let remote_tools = McpToolBox::new_http("http://localhost:8000/mcp").await?;
 let hosted_tools = McpToolBox::new_http_with_bearer("https://example.com/mcp", &token).await?;
 
 // per run, or for every run with agent.with_toolbox(mcp_tools)
-let result: RunResult<String> = agent.run("What time is it in Poland?").toolbox(mcp_tools).await?;
+let result: RunResult<String> = agent.run("What time is it in Poland?").with_toolbox(mcp_tools).await?;
 ```
 
 The server's tool list is read once, when the toolbox is created.

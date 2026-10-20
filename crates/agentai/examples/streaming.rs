@@ -28,7 +28,10 @@ async fn main() -> Result<()> {
     println!("Question: {question}\n");
 
     // The stream is `Send + 'static`, so it could also be moved into a spawned task
-    let mut stream = agent.run::<String>(question).history(&history).stream();
+    let mut stream = agent
+        .run::<String>(question)
+        .with_history(&history)
+        .stream();
     while let Some(event) = stream.next().await {
         match event? {
             AgentEvent::TextDelta(text) => {

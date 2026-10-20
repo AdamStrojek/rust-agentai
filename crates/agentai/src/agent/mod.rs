@@ -13,7 +13,7 @@ use genai::Client;
 /// Provider (genai adapter) selector used by [`Agent::new_with_provider`], re-exported from genai.
 pub use genai::adapter::AdapterKind;
 /// A message of the conversation history, re-exported from genai. The history is yours: pass it
-/// to [`AgentRun::history`] and append [`RunResult::new_messages`] to it after a run.
+/// to [`AgentRun::with_history`] and append [`RunResult::new_messages`] to it after a run.
 pub use genai::chat::ChatMessage;
 /// Model options (temperature, max tokens, tool choice, reasoning effort, ...) used by
 /// [`Agent::with_chat_options`], re-exported from genai.
@@ -71,8 +71,8 @@ pub enum AgentError {
         raw: String,
     },
     /// No model was set, neither with [`Agent::with_model`] nor for the run
-    /// ([`AgentRun::model`]).
-    #[error("no model set: use Agent::with_model or AgentRun::model")]
+    /// ([`AgentRun::with_model`]).
+    #[error("no model set: use Agent::with_model or AgentRun::with_model")]
     MissingModel,
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
@@ -122,7 +122,7 @@ pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 /// An agent is configuration only: the genai client, the system prompt, the default model and
 /// toolbox, how many model calls one [`run`](Agent::run) may make, and the [`ChatOptions`] sent
 /// with every request. It does not keep the conversation. You own the history, pass it to
-/// [`AgentRun::history`] and append [`RunResult::new_messages`] to it, so one agent can serve
+/// [`AgentRun::with_history`] and append [`RunResult::new_messages`] to it, so one agent can serve
 /// many conversations at once. Cloning an agent is cheap.
 ///
 /// ```no_run
@@ -205,14 +205,14 @@ impl Agent {
     }
 
     /// Sets the model used by every [`run`](Agent::run), unless the run sets its own with
-    /// [`AgentRun::model`]. Without a model, a run returns [`AgentError::MissingModel`].
+    /// [`AgentRun::with_model`]. Without a model, a run returns [`AgentError::MissingModel`].
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
         self
     }
 
     /// Sets the toolbox used by every [`run`](Agent::run), unless the run sets its own with
-    /// [`AgentRun::toolbox`]. Combine several toolboxes with
+    /// [`AgentRun::with_toolbox`]. Combine several toolboxes with
     /// [`ToolBoxSet`](crate::tool::ToolBoxSet).
     pub fn with_toolbox(self, toolbox: impl ToolBox) -> Self {
         self.with_toolbox_arc(Arc::new(toolbox))
@@ -280,8 +280,8 @@ impl Agent {
     /// returns the final answer as `D`.
     ///
     /// The returned [`AgentRun`] is configured with builder methods and executed with
-    /// `.await`, or streamed with [`AgentRun::stream`]. Pass the conversation so far with [`AgentRun::history`], and change the model,
-    /// toolbox or options for this run only with [`AgentRun::model`], [`AgentRun::toolbox`] or
+    /// `.await`, or streamed with [`AgentRun::stream`]. Pass the conversation so far with [`AgentRun::with_history`], and change the model,
+    /// toolbox or options for this run only with [`AgentRun::with_model`], [`AgentRun::with_toolbox`] or
     /// [`AgentRun::with_options`].
     ///
     /// ```no_run
@@ -290,11 +290,11 @@ impl Agent {
     /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
     /// let mut history: Vec<ChatMessage> = Vec::new();
     ///
-    /// let result: RunResult<String> = agent.run("Why is the sky blue?").history(&history).await?;
+    /// let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     /// println!("{}", result.answer);
     /// history.extend(result.new_messages);
     ///
-    /// let result: RunResult<String> = agent.run("And why is it red at sunset?").history(&history).await?;
+    /// let result: RunResult<String> = agent.run("And why is it red at sunset?").with_history(&history).await?;
     /// println!("{}", result.answer);
     /// history.extend(result.new_messages);
     /// # Ok(())

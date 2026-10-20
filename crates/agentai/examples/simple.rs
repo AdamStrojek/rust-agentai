@@ -28,14 +28,14 @@ async fn main() -> Result<()> {
 
     let question = "Why sky is blue?";
     info!("Question: {}", question);
-    let result: RunResult<String> = agent.run(question).history(&history).await?;
+    let result: RunResult<String> = agent.run(question).with_history(&history).await?;
     info!("Answer: {}", result.answer);
     // Add the question and the answer to the history to continue the conversation
     history.extend(result.new_messages);
 
     let question = "Summarize your previous answer in one sentence.";
     info!("Question: {}", question);
-    let result: RunResult<String> = agent.run(question).history(&history).await?;
+    let result: RunResult<String> = agent.run(question).with_history(&history).await?;
     info!("Answer: {}", result.answer);
     history.extend(result.new_messages);
 

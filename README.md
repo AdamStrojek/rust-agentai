@@ -39,7 +39,7 @@ This library is under heavy development. The interface may change at any time wi
   result, and finally the result of the run. Runs with tool calls and structured output stream too. The
   stream is `Send + 'static`, so you can spawn it or return it from a web handler.
 - **You manage the history**: the agent no longer keeps the conversation. Pass your history with
-  `.history(&history)` and add the run's `new_messages` to it when you want
+  `.with_history(&history)` and add the run's `new_messages` to it when you want
   to continue: `history.extend(result.new_messages)`. You can store, trim, persist or reset it however you
   like (`ChatMessage` is serializable), and your history is never changed by a failed or cancelled run.
   The system prompt is not part of the history: the agent sends it with every request.
@@ -54,7 +54,7 @@ This library is under heavy development. The interface may change at any time wi
   confusing parse error.
 
 **Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
-`agent.run(prompt).history(&history).await`, which returns a `RunResult` instead of the bare answer; the
+`agent.run(prompt).with_history(&history).await`, which returns a `RunResult` instead of the bare answer; the
 model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
 no longer remembers earlier runs. Read the
 [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading.
@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
     // The conversation history is yours
     let mut history: Vec<ChatMessage> = Vec::new();
 
-    let result: RunResult<String> = agent.run("Why is the sky blue?").history(&history).await?;
+    let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     println!("Answer: {}", result.answer);
     // Keep the question and the answer to continue the conversation
     history.extend(result.new_messages);
