@@ -31,7 +31,7 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
-#### Version 0.2.0
+#### Agent providers, remote MCP and configuration (version 0.2.0)
 
 - **Creating agents**: `Agent::new_with_provider` binds an agent to any
   genai provider with an explicit API key, for example the native OpenRouter adapter, which needs no base URL:
@@ -49,9 +49,13 @@ This library is under heavy development. The interface may change at any time wi
 - **Strict tools**: `#[tool(strict)]` marks a tool as strict, so providers that support it make the model's
   arguments match the parameter schema exactly.
 - **Dependencies**: genai 0.7 (re-exported as `agentai::genai`; tool calls are no longer lost when a model
-  also returns text), schemars 1, reqwest 0.13, syn 3, Rust edition 2024 and MSRV 1.88. The
-  [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) lists the breaking
-  changes and how to migrate.
+  also returns text), schemars 1, reqwest 0.13, syn 3, Rust edition 2024 and MSRV 1.88.
+
+**Breaking changes**: `Agent::new`, `Agent::new_with_url` and `Agent::run` return `AgentError` instead of
+`anyhow` errors, `ToolError` variants are renamed and split, `Tool` is built with `Tool::new`, and answer
+and tool parameter types need `schemars` 1.x. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading: it lists
+every breaking change and how to migrate.
 
 #### `ToolBox` (version 0.1.5)
 
