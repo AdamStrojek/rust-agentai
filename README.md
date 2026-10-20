@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+    <img src="assets/logo.png" alt="AgentAI logo" width="160">
+  </picture>
+</p>
+
 [![](https://img.shields.io/crates/v/agentai.svg)](https://crates.io/crates/agentai)
 [![](https://docs.rs/agentai/badge.svg)](https://docs.rs/agentai)
 
