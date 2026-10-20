@@ -1,10 +1,10 @@
 use heck::ToUpperCamelCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use std::collections::HashSet;
 use syn::{
-    parse_macro_input, Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat,
+    Error, Expr, FnArg, Ident, ImplItem, ItemImpl, Lit, Meta, MetaNameValue, Pat, parse_macro_input,
 };
 
 /// # Macro for Generating `ToolBox` Implementations
@@ -174,7 +174,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 "toolbox! macro only supports impl blocks for structs",
             )
             .to_compile_error()
-            .into()
+            .into();
         }
     };
 
@@ -188,7 +188,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Pass 1: Collect information for tool definitions and call dispatch
     // We iterate over a reference here because we need the original items again in Pass 2
     for item in item_impl.items.iter_mut() {
-        if let ImplItem::Fn(ref mut method) = item {
+        if let ImplItem::Fn(method) = item {
             // Find the #[tool] attribute
             if let Some(tool_attr) = method
                 .attrs
@@ -313,7 +313,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 for arg in method.sig.inputs.iter_mut() {
                     // self attribute are type FnArg::Receiver()
-                    if let FnArg::Typed(ref mut pat_type) = arg {
+                    if let FnArg::Typed(pat_type) = arg {
                         // #[doc = "Documentation"]    // < pat_type.attrs
                         // attribute: Type,            // < pat_type.pat: pat_type.ty
                         // ...

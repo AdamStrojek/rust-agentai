@@ -1,7 +1,7 @@
-use agentai::tool::mcp::McpToolBox;
 use agentai::Agent;
+use agentai::tool::mcp::McpToolBox;
 use anyhow::Result;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};

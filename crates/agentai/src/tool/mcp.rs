@@ -12,8 +12,8 @@ use anyhow::Result as AnyhowResult;
 use async_trait::async_trait;
 use log::trace;
 use mcp_client_rs::{
-    client::{Client, ClientBuilder},
     MessageContent,
+    client::{Client, ClientBuilder},
 };
 use serde_json::Value;
 use std::collections::HashMap;

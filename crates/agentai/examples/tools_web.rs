@@ -1,10 +1,10 @@
-use agentai::tool::{
-    web::{WebFetchToolBox, WebSearchToolBox},
-    ToolBoxSet,
-};
 use agentai::Agent;
+use agentai::tool::{
+    ToolBoxSet,
+    web::{WebFetchToolBox, WebSearchToolBox},
+};
 use anyhow::Result;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};

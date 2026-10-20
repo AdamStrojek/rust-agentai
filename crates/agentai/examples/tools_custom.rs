@@ -4,10 +4,10 @@
 //! provided by the `agentai` crate. This tool will be used by the AI agent to fetch content from a URL.
 //!
 
-use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
 use agentai::Agent;
+use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
 use anyhow::Error;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 
 const SYSTEM: &str = "You are helpful assistant. You goal is to provide summary for provided site. Limit you answer to 3 sentences.";
@@ -22,8 +22,7 @@ async fn main() -> Result<(), Error> {
     )?;
     info!("Starting AgentAI");
 
-    let question =
-        "For what I can use this library? https://raw.githubusercontent.com/AdamStrojek/rust-agentai/refs/heads/master/README.md";
+    let question = "For what I can use this library? https://raw.githubusercontent.com/AdamStrojek/rust-agentai/refs/heads/master/README.md";
 
     info!("Question: {}", question);
 

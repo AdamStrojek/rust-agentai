@@ -9,15 +9,15 @@
 //! To read more about tool look into [crate::tool]
 
 use crate::tool::ToolBox;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, MessageContent, ToolResponse};
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ClientBuilder, ModelIden, ServiceTarget};
 use log::{debug, trace};
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::de::DeserializeOwned;
-use serde_json::{from_str, json, Value};
+use serde_json::{Value, from_str, json};
 use std::any::TypeId;
 use std::sync::Arc;
 
@@ -178,8 +178,7 @@ impl Agent {
                     for tool_request in tools_call {
                         trace!(
                             "Tool request: {} with arguments: {}",
-                            tool_request.fn_name,
-                            tool_request.fn_arguments
+                            tool_request.fn_name, tool_request.fn_arguments
                         );
                         if let Some(tool) = toolbox {
                             match tool

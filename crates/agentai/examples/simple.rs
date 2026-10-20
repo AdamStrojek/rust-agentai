@@ -1,6 +1,6 @@
 use agentai::Agent;
 use anyhow::Result;
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 
 const SYSTEM: &str = "You are helpful assistant";

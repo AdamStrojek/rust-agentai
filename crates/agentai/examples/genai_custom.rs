@@ -2,11 +2,11 @@ use agentai::Agent;
 use anyhow::Result;
 use genai::chat::ChatOptions;
 use genai::{
+    ClientBuilder, ModelIden, ServiceTarget,
     adapter::AdapterKind,
     resolver::{AuthData, Endpoint, ServiceTargetResolver},
-    ClientBuilder, ModelIden, ServiceTarget,
 };
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
 
 const SYSTEM: &str = "You are helpful assistant";
