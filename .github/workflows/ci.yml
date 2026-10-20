@@ -90,8 +90,7 @@ jobs:
     if:
       false
       # Disable temprary, examples are runned with doc tests
-    permissions:
-        runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
