@@ -2,12 +2,11 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master"]
   pull_request:
 
 permissions:
   contents: read
-  models: read
 
 jobs:
   fmt:
@@ -55,10 +54,10 @@ jobs:
       fail-fast: false
       matrix:
         llm:
-          - name: gpt-4.1-mini
-            base_url: https://models.github.ai/inference/
-            model: openai/gpt-4.1-mini
-            key_secret: GITHUB_TOKEN
+          - name: nemotron-3.5-super-vl
+            base_url: https://openrouter.ai/api/v1/
+            model: nvidia/nemotron-3.5-super-vl:free
+            key_secret: OPENROUTER_API_KEY
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -91,17 +90,15 @@ jobs:
     if:
       false
       # Disable temprary, examples are runned with doc tests
-    permissions:
-      models: read
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         llm:
-          - name: gpt-4.1-mini
-            base_url: https://models.github.ai/inference/
-            model: openai/gpt-4.1-mini
-            key_secret: GITHUB_TOKEN
+          - name: nemotron-3.5-super-vl
+            base_url: https://openrouter.ai/api/v1/
+            model: nvidia/nemotron-3.5-super-vl:free
+            key_secret: OPENROUTER_API_KEY
           # - name: gemini-2.5-flash
           #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
           #   model: gemini-2.5-flash

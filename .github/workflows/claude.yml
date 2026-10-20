@@ -30,7 +30,6 @@ jobs:
       issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
-      models: read # GITHUB_TOKEN as AGENTAI_API_KEY for GitHub Models
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,6 +48,6 @@ jobs:
             --model claude-sonnet-5-5
             --allowedTools "Bash(cargo build:*),Bash(cargo check:*),Bash(cargo fmt:*),Bash(cargo clippy:*),Bash(cargo test:*),Bash(cargo doc:*),Bash(cargo run --example:*)"
         env:
-          AGENTAI_BASE_URL: https://models.github.ai/inference/
-          AGENTAI_MODEL: openai/gpt-4.1-mini
-          AGENTAI_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+          AGENTAI_BASE_URL: https://openrouter.ai/api/v1/
+          AGENTAI_MODEL: nvidia/nemotron-3.5-super-vl:free
+          AGENTAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
