@@ -79,8 +79,15 @@ use syn::{
 /// ### 3. Advanced Configuration
 ///
 /// The `#[tool(...)]` attribute gives you broad control over the configuration of declared tools.
-/// You can change any of the options using `name=value` pairs. The following options are supported:
-/// - `name`: Overrides the default tool name. This name must be unique within the toolbox.
+/// Options are separated by commas, for example `#[tool(name = "lookup", strict)]`. The following
+/// options are supported:
+/// - `name = "..."`: Overrides the default tool name. This name must be unique within the toolbox.
+/// - `strict` (or `strict = true` / `strict = false`): Marks the tool definition as strict, so
+///   providers that support it (OpenAI and compatible APIs) force the model's arguments to match
+///   the parameter schema exactly. genai adapts the schema to the provider's strict rules, for
+///   example every parameter becomes required and `additionalProperties` is set to `false`;
+///   use `Option<T>` for parameters the model may leave empty (`null`). Not every provider (or
+///   every model behind a gateway such as OpenRouter) supports strict tools, so it is opt-in.
 ///
 /// ### 4. Tool Arguments
 /// The tool's schema is generated based on the method's arguments, which is why they must be serializable.
@@ -204,11 +211,17 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let fn_name = fn_name_sig.to_string();
                 let mut tool_name = fn_name.clone();
 
-                // Parse the #[tool] attribute for name = "..." using parse_args_with with Meta
+                // Parse the #[tool] attribute options: name = "...", strict, strict = <bool>
                 let mut name_arg_found = false;
+                let mut strict: Option<bool> = None;
                 let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
-                if let Ok(args) = tool_attr.parse_args_with(parser) {
-                    // Iterate over the parsed Meta items to find 'name'. #[tool(name = "...")]
+                // A bare #[tool] has no arguments; #[tool(...)] must parse, so typos are reported
+                if let Meta::List(_) = &tool_attr.meta {
+                    let args = match tool_attr.parse_args_with(parser) {
+                        Ok(args) => args,
+                        Err(err) => return err.to_compile_error().into(),
+                    };
+                    // Iterate over the parsed options: name = "...", strict, strict = <bool>
                     for arg_meta in args {
                         match arg_meta {
                             Meta::NameValue(name_value) if name_value.path.is_ident("name") => {
@@ -242,11 +255,45 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 tool_name = lit_str.value();
                                 name_arg_found = true;
                             }
+                            Meta::Path(path) if path.is_ident("strict") => {
+                                if strict.is_some() {
+                                    return Error::new_spanned(
+                                        path.to_token_stream(),
+                                        "Duplicate 'strict' argument in tool attribute",
+                                    )
+                                    .to_compile_error()
+                                    .into();
+                                }
+                                strict = Some(true);
+                            }
+                            Meta::NameValue(name_value) if name_value.path.is_ident("strict") => {
+                                if strict.is_some() {
+                                    return Error::new_spanned(
+                                        name_value.to_token_stream(),
+                                        "Duplicate 'strict' argument in tool attribute",
+                                    )
+                                    .to_compile_error()
+                                    .into();
+                                }
+                                let Expr::Lit(syn::ExprLit {
+                                    lit: Lit::Bool(lit_bool),
+                                    ..
+                                }) = &name_value.value
+                                else {
+                                    return Error::new_spanned(
+                                        name_value.value.to_token_stream(),
+                                        "Expected `true` or `false` for strict",
+                                    )
+                                    .to_compile_error()
+                                    .into();
+                                };
+                                strict = Some(lit_bool.value);
+                            }
                             _ => {
-                                // Error: If arguments are present, they must be 'name = "..."'
+                                // Error: unknown option
                                 return Error::new_spanned(
                                     arg_meta.to_token_stream(),
-                                    "Expected name = \"...\" in tool attribute",
+                                    "Expected `name = \"...\"` or `strict` in tool attribute",
                                 )
                                 .to_compile_error()
                                 .into();
@@ -375,11 +422,17 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 };
 
+                let strict_token = match strict {
+                    Some(strict) => quote! { tool.strict = Some(#strict); },
+                    None => quote! {},
+                };
+
                 tool_definitions.extend(quote! {
                     {
                         let mut tool = Tool::new(#tool_name);
                         tool.description = #description_token;
                         tool.schema = #schema_token;
+                        #strict_token
                         tool
                     },
                 });

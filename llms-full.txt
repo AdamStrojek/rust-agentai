@@ -254,6 +254,7 @@ let answer: String = agent.run(&model, "How warm is it in Paris in Fahrenheit?",
 Rules:
 
 - The tool name is the method name. Override it with `#[tool(name = "...")]`. Names must be unique in the toolbox.
+- `#[tool(strict)]` (or `strict = true/false`, combinable as `#[tool(name = "x", strict)]`) marks the definition as strict: providers that support it (OpenAI and compatible APIs) make the model's arguments match the schema exactly. genai adapts the schema for strict mode: every parameter is listed as required and `additionalProperties` is `false`, so use `Option<T>` for parameters the model may leave out (it then sends `null`). Not every provider or OpenRouter model supports strict tools, so it is opt-in.
 - The method's doc comment is the tool description. Parameter doc comments become parameter descriptions. Write them for the model: say when to use the tool and what each argument means.
 - Each tool must take `&self` and return `ToolResult`. Both `fn` and `async fn` work.
 - Every parameter must implement `serde::Deserialize` and `schemars::JsonSchema`. Attributes on parameters, such as `#[serde(...)]` or `#[schemars(...)]`, are kept.

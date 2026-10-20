@@ -34,6 +34,8 @@
 //! [`Agent::with_chat_options`](crate::Agent::with_chat_options) configure the loop limit and the model
 //! options (temperature, max tokens, tool choice, reasoning effort, ...). The `genai` crate is
 //! re-exported as `agentai::genai`.
+//! `#[tool(strict)]` marks a tool definition as strict, so supporting providers make the model's
+//! arguments match the parameter schema exactly.
 //!
 //! #### `ToolBox` (version 0.1.5)
 //!
@@ -137,3 +139,72 @@ pub mod structured_output;
 
 #[allow(unused_imports)]
 pub use agent::*;
+
+/// Compile-fail checks for the `#[tool(...)]` options. Only built for doc tests.
+///
+/// An unknown option is rejected:
+///
+/// ```compile_fail
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(unknown)]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+///
+/// `strict` takes only a boolean:
+///
+/// ```compile_fail
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(strict = "yes")]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+///
+/// `strict` can be given only once:
+///
+/// ```compile_fail
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(strict, strict = false)]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+///
+/// Malformed options are reported instead of being ignored (missing comma here):
+///
+/// ```compile_fail
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(name = "a" strict)]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+///
+/// The same toolbox with valid options compiles:
+///
+/// ```
+/// use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
+/// struct T;
+/// #[toolbox]
+/// impl T {
+///     /// Tool
+///     #[tool(name = "a", strict)]
+///     fn a(&self) -> ToolResult { Ok(String::new()) }
+/// }
+/// ```
+#[cfg(all(doctest, feature = "macros"))]
+pub struct ToolAttributeCompileChecks;
