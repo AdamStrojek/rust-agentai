@@ -5,16 +5,22 @@
 //!
 //! Supported connection types:
 //! - `stdio`: the server is started as a child process ([`McpToolBox::new`]).
-//! - Streamable HTTP: the server is already running and reachable by URL ([`McpToolBox::new_http`]).
+//! - Streamable HTTP: the server is already running and reachable by URL ([`McpToolBox::new_http`],
+//!   or [`McpToolBox::new_http_with_bearer`] for servers that need a bearer token).
 //!
 //! The server's tool list is read once, when the toolbox is created.
+//!
+//! Tool results are returned to the model as text. Text blocks are joined; when there is no
+//! text, the structured content is returned as JSON. Images, audio and embedded resources are
+//! not forwarded: each one is replaced by a short placeholder such as `[image omitted]`.
 
 use crate::tool::{Tool, ToolBox, ToolError};
 use anyhow::{Result as AnyhowResult, anyhow};
 use async_trait::async_trait;
 use log::trace;
-use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use rmcp::service::RunningService;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::Value;
@@ -78,6 +84,28 @@ impl McpToolBox {
         Self::from_client(client).await
     }
 
+    /// Connects to a running MCP server over the Streamable HTTP transport and sends
+    /// `Authorization: Bearer <token>` with every request.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - Endpoint of the MCP server, for example `https://example.com/mcp`.
+    /// * `token` - Bearer token, without the `Bearer ` prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the MCP handshake fails or the tool list cannot be read.
+    pub async fn new_http_with_bearer(url: &str, token: &str) -> AnyhowResult<Self> {
+        trace!("McpToolBox::new_http_with_bearer for url: {url}");
+        let config =
+            StreamableHttpClientTransportConfig::with_uri(url.to_string()).auth_header(token);
+        let transport = StreamableHttpClientTransport::from_config(config);
+        let client = ().serve(transport).await?;
+        trace!("McpToolBox::new_http_with_bearer client initialized");
+
+        Self::from_client(client).await
+    }
+
     async fn from_client(client: RunningService<RoleClient, ()>) -> AnyhowResult<Self> {
         let tools = client
             .list_all_tools()
@@ -95,20 +123,28 @@ impl McpToolBox {
     }
 }
 
-/// Joins the text blocks of an MCP tool result. Falls back to the structured content
-/// when the server returned no text.
+/// Converts an MCP tool result to text for the model. Text blocks are joined; other blocks
+/// become placeholders so the model knows something was returned. Falls back to the
+/// structured content when the server returned no text.
 fn result_to_text(result: &CallToolResult) -> String {
-    let text = result
+    let has_text = result.content.iter().any(|block| block.as_text().is_some());
+    if !has_text && let Some(structured) = &result.structured_content {
+        return structured.to_string();
+    }
+
+    result
         .content
         .iter()
-        .filter_map(|block| block.as_text().map(|t| t.text.as_str()))
+        .map(|block| match block {
+            ContentBlock::Text(text) => text.text.clone(),
+            ContentBlock::Image(_) => "[image omitted]".to_string(),
+            ContentBlock::Audio(_) => "[audio omitted]".to_string(),
+            ContentBlock::Resource(_) => "[embedded resource omitted]".to_string(),
+            ContentBlock::ResourceLink(link) => format!("[resource link: {}]", link.uri),
+            _ => "[unsupported content omitted]".to_string(),
+        })
         .collect::<Vec<_>>()
-        .join("\n");
-
-    match (&result.structured_content, text.is_empty()) {
-        (Some(structured), true) => structured.to_string(),
-        _ => text,
-    }
+        .join("\n")
 }
 
 #[async_trait]
@@ -248,6 +284,26 @@ mod tests {
             Err(ToolError::LLMError(message)) => assert!(!message.is_empty()),
             other => panic!("Expected ToolError::LLMError, got {other:?}"),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_result_to_text() -> AnyhowResult<()> {
+        let mixed: CallToolResult = serde_json::from_value(json!({
+            "content": [
+                { "type": "text", "text": "first" },
+                { "type": "image", "data": "AAAA", "mimeType": "image/png" },
+                { "type": "text", "text": "second" }
+            ]
+        }))?;
+        assert_eq!(result_to_text(&mixed), "first\n[image omitted]\nsecond");
+
+        let structured: CallToolResult = serde_json::from_value(json!({
+            "content": [],
+            "structuredContent": { "sum": 3 }
+        }))?;
+        assert_eq!(result_to_text(&structured), r#"{"sum":3}"#);
 
         Ok(())
     }

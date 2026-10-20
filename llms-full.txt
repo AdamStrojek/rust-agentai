@@ -294,6 +294,8 @@ let mcp_tools = McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "
 
 // or a server that is already running
 let remote_tools = McpToolBox::new_http("http://localhost:8000/mcp").await?;
+// with a bearer token (without the "Bearer " prefix)
+let hosted_tools = McpToolBox::new_http_with_bearer("https://example.com/mcp", &token).await?;
 
 let answer: String = agent.run(&model, "What time is it in Poland?", Some(&mcp_tools)).await?;
 ```
@@ -302,7 +304,7 @@ The server's tool list is read once, when the toolbox is created.
 
 - **Unknown tools:** a tool name the server does not offer returns `ToolError::NoToolFound`, so an `McpToolBox` can sit anywhere in a `ToolBoxSet`.
 - **Tool errors:** when the server reports a tool error (`isError`), the call returns `ToolError::LLMError` with the server's message, which the agent passes to the model.
-- **Results:** text blocks of the result are joined with newlines. If there is no text, the structured content is returned as JSON. Images and other blocks are ignored.
+- **Results:** text blocks of the result are joined with newlines. If there is no text, the structured content is returned as JSON. Images, audio and embedded resources are not forwarded; each becomes a placeholder such as `[image omitted]`.
 
 ## Custom genai client
 
