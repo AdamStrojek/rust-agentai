@@ -334,3 +334,56 @@ async fn structured_output_keeps_custom_options() {
     assert_eq!(request["temperature"], json!(0.0));
     assert!(request.get("response_format").is_some());
 }
+
+struct StrictTools;
+
+#[crate::tool::toolbox]
+impl StrictTools {
+    /// Strict echo.
+    #[tool(strict)]
+    fn strict_echo(
+        &self,
+        /// Text to echo
+        text: String,
+    ) -> ToolResult {
+        Ok(text)
+    }
+
+    /// Plain echo.
+    #[tool]
+    fn plain_echo(
+        &self,
+        /// Text to echo
+        text: String,
+    ) -> ToolResult {
+        Ok(text)
+    }
+}
+
+#[tokio::test]
+async fn strict_tools_are_sent_as_strict() {
+    let llm = MockLlm::start(vec![text_reply("hi")]).await;
+
+    let _: String = llm
+        .agent()
+        .run("m", "question", Some(&StrictTools))
+        .await
+        .unwrap();
+
+    let request = request_json(&llm, 0);
+    let tools = request["tools"].as_array().unwrap();
+    let function = |name: &str| {
+        tools
+            .iter()
+            .map(|t| &t["function"])
+            .find(|f| f["name"] == json!(name))
+            .unwrap()
+            .clone()
+    };
+
+    let strict = function("strict_echo");
+    assert_eq!(strict["strict"], json!(true));
+    assert_eq!(strict["parameters"]["additionalProperties"], json!(false));
+    assert_eq!(strict["parameters"]["required"], json!(["text"]));
+    assert_eq!(function("plain_echo")["strict"], json!(false));
+}

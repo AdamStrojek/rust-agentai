@@ -47,6 +47,8 @@ for example the native OpenRouter adapter (`AdapterKind::OpenRouter`), with an e
 `Agent::with_chat_options` configure the loop limit and the model
 options (temperature, max tokens, tool choice, reasoning effort, ...). The `genai` crate is
 re-exported as `agentai::genai`.
+`#[tool(strict)]` marks a tool definition as strict, so supporting providers make the model's
+arguments match the parameter schema exactly.
 
 #### `ToolBox` (version 0.1.5)
 
