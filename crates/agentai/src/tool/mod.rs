@@ -124,6 +124,10 @@ pub enum ToolError {
     // -- Recoverable: sent to the model as the tool result; the loop continues
     /// The requested tool does not exist in this `ToolBox`. This is the signal for
     /// [`ToolBoxSet`] to try the next toolbox.
+    ///
+    /// Reserved for unknown tool names: a tool that fails for its own reasons should return
+    /// [`InvalidArguments`](ToolError::InvalidArguments) or [`Failed`](ToolError::Failed),
+    /// otherwise an outer `ToolBoxSet` silently tries the next toolbox instead.
     #[error("tool '{0}' not found")]
     NotFound(String),
     /// Arguments are missing, malformed or invalid (wrong timezone, bad date format, ...).
