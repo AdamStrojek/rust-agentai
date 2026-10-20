@@ -43,11 +43,12 @@
 //!
 //! ## Future Plans
 //!
-//! We are continuously working to improve AgentAI. Here are some of the features planned for the near future:
+//! We are continuously working to improve AgentAI. These are the next features we plan; the linked issues have the details:
 //!
-//! - **Agent Memory**: Enhance the user experience by adding new functionality for AI agent memory. This will give users control over memory behavior, such as persistence, record limits, and context management for new requests.
-//! - **User Input and Streaming Output**: Not every AI agent works silently in the background. Some require additional interaction from the user. This feature will introduce an interface to handle user interactions and provide responses in a streaming format for a better user experience.
-//! - **Configurable Behavior**: Introduce a comprehensive way to manage every aspect of an agent's configuration, from model parameters to error-handling behavior for tools.
+//! - **Run details and history control** ([#46](https://github.com/AdamStrojek/rust-agentai/issues/46)): return token usage, the stop reason and reasoning from a run, and let you read and reset the conversation history.
+//! - **Streaming output** ([#49](https://github.com/AdamStrojek/rust-agentai/issues/49)): stream the answer as it is generated, including runs with tool calls.
+//! - **Agent Memory**: control what the agent remembers between runs, such as persistence, record limits and context management.
+//! - **User input during a run**: let an agent ask the user for more information or confirmation before it continues.
 //!
 //! ## Installation
 //!
