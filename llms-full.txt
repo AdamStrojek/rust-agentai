@@ -23,7 +23,7 @@ All features are on by default.
 | `macros` | the `#[toolbox]` attribute (`agentai::tool::toolbox`) |
 | `tools-buildin` | `agentai::tool::buildin`: date, time, timezone and location tools (turns on `macros`) |
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
-| `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server over stdio (experimental) |
+| `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
 
 For a minimal build: `agentai = { version = "0.2", default-features = false, features = ["macros"] }`.
 
@@ -282,19 +282,29 @@ let fetch = WebFetchToolBox::new();                                    // tool: 
 
 `web_search` queries the Brave Search API and returns result titles, URLs and descriptions. `web_fetch` downloads a URL and returns the body as text.
 
-### MCP servers (`mcp-client`, experimental)
+### MCP servers (`mcp-client`)
 
-`McpToolBox` starts an MCP server as a child process, talks to it over stdio, and exposes all of its tools.
+`McpToolBox` exposes all tools of an MCP server. It is built on the official MCP Rust SDK, `rmcp`. It either starts the server as a child process and talks to it over stdio, or connects to a running server over Streamable HTTP.
 
 ```rust
 use agentai::tool::mcp::McpToolBox;
 
 // command, arguments, optional environment variables (Option<HashMap<String, String>>)
 let mcp_tools = McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
+
+// or a server that is already running
+let remote_tools = McpToolBox::new_http("http://localhost:8000/mcp").await?;
+// with a bearer token (without the "Bearer " prefix)
+let hosted_tools = McpToolBox::new_http_with_bearer("https://example.com/mcp", &token).await?;
+
 let answer: String = agent.run(&model, "What time is it in Poland?", Some(&mcp_tools)).await?;
 ```
 
-The server's tool list is read once in `new`. Only stdio servers are supported.
+The server's tool list is read once, when the toolbox is created.
+
+- **Unknown tools:** a tool name the server does not offer returns `ToolError::NoToolFound`, so an `McpToolBox` can sit anywhere in a `ToolBoxSet`.
+- **Tool errors:** when the server reports a tool error (`isError`), the call returns `ToolError::LLMError` with the server's message, which the agent passes to the model.
+- **Results:** text blocks of the result are joined with newlines. If there is no text, the structured content is returned as JSON. Images, audio and embedded resources are not forwarded; each becomes a placeholder such as `[image omitted]`.
 
 ## Custom genai client
 

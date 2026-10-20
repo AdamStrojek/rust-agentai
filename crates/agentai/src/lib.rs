@@ -26,6 +26,8 @@
 //! Models that return text together with tool calls now work: the tool calls are no longer dropped.
 //! `Agent::new` and `Agent::new_with_url` now return `Result`, and a tool call without a toolbox
 //! is answered with an error message to the model instead of a panic.
+//! [`McpToolBox`](crate::tool::mcp::McpToolBox) now uses the official MCP SDK (`rmcp`) and can also
+//! connect to running servers over Streamable HTTP.
 //!
 //! #### `ToolBox` (version 0.1.5)
 //!
