@@ -54,6 +54,7 @@ pub use genai::chat::Tool;
 pub type ToolResult = Result<String, ToolError>;
 
 // Re-export tool and toolbox macros, they are used to generate auto implementation of
+#[cfg(feature = "macros")]
 pub use agentai_macros::toolbox;
 
 /// Manages a collection of callable `Tool` instances.
