@@ -12,7 +12,8 @@
 use crate::tool::{toolbox, Tool, ToolBox, ToolError, ToolResult};
 use anyhow::anyhow;
 use time::format_description::well_known::{Iso8601, Rfc3339};
-use time::{format_description, Date, OffsetDateTime, Time};
+use time::macros::format_description;
+use time::{Date, OffsetDateTime, Time};
 use time_tz::{timezones, OffsetDateTimeExt};
 
 /// # Current Date and Time Toolbox
@@ -42,8 +43,7 @@ impl CurrentDateAndTimeToolBox {
     #[tool]
     pub fn get_current_time(&self) -> ToolResult {
         let now = OffsetDateTime::now_local().map_err(|e| ToolError::Other(anyhow!(e)))?;
-        let format = format_description::parse("[hour]:[minute]:[second]")
-            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let format = format_description!("[hour]:[minute]:[second]");
         now.format(&format)
             .map_err(|e| ToolError::Other(anyhow!(e)))
     }
@@ -84,8 +84,7 @@ impl CurrentDateAndTimeToolBox {
             .ok_or_else(|| ToolError::Other(anyhow!("Unknown timezone: {}", timezone)))?;
         let now_utc = OffsetDateTime::now_utc();
         let now_in_tz = now_utc.to_timezone(tz);
-        let format = format_description::parse("[hour]:[minute]:[second]")
-            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let format = format_description!("[hour]:[minute]:[second]");
         now_in_tz
             .format(&format)
             .map_err(|e| ToolError::Other(anyhow!(e)))
@@ -110,8 +109,7 @@ impl CurrentDateAndTimeToolBox {
             ToolError::Other(anyhow!("Unknown target timezone: {}", target_timezone))
         })?;
 
-        let time_format = format_description::parse("[hour]:[minute]")
-            .map_err(|e| ToolError::Other(anyhow!(e)))?;
+        let time_format = format_description!("[hour]:[minute]");
         let parsed_time = Time::parse(&time, &time_format)
             .map_err(|e| ToolError::Other(anyhow!("Invalid time format for '{}': {}", time, e)))?;
 
