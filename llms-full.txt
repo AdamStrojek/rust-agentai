@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` keeps a conversation history, calls a model, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`.
 
-This guide describes `agentai` 0.1.5 (the `master` branch). The crate is pre-1.0 and its API changes between minor versions, so check the version in `Cargo.toml` before relying on it.
+This guide was written for `agentai` 0.1.5. The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -173,8 +173,11 @@ impl WeatherToolBox {
 
     /// Converts Celsius to Fahrenheit.
     #[tool(name = "celsius_to_fahrenheit")]
-    fn convert(&self, /// Temperature in Celsius
-        celsius: f64) -> ToolResult {
+    fn convert(
+        &self,
+        /// Temperature in Celsius
+        celsius: f64,
+    ) -> ToolResult {
         Ok(format!("{}", celsius * 9.0 / 5.0 + 32.0))
     }
 }
@@ -193,7 +196,7 @@ Rules:
 - `Tool`, `ToolBox`, `ToolError` and `ToolResult` must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
 - The type must be `Send + Sync + 'static`.
 
-Error handling in generated toolboxes: if the arguments do not deserialize, or the method returns any `Err`, the generated code prints the details to stderr and returns `ToolError::ExecutionError`. The model then sees only `Tool execution failed`, not your message. To give the model a useful explanation (for example "unknown city"), return `Ok` with that text, or implement `ToolBox` by hand.
+Error handling in generated toolboxes: if the arguments do not deserialize, or the method returns any `Err` (including `ToolError::LLMError`), the generated code prints the details to stderr and returns `ToolError::ExecutionError`. The model then sees only `Tool execution failed`, not your message. This also applies to the ready-made toolboxes below, which are written with `#[toolbox]`. To give the model a useful explanation (for example "unknown city"), return `Ok` with that text, or implement `ToolBox` by hand.
 
 ### Implementing `ToolBox` by hand
 

@@ -4,7 +4,7 @@
 
 Key facts for code generation:
 
-- The crate is pre-1.0 and the API changes between minor versions. This file describes `agentai` 0.1.5 (the `master` branch).
+- The crate is pre-1.0 and the API changes between minor versions. This file was written for `agentai` 0.1.5; check the CHANGELOG for later changes.
 - The library is async. Examples use `tokio` with `#[tokio::main]` and return `anyhow::Result`.
 - Create an agent with `Agent::new(system)`, `Agent::new_with_url(base_url, api_key, system)` or `Agent::new_with_client(genai_client, system)`.
 - Ask with `agent.run::<T>(model, prompt, toolbox)`. Use `T = String` for plain text. Any other `T` turns on structured output.
