@@ -12,7 +12,10 @@ use crate::tool::{ToolBox, ToolError};
 use genai::Client;
 /// Provider (genai adapter) selector used by [`Agent::new_with_provider`], re-exported from genai.
 pub use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, JsonSpec, ToolCall, ToolResponse};
+/// Model options (temperature, max tokens, tool choice, reasoning effort, ...) used by
+/// [`Agent::with_chat_options`], re-exported from genai.
+pub use genai::chat::ChatOptions;
+use genai::chat::{ChatMessage, ChatRequest, JsonSpec, ToolCall, ToolResponse};
 use genai::resolver::{AuthData, Endpoint};
 use log::{debug, trace};
 use schemars::{JsonSchema, schema_for};
@@ -86,19 +89,44 @@ impl AgentError {
     }
 }
 
+/// Default number of model calls in one [`Agent::run`].
+pub const DEFAULT_MAX_ITERATIONS: usize = 5;
+
+/// Default temperature sent with every request, unless [`Agent::with_chat_options`] replaces it.
+pub const DEFAULT_TEMPERATURE: f64 = 0.2;
+
 /// The `Agent` struct represents an agent that interacts with a chat model.
-/// It maintains a history of chat messages, a set of tools, and a context.
+/// It keeps the conversation history and its configuration: how many model calls one
+/// [`run`](Agent::run) may make, and the [`ChatOptions`] sent with every request.
 ///
-/// As `Context` you can provide any structure. Such object will not be used by
-/// `Agent` itself, but it will be passed in unmodified state as reference to any
-/// `AgentTool` trait, that was registered to be used.
+/// ```no_run
+/// use agentai::Agent;
+/// use agentai::genai::chat::{ChatOptions, ReasoningEffort};
+///
+/// # fn main() -> Result<(), agentai::AgentError> {
+/// let agent = Agent::new("You are a useful assistant")?
+///     .with_max_iterations(10)
+///     .with_chat_options(
+///         ChatOptions::default()
+///             .with_temperature(0.0)
+///             .with_max_tokens(2000)
+///             .with_reasoning_effort(ReasoningEffort::Low),
+///     );
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Agent {
     /// Reference to GenAI Client
     client: Client,
 
-    // tool_box: impl ToolBox,
     history: Vec<ChatMessage>,
+
+    /// Maximum number of model calls in one `run`
+    max_iterations: usize,
+
+    /// Options sent with every request
+    chat_options: ChatOptions,
 }
 
 impl Agent {
@@ -135,7 +163,45 @@ impl Agent {
         Self {
             client,
             history: vec![ChatMessage::system(system.trim())],
+            max_iterations: DEFAULT_MAX_ITERATIONS,
+            chat_options: ChatOptions::default().with_temperature(DEFAULT_TEMPERATURE),
         }
+    }
+
+    /// Sets the maximum number of model calls in one [`run`](Agent::run).
+    ///
+    /// Every answer with tool calls uses one iteration, so raise it for tasks that need many
+    /// tool rounds. When the limit is reached without a final answer, `run` returns
+    /// [`AgentError::MaxIterationsReached`]. With `0`, `run` returns that error without
+    /// calling the model. The default is [`DEFAULT_MAX_ITERATIONS`].
+    pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
+        self.max_iterations = max_iterations;
+        self
+    }
+
+    /// Sets the [`ChatOptions`] sent with every request, for example temperature, max tokens,
+    /// [tool choice](genai::chat::ToolChoice) or [reasoning effort](genai::chat::ReasoningEffort).
+    ///
+    /// The options replace the defaults, including the default temperature
+    /// ([`DEFAULT_TEMPERATURE`]); set `with_temperature` yourself if you want to keep one.
+    /// For structured output (`run::<D>` with `D` other than `String`), `run` always sets the
+    /// response format, so a response format given here is replaced.
+    ///
+    /// Options set on a custom genai client passed to [`new_with_client`](Agent::new_with_client)
+    /// still apply. genai uses them for every field these options leave unset.
+    pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {
+        self.chat_options = chat_options;
+        self
+    }
+
+    /// Returns the maximum number of model calls in one [`run`](Agent::run).
+    pub fn max_iterations(&self) -> usize {
+        self.max_iterations
+    }
+
+    /// Returns the [`ChatOptions`] sent with every request.
+    pub fn chat_options(&self) -> &ChatOptions {
+        &self.chat_options
     }
 
     /// Creates a new `Agent` instance that talks to an OpenAI-compatible endpoint
@@ -255,10 +321,8 @@ impl Agent {
         // TODO: What to do when message have images? Should we send them only once?
         self.history.push(ChatMessage::user(prompt));
 
-        // Prepare chat options
-        // TODO: Allow to provide chat options to GenAI
-        // This should be be part
-        let mut chat_opts = ChatOptions::default().with_temperature(0.2);
+        // Agent options, plus the response format for structured output
+        let mut chat_opts = self.chat_options.clone();
 
         let is_answer_string = TypeId::of::<String>() == TypeId::of::<D>();
         if !is_answer_string {
@@ -274,8 +338,7 @@ impl Agent {
             chat_opts = chat_opts.with_response_format(JsonSpec::new("ResponseFormat", json!(obj)));
         }
 
-        // TODO move it to config structure
-        let max_iterations = 5;
+        let max_iterations = self.max_iterations;
 
         for iteration in 0..max_iterations {
             debug!("Agent iteration: {iteration}");
