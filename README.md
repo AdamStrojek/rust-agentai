@@ -31,7 +31,7 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
-#### Agent providers, remote MCP and configuration (version 0.2.0)
+#### 0.2.0 - Agent providers, remote MCP and configuration
 
 - **Creating agents**: `Agent::new_with_provider` binds an agent to any
   genai provider with an explicit API key, for example the native OpenRouter adapter, which needs no base URL:
@@ -57,7 +57,7 @@ and tool parameter types need `schemars` 1.x. Read the
 [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading: it lists
 every breaking change and how to migrate.
 
-#### `ToolBox` (version 0.1.5)
+#### 0.1.5 - `ToolBox`
 
 This release introduces the [`ToolBox`](https://docs.rs/agentai/latest/agentai/tool/trait.ToolBox.html), a new feature providing an easy-to-use interface for supplying tools to AI agents.
 
