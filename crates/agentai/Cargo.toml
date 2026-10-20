@@ -1,6 +1,6 @@
 [package]
 name = "agentai"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Adam Strojek <adam@strojek.info>"]
@@ -16,7 +16,7 @@ exclude = ["release-plz.toml", ".github"]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
-agentai-macros = { path = "../agentai-macros", version = "0.1", optional = true }
+agentai-macros = { path = "../agentai-macros", version = "0.2", optional = true }
 genai = "0.7"
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.5...agentai-v0.2.0) - 2026-10-20
+
+### New features
+- *(macros)* add #[tool(strict)] for strict tool schemas ([#61](https://github.com/AdamStrojek/rust-agentai/pull/61)) (by @AdamStrojek)
+- *(agent)* configurable max_iterations and ChatOptions ([#59](https://github.com/AdamStrojek/rust-agentai/pull/59)) (by @AdamStrojek)
+- *(agent)* add Agent::new_with_provider and native OpenRouter support ([#58](https://github.com/AdamStrojek/rust-agentai/pull/58)) (by @AdamStrojek)
+- *(error)* [**breaking**] replace anyhow with typed AgentError and ToolError ([#56](https://github.com/AdamStrojek/rust-agentai/pull/56)) (by @AdamStrojek)
+- *(mcp)* replace mcp_client_rs with the official rmcp SDK ([#53](https://github.com/AdamStrojek/rust-agentai/pull/53)) (by @AdamStrojek)
+- [**breaking**] upgrade genai to 0.7, schemars 1, reqwest 0.13 and edition 2024 ([#52](https://github.com/AdamStrojek/rust-agentai/pull/52)) (by @AdamStrojek) - #52
+- mark Send and Sync on Toolbox trait ([#32](https://github.com/AdamStrojek/rust-agentai/pull/32)) (by @fvanzee) - #32
+
+### Fixes
+- *(tools)* replace deprecated time format parsing in buildin tools ([#41](https://github.com/AdamStrojek/rust-agentai/pull/41)) (by @AdamStrojek)
+
+### Miscellaneous
+- add project logo ([#54](https://github.com/AdamStrojek/rust-agentai/pull/54)) (by @AdamStrojek) - #54
+- run LLM tests against a free OpenRouter model ([#43](https://github.com/AdamStrojek/rust-agentai/pull/43)) (by @AdamStrojek) - #43
+- *(deps)* upgrade agentai-macros to syn 3 ([#60](https://github.com/AdamStrojek/rust-agentai/pull/60)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+* @fvanzee
+
 ## [0.1.5](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.4...agentai-v0.1.5) - 2025-07-20
 
 ### New features
