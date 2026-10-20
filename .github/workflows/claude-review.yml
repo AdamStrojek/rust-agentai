@@ -30,11 +30,21 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Review this pull request. Follow CLAUDE.md. Focus on correctness bugs, API
-            breakage that is not intentional, unsafe error handling (unwrap/todo! in library
-            code), and missing docs or examples for new public items.
+            Review this pull request. Follow CLAUDE.md. Focus on correctness bugs, unsafe
+            error handling (unwrap/todo! in library code), and missing docs or examples for
+            new public items.
 
-            Post specific issues as inline comments and finish with one summary comment.
+            Backward compatibility: compare the public API of `agentai` and `agentai-macros`
+            against the base branch. List every breaking change: removed or renamed public
+            items, changed signatures, trait bounds or generic parameters, new required trait
+            methods, removed or renamed Cargo features, and changed runtime behaviour of
+            `Agent::run`, `ToolBox`, `#[toolbox]` or memory. For each, say what a library
+            user has to change in their code. The crate is pre-1.0, so breaking changes are
+            allowed: report them as changelog notes, not as defects, unless they look
+            unintended. Say explicitly when the PR has no breaking changes.
+
+            Post specific issues as inline comments and finish with one summary comment
+            that has a "Breaking changes" section.
           claude_args: |
             --model claude-sonnet-5-5
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(cargo check:*),Bash(cargo clippy:*)"
