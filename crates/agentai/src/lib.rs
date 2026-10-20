@@ -86,6 +86,11 @@
 //! cargo run --example simple
 //! ```
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/assets/logo-docs.png",
+    html_favicon_url = "https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/assets/favicon.png"
+)]
+
 pub mod agent;
 pub mod tool;
 
