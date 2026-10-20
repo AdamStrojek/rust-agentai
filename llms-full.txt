@@ -29,7 +29,7 @@ For a minimal build: `agentai = { version = "0.2", default-features = false, fea
 
 ## Creating an agent
 
-`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new` and `new_with_url` return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building a genai client can fail.
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new`, `new_with_url` and `new_with_provider` return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building a genai client can fail.
 
 ```rust
 use agentai::Agent;
@@ -51,10 +51,25 @@ let mut agent = Agent::new_with_url(
     "You are a useful assistant",
 )?;
 
-// 3. Your own genai::Client, for custom resolvers or default chat options.
+// 3. One genai provider (adapter) with an explicit key. Bare model names go
+//    to that provider. `None` keeps its default endpoint; pass Some(url)
+//    to override it. `AdapterKind` is re-exported from genai.
+use agentai::AdapterKind;
+let mut agent = Agent::new_with_provider(
+    AdapterKind::OpenRouter,
+    None,
+    &std::env::var("OPENROUTER_API_KEY")?,
+    "You are a useful assistant",
+)?;
+
+// 4. Your own genai::Client, for custom resolvers or default chat options.
 let client = genai::Client::new()?;
 let mut agent = Agent::new_with_client(client, "You are a useful assistant");
 ```
+
+`new_with_url(url, key, system)` is the same as `new_with_provider(AdapterKind::OpenAI, Some(url), key, system)`.
+
+With `Agent::new` you can still pick a provider per call through genai's model namespaces, for example `open_router::nvidia/nemotron-3.5-super-vl:free`. genai then reads the key from the provider's environment variable (`OPEN_ROUTER_API_KEY` for OpenRouter). An agent created with `new_with_url` or `new_with_provider` is bound to one provider: a model name with another namespace fails with an adapter mismatch error.
 
 `Agent` implements `Clone`. A clone copies the conversation history so far, so you can branch a conversation.
 

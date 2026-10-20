@@ -12,6 +12,7 @@
 //! The list of all available examples can be found below
 
 pub mod genai_custom;
+pub mod openrouter;
 pub mod simple;
 pub mod struct_output;
 pub mod tools_custom;
