@@ -12,17 +12,28 @@ use crate::tool::{ToolBox, ToolError};
 use genai::Client;
 /// Provider (genai adapter) selector used by [`Agent::new_with_provider`], re-exported from genai.
 pub use genai::adapter::AdapterKind;
+/// A message of the conversation history, re-exported from genai. The history is yours: pass it
+/// to [`AgentRun::history`] and append [`RunResult::new_messages`] to it after a run.
+pub use genai::chat::ChatMessage;
 /// Model options (temperature, max tokens, tool choice, reasoning effort, ...) used by
 /// [`Agent::with_chat_options`], re-exported from genai.
 pub use genai::chat::ChatOptions;
-use genai::chat::{ChatMessage, ChatRequest, JsonSpec, ToolCall, ToolResponse};
+/// Why the model stopped, re-exported from genai. See [`RunResult::stop_reason`].
+pub use genai::chat::StopReason;
+/// A tool call requested by the model, re-exported from genai.
+pub use genai::chat::ToolCall;
+/// Token usage, re-exported from genai. See [`RunResult::usage`].
+pub use genai::chat::Usage;
 use genai::resolver::{AuthData, Endpoint};
-use log::{debug, trace};
-use schemars::{JsonSchema, schema_for};
-use serde::de::DeserializeOwned;
-use serde_json::{Value, from_str, json};
-use std::any::TypeId;
+use std::sync::Arc;
 use thiserror::Error;
+
+mod core;
+mod run;
+mod stream;
+
+pub use run::{AgentRun, RunOptions, RunResult};
+pub use stream::{AgentEvent, AgentStream};
 
 #[cfg(test)]
 mod tests;
@@ -52,6 +63,17 @@ pub enum AgentError {
         #[source]
         source: serde_json::Error,
     },
+    /// The final answer was cut off by the token limit (for example `max_tokens` in
+    /// [`ChatOptions`]). Holds the truncated text. Raise the limit or ask for a shorter answer.
+    #[error("the model answer was truncated by the token limit")]
+    MaxTokens {
+        /// Truncated text returned by the model.
+        raw: String,
+    },
+    /// No model was set, neither with [`Agent::with_model`] nor for the run
+    /// ([`AgentRun::model`]).
+    #[error("no model set: use Agent::with_model or AgentRun::model")]
+    MissingModel,
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
     MaxIterationsReached(usize),
@@ -96,8 +118,12 @@ pub const DEFAULT_MAX_ITERATIONS: usize = 5;
 pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
-/// It keeps the conversation history and its configuration: how many model calls one
-/// [`run`](Agent::run) may make, and the [`ChatOptions`] sent with every request.
+///
+/// An agent is configuration only: the genai client, the system prompt, the default model and
+/// toolbox, how many model calls one [`run`](Agent::run) may make, and the [`ChatOptions`] sent
+/// with every request. It does not keep the conversation. You own the history, pass it to
+/// [`AgentRun::history`] and append [`RunResult::new_messages`] to it, so one agent can serve
+/// many conversations at once. Cloning an agent is cheap.
 ///
 /// ```no_run
 /// use agentai::Agent;
@@ -105,6 +131,7 @@ pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 ///
 /// # fn main() -> Result<(), agentai::AgentError> {
 /// let agent = Agent::new("You are a useful assistant")?
+///     .with_model("gpt-4o")
 ///     .with_max_iterations(10)
 ///     .with_chat_options(
 ///         ChatOptions::default()
@@ -120,7 +147,14 @@ pub struct Agent {
     /// Reference to GenAI Client
     client: Client,
 
-    history: Vec<ChatMessage>,
+    /// System prompt sent with every request. It is not part of the history.
+    system: String,
+
+    /// Model used when the run does not set one
+    model: Option<String>,
+
+    /// Toolbox used when the run does not set one
+    toolbox: Option<Arc<dyn ToolBox>>,
 
     /// Maximum number of model calls in one `run`
     max_iterations: usize,
@@ -138,7 +172,7 @@ impl Agent {
     ///
     /// # Arguments
     ///
-    /// * `system` - The system message to initialize the chat history.
+    /// * `system` - The system prompt sent with every request.
     ///
     /// # Errors
     ///
@@ -154,7 +188,7 @@ impl Agent {
     /// # Arguments
     ///
     /// * `client` - User provided GenAI Client
-    /// * `system` - The system message to initialize the chat history.
+    /// * `system` - The system prompt sent with every request.
     ///
     /// # Returns
     ///
@@ -162,10 +196,33 @@ impl Agent {
     pub fn new_with_client(client: Client, system: &str) -> Self {
         Self {
             client,
-            history: vec![ChatMessage::system(system.trim())],
+            system: system.trim().to_string(),
+            model: None,
+            toolbox: None,
             max_iterations: DEFAULT_MAX_ITERATIONS,
             chat_options: ChatOptions::default().with_temperature(DEFAULT_TEMPERATURE),
         }
+    }
+
+    /// Sets the model used by every [`run`](Agent::run), unless the run sets its own with
+    /// [`AgentRun::model`]. Without a model, a run returns [`AgentError::MissingModel`].
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// Sets the toolbox used by every [`run`](Agent::run), unless the run sets its own with
+    /// [`AgentRun::toolbox`]. Combine several toolboxes with
+    /// [`ToolBoxSet`](crate::tool::ToolBoxSet).
+    pub fn with_toolbox(self, toolbox: impl ToolBox) -> Self {
+        self.with_toolbox_arc(Arc::new(toolbox))
+    }
+
+    /// Same as [`with_toolbox`](Agent::with_toolbox), for a toolbox you already share in an
+    /// [`Arc`], for example between several agents.
+    pub fn with_toolbox_arc(mut self, toolbox: Arc<dyn ToolBox>) -> Self {
+        self.toolbox = Some(toolbox);
+        self
     }
 
     /// Sets the maximum number of model calls in one [`run`](Agent::run).
@@ -204,6 +261,70 @@ impl Agent {
         &self.chat_options
     }
 
+    /// Returns the system prompt sent with every request.
+    pub fn system(&self) -> &str {
+        &self.system
+    }
+
+    /// Returns the model set with [`with_model`](Agent::with_model).
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    /// Returns the toolbox set with [`with_toolbox`](Agent::with_toolbox).
+    pub fn toolbox(&self) -> Option<&Arc<dyn ToolBox>> {
+        self.toolbox.as_ref()
+    }
+
+    /// Starts a run: sends `prompt` to the model, runs the tools the model asks for and
+    /// returns the final answer as `D`.
+    ///
+    /// The returned [`AgentRun`] is configured with builder methods and executed with
+    /// `.await`, or streamed with [`AgentRun::stream`]. Pass the conversation so far with [`AgentRun::history`], and change the model,
+    /// toolbox or options for this run only with [`AgentRun::model`], [`AgentRun::toolbox`] or
+    /// [`AgentRun::with_options`].
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, ChatMessage, RunResult};
+    ///
+    /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
+    /// let mut history: Vec<ChatMessage> = Vec::new();
+    ///
+    /// let result: RunResult<String> = agent.run("Why is the sky blue?").history(&history).await?;
+    /// println!("{}", result.answer);
+    /// history.extend(result.new_messages);
+    ///
+    /// let result: RunResult<String> = agent.run("And why is it red at sunset?").history(&history).await?;
+    /// println!("{}", result.answer);
+    /// history.extend(result.new_messages);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Awaiting the run returns an [`AgentError`]:
+    /// - [`MissingModel`](AgentError::MissingModel) when no model is set;
+    /// - [`Llm`](AgentError::Llm) when the request to the model fails (see
+    ///   [`AgentError::is_transient`]);
+    /// - [`Schema`](AgentError::Schema) when the schema of `D` cannot be generated;
+    /// - [`InvalidAnswer`](AgentError::InvalidAnswer) when the answer does not match `D`;
+    /// - [`MaxTokens`](AgentError::MaxTokens) when the answer was cut off by the token limit;
+    /// - [`MaxIterationsReached`](AgentError::MaxIterationsReached) when there is no final answer;
+    /// - [`Tool`](AgentError::Tool) when a tool fails with a fatal error. Recoverable tool errors
+    ///   ([`ToolError::is_recoverable`]) are sent to the model instead.
+    ///
+    /// Your history is never changed, so after an error you can retry with the same history.
+    ///
+    /// ## Structured Output
+    /// The answer type `D` decides between text and structured output: with `String` the model
+    /// answers in plain text, with any other type the model is asked for JSON matching its schema.
+    ///
+    /// For more information go to [crate::structured_output]
+    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRun<'_, D> {
+        AgentRun::new(self, prompt.into())
+    }
+
     /// Creates a new `Agent` instance that talks to an OpenAI-compatible endpoint
     /// (OpenAI, OpenRouter, LiteLLM, Ollama, ...).
     ///
@@ -216,7 +337,7 @@ impl Agent {
     ///
     /// * `base_url` - Base URL of the API, for example `https://openrouter.ai/api/v1/`.
     /// * `api_key` - API key sent with every request.
-    /// * `system` - The system message to initialize the chat history.
+    /// * `system` - The system prompt sent with every request.
     ///
     /// # Errors
     ///
@@ -251,7 +372,7 @@ impl Agent {
     /// * `base_url` - Endpoint override. `None` keeps the provider's default endpoint, for
     ///   example `https://openrouter.ai/api/v1/` for OpenRouter.
     /// * `api_key` - API key sent with every request.
-    /// * `system` - The system message to initialize the chat history.
+    /// * `system` - The system prompt sent with every request.
     ///
     /// # Errors
     ///
@@ -273,195 +394,5 @@ impl Agent {
         };
         let client = builder.build().map_err(AgentError::ClientInit)?;
         Ok(Self::new_with_client(client, system))
-    }
-
-    /// Runs the agent with the given model and prompt.
-    ///
-    /// # Arguments
-    ///
-    /// * `model` - The model to use for the chat.
-    /// * `prompt` - The prompt to send to the chat model.
-    ///
-    /// # Returns
-    ///
-    /// A result containing the deserialized response.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`AgentError`]:
-    /// - [`Llm`](AgentError::Llm) when the request to the model fails (see
-    ///   [`AgentError::is_transient`]);
-    /// - [`Schema`](AgentError::Schema) when the schema of `D` cannot be generated;
-    /// - [`InvalidAnswer`](AgentError::InvalidAnswer) when the answer does not match `D`;
-    /// - [`MaxIterationsReached`](AgentError::MaxIterationsReached) when there is no final answer;
-    /// - [`Tool`](AgentError::Tool) when a tool fails with a fatal error. Recoverable tool errors
-    ///   ([`ToolError::is_recoverable`]) are sent to the model instead.
-    ///
-    /// ## Structured Output
-    /// Type returned by this function is responsible for setting LLM response into structured output
-    ///
-    /// For more information go to [crate::structured_output]
-    pub async fn run<D>(
-        &mut self,
-        model: &str,
-        prompt: &str,
-        toolbox: Option<&dyn ToolBox>,
-    ) -> Result<D, AgentError>
-    where
-        D: DeserializeOwned + JsonSchema + 'static,
-    {
-        // TODO change returned type
-        // Need to create new type that will provide not only response structure,
-        // but also statistics and reasoning.
-        debug!("Agent Question: {prompt}");
-        // Add new request to history
-        // TODO: Create new history trait
-        // This will allow on configuring behaviour of messages. When doing multi-agent
-        // approach we could decide what history is being used, should we save all messages etc.
-        // TODO: What to do when message have images? Should we send them only once?
-        self.history.push(ChatMessage::user(prompt));
-
-        // Agent options, plus the response format for structured output
-        let mut chat_opts = self.chat_options.clone();
-
-        let is_answer_string = TypeId::of::<String>() == TypeId::of::<D>();
-        if !is_answer_string {
-            // If answer type is more complex then add response format to request options
-            let mut response_schema = serde_json::to_value(schema_for!(D))
-                .map_err(|err| AgentError::Schema(err.to_string()))?;
-            let obj = response_schema.as_object_mut().ok_or_else(|| {
-                AgentError::Schema("JSON schema of the answer type is not an object".to_string())
-            })?;
-            // Schemars attaches additional fields and not every LLM accepts them (Gemini)
-            obj.remove("$schema");
-            obj.remove("title");
-            chat_opts = chat_opts.with_response_format(JsonSpec::new("ResponseFormat", json!(obj)));
-        }
-
-        let max_iterations = self.max_iterations;
-
-        for iteration in 0..max_iterations {
-            debug!("Agent iteration: {iteration}");
-            // Create chat request
-            let mut chat_req = ChatRequest::new(self.history.clone());
-            if let Some(toolbox) = toolbox {
-                let definitions =
-                    toolbox
-                        .tools_definitions()
-                        .map_err(|source| AgentError::Tool {
-                            tool: String::new(),
-                            source,
-                        })?;
-                chat_req = chat_req.with_tools(definitions);
-            }
-            let chat_resp = self
-                .client
-                .exec_chat(model, chat_req, Some(&chat_opts))
-                .await
-                .map_err(AgentError::Llm)?;
-
-            // Collect tool calls before the response is consumed. Some models return text
-            // (e.g. "Let me check...") together with tool calls; the tool calls win.
-            let tool_calls: Vec<ToolCall> = chat_resp.tool_calls().into_iter().cloned().collect();
-
-            if !tool_calls.is_empty() {
-                // Keeps text, reasoning and provider continuation data next to the tool calls
-                if let Some(assistant_msg) = chat_resp.into_assistant_message_for_tool_use() {
-                    self.history.push(assistant_msg);
-                }
-                let mut fatal: Option<AgentError> = None;
-                for tool_call in tool_calls {
-                    if fatal.is_some() {
-                        // The run is stopping. Every tool call still needs a response, or the
-                        // history would be rejected by the provider on the next `run`.
-                        self.history.push(
-                            ToolResponse::from_tool_call(
-                                &tool_call,
-                                "Tool was not executed because an earlier tool call failed"
-                                    .to_string(),
-                            )
-                            .into(),
-                        );
-                        continue;
-                    }
-                    trace!(
-                        "Tool request: {} with arguments: {}",
-                        tool_call.fn_name, tool_call.fn_arguments
-                    );
-                    let content = match toolbox {
-                        Some(toolbox) => {
-                            match toolbox
-                                .call_tool(
-                                    tool_call.fn_name.clone(),
-                                    tool_call.fn_arguments.clone(),
-                                )
-                                .await
-                            {
-                                Ok(result) => {
-                                    trace!("Tool result: {result}");
-                                    result
-                                }
-                                Err(err) if err.is_recoverable() => {
-                                    // Recoverable errors go back to the model, so it can react
-                                    // to them. Some MCP servers return important information
-                                    // as errors.
-                                    trace!("Tool error: {err}");
-                                    err.to_string()
-                                }
-                                Err(source) => {
-                                    // Retrying cannot help, so the run stops
-                                    debug!("Fatal error in tool '{}': {source}", tool_call.fn_name);
-                                    let message = format!("Tool failed: {source}");
-                                    fatal = Some(AgentError::Tool {
-                                        tool: tool_call.fn_name.clone(),
-                                        source,
-                                    });
-                                    message
-                                }
-                            }
-                        }
-                        None => {
-                            debug!(
-                                "Model requested tool '{}' but no toolbox was provided",
-                                tool_call.fn_name
-                            );
-                            format!(
-                                "Tool '{}' is not available: no tools were provided",
-                                tool_call.fn_name
-                            )
-                        }
-                    };
-                    self.history
-                        .push(ToolResponse::from_tool_call(&tool_call, content).into());
-                }
-                if let Some(err) = fatal {
-                    return Err(err);
-                }
-                continue;
-            }
-
-            let texts = chat_resp.content.into_texts();
-            if texts.is_empty() {
-                // Nothing usable in this response (for example only reasoning), ask again
-                debug!("Agent iteration {iteration}: response has no text and no tool calls");
-                continue;
-            }
-            // Structured output may be split across several text parts
-            let raw = texts.join("");
-            debug!("Agent Answer: {raw}");
-            self.history.push(ChatMessage::assistant(raw.clone()));
-            let resp = if is_answer_string {
-                // TODO: Workaround when choosing String as response type. Because we are
-                // expecting D: DeserializeOwned then we can't return String directly.
-                // To workaround this I escape content and later deserialize it using
-                // serde_json::from_str to correct "struct" (String)
-                Value::String(raw.clone()).to_string()
-            } else {
-                raw.clone()
-            };
-            return from_str(&resp).map_err(|source| AgentError::InvalidAnswer { raw, source });
-        }
-
-        Err(AgentError::MaxIterationsReached(max_iterations))
     }
 }

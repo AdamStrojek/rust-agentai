@@ -1,8 +1,8 @@
-use agentai::Agent;
 use agentai::tool::{
     ToolBoxSet,
     web::{WebFetchToolBox, WebSearchToolBox},
 };
+use agentai::{Agent, RunResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use schemars::JsonSchema;
@@ -40,11 +40,13 @@ async fn main() -> Result<()> {
     let model =
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
+    let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?
+        .with_model(&model)
+        .with_toolbox(toolbox);
 
-    let answer: Answer = agent.run(&model, question, Some(&toolbox)).await?;
+    let result: RunResult<Answer> = agent.run(question).await?;
 
-    info!("{:#?}", answer);
+    info!("{:#?}", result.answer);
 
     Ok(())
 }

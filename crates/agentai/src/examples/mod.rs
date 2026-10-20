@@ -14,6 +14,7 @@
 pub mod genai_custom;
 pub mod openrouter;
 pub mod simple;
+pub mod streaming;
 pub mod struct_output;
 pub mod tools_custom;
 pub mod tools_mcp;

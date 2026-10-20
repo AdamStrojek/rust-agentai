@@ -1,4 +1,4 @@
-use agentai::Agent;
+use agentai::{Agent, RunResult};
 use anyhow::Result;
 use genai::chat::ChatOptions;
 use genai::{
@@ -52,11 +52,11 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let mut agent = Agent::new_with_client(client, SYSTEM);
+    let agent = Agent::new_with_client(client, SYSTEM).with_model(&model);
 
-    let answer: String = agent.run(&model, question, None).await?;
+    let result: RunResult<String> = agent.run(question).await?;
 
-    info!("Answer: {}", answer);
+    info!("Answer: {}", result.answer);
 
     Ok(())
 }

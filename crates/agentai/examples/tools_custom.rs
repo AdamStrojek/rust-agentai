@@ -4,8 +4,8 @@
 //! provided by the `agentai` crate. This tool will be used by the AI agent to fetch content from a URL.
 //!
 
-use agentai::Agent;
 use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
+use agentai::{Agent, RunResult};
 use anyhow::Error;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -35,11 +35,13 @@ async fn main() -> Result<(), Error> {
     let model =
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
+    let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?
+        .with_model(&model)
+        .with_toolbox(toolbox);
 
-    let answer: String = agent.run(&model, question, Some(&toolbox)).await?;
+    let result: RunResult<String> = agent.run(question).await?;
 
-    info!("Answer: {}", answer);
+    info!("Answer: {}", result.answer);
 
     Ok(())
 }
@@ -78,7 +80,7 @@ impl UrlFetcherToolBox {
         // Errors the model can react to, such as a bad URL, are `ToolError::Failed` or
         // `ToolError::InvalidArguments`: the agent sends them to the model, which can then try
         // again. Use `ToolError::Configuration` or `ToolError::fatal(..)` for problems that
-        // retrying cannot fix: `Agent::run` then stops and returns `AgentError::Tool`.
+        // retrying cannot fix: the run then stops and returns `AgentError::Tool`.
         reqwest::get(&url)
             .await
             .map_err(|e| ToolError::Failed(format!("Request to {url} failed: {e}")))?

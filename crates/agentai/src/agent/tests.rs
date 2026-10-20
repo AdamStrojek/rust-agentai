@@ -3,6 +3,7 @@ use crate::tool::{Tool, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -56,8 +57,13 @@ impl MockLlm {
                         .unwrap()
                         .pop_front()
                         .expect("mock LLM has no more responses");
+                    let content_type = if payload.starts_with("data:") {
+                        "text/event-stream"
+                    } else {
+                        "application/json"
+                    };
                     let response = format!(
-                        "HTTP/1.1 {status} Mock\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                        "HTTP/1.1 {status} Mock\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
                         payload.len()
                     );
                     socket.write_all(response.as_bytes()).await.unwrap();
@@ -69,7 +75,9 @@ impl MockLlm {
     }
 
     fn agent(&self) -> Agent {
-        Agent::new_with_url(&self.base_url, "test-key", "system").unwrap()
+        Agent::new_with_url(&self.base_url, "test-key", "system")
+            .unwrap()
+            .with_model("m")
     }
 
     fn requests(&self) -> Vec<String> {
@@ -134,13 +142,15 @@ async fn recoverable_tool_error_lets_the_model_retry() {
         make_error: || ToolError::InvalidArguments("timezone is unknown".to_string()),
     };
 
-    let answer: String = llm
+    let result: RunResult<String> = llm
         .agent()
-        .run("m", "question", Some(&toolbox))
+        .with_toolbox(toolbox)
+        .run("question")
         .await
         .unwrap();
 
-    assert_eq!(answer, "recovered");
+    assert_eq!(result.answer, "recovered");
+    assert_eq!(result.iterations, 2);
     let requests = llm.requests();
     assert_eq!(requests.len(), 2);
     // The second request carries the tool error as the tool result
@@ -156,7 +166,8 @@ async fn fatal_tool_error_ends_the_run() {
 
     let err = llm
         .agent()
-        .run::<String>("m", "question", Some(&toolbox))
+        .with_toolbox(toolbox)
+        .run::<String>("question")
         .await
         .unwrap_err();
 
@@ -181,11 +192,7 @@ async fn invalid_answer_keeps_the_raw_text() {
     }
     let llm = MockLlm::start(vec![text_reply("not json at all")]).await;
 
-    let err = llm
-        .agent()
-        .run::<Answer>("m", "question", None)
-        .await
-        .unwrap_err();
+    let err = llm.agent().run::<Answer>("question").await.unwrap_err();
 
     match err {
         AgentError::InvalidAnswer { raw, .. } => assert_eq!(raw, "not json at all"),
@@ -202,7 +209,8 @@ async fn running_out_of_iterations_is_reported() {
 
     let err = llm
         .agent()
-        .run::<String>("m", "question", Some(&toolbox))
+        .with_toolbox(toolbox)
+        .run::<String>("question")
         .await
         .unwrap_err();
 
@@ -217,11 +225,11 @@ async fn provider_errors_know_if_they_are_transient() {
     ])
     .await;
 
-    let err = llm.agent().run::<String>("m", "q", None).await.unwrap_err();
+    let err = llm.agent().run::<String>("q").await.unwrap_err();
     assert!(matches!(err, AgentError::Llm(_)));
     assert!(err.is_transient());
 
-    let err = llm.agent().run::<String>("m", "q", None).await.unwrap_err();
+    let err = llm.agent().run::<String>("q").await.unwrap_err();
     assert!(matches!(err, AgentError::Llm(_)));
     assert!(!err.is_transient());
 }
@@ -249,7 +257,8 @@ async fn max_iterations_can_be_configured() {
     let err = llm
         .agent()
         .with_max_iterations(2)
-        .run::<String>("m", "question", Some(&toolbox))
+        .with_toolbox(toolbox)
+        .run::<String>("question")
         .await
         .unwrap_err();
 
@@ -264,7 +273,7 @@ async fn zero_iterations_do_not_call_the_model() {
     let err = llm
         .agent()
         .with_max_iterations(0)
-        .run::<String>("m", "question", None)
+        .run::<String>("question")
         .await
         .unwrap_err();
 
@@ -278,7 +287,7 @@ async fn default_options_send_the_default_temperature() {
 
     let agent = llm.agent();
     assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
-    let _: String = agent.clone().run("m", "question", None).await.unwrap();
+    let _: RunResult<String> = agent.run("question").await.unwrap();
 
     assert_eq!(
         request_json(&llm, 0)["temperature"],
@@ -296,10 +305,10 @@ async fn chat_options_are_sent_with_every_request() {
         .with_max_tokens(123)
         .with_tool_choice(ToolChoice::Required);
 
-    let _: String = llm
+    let _: RunResult<String> = llm
         .agent()
         .with_chat_options(options)
-        .run("m", "question", None)
+        .run("question")
         .await
         .unwrap();
 
@@ -322,14 +331,14 @@ async fn structured_output_keeps_custom_options() {
 
     let llm = MockLlm::start(vec![text_reply(r#"{"value": 7}"#)]).await;
 
-    let answer: Answer = llm
+    let result: RunResult<Answer> = llm
         .agent()
         .with_chat_options(ChatOptions::default().with_temperature(0.0))
-        .run("m", "question", None)
+        .run("question")
         .await
         .unwrap();
 
-    assert_eq!(answer.value, 7);
+    assert_eq!(result.answer.value, 7);
     let request = request_json(&llm, 0);
     assert_eq!(request["temperature"], json!(0.0));
     assert!(request.get("response_format").is_some());
@@ -364,9 +373,10 @@ impl StrictTools {
 async fn strict_tools_are_sent_as_strict() {
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
 
-    let _: String = llm
+    let _: RunResult<String> = llm
         .agent()
-        .run("m", "question", Some(&StrictTools))
+        .with_toolbox(StrictTools)
+        .run("question")
         .await
         .unwrap();
 
@@ -386,4 +396,351 @@ async fn strict_tools_are_sent_as_strict() {
     assert_eq!(strict["parameters"]["additionalProperties"], json!(false));
     assert_eq!(strict["parameters"]["required"], json!(["text"]));
     assert_eq!(function("plain_echo")["strict"], json!(false));
+}
+
+/// Toolbox with one tool, `echo`, that returns "echoed".
+struct EchoToolBox;
+
+#[async_trait]
+impl ToolBox for EchoToolBox {
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        Ok(vec![Tool::new("echo")])
+    }
+
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult {
+        Ok("echoed".to_string())
+    }
+}
+
+fn sse(chunks: Vec<Value>) -> (u16, String) {
+    let mut body = String::new();
+    for chunk in chunks {
+        body.push_str(&format!("data: {chunk}\n\n"));
+    }
+    body.push_str("data: [DONE]\n\n");
+    (200, body)
+}
+
+fn sse_chunk(delta: Value, finish_reason: Option<&str>) -> Value {
+    json!({
+        "id": "1", "object": "chat.completion.chunk", "created": 0, "model": "m",
+        "choices": [{ "index": 0, "delta": delta, "finish_reason": finish_reason }]
+    })
+}
+
+fn sse_usage() -> Value {
+    json!({
+        "id": "1", "object": "chat.completion.chunk", "created": 0, "model": "m",
+        "choices": [],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    })
+}
+
+fn streamed_text_reply(parts: &[&str]) -> (u16, String) {
+    let mut chunks: Vec<Value> = parts
+        .iter()
+        .map(|part| sse_chunk(json!({ "role": "assistant", "content": part }), None))
+        .collect();
+    chunks.push(sse_chunk(json!({}), Some("stop")));
+    chunks.push(sse_usage());
+    sse(chunks)
+}
+
+fn streamed_tool_call_reply() -> (u16, String) {
+    sse(vec![
+        sse_chunk(
+            json!({ "role": "assistant", "tool_calls": [{
+                "index": 0, "id": "call_1", "type": "function",
+                "function": { "name": "echo", "arguments": "" }
+            }]}),
+            None,
+        ),
+        sse_chunk(
+            json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "{}" } }]}),
+            None,
+        ),
+        sse_chunk(json!({}), Some("tool_calls")),
+        sse_usage(),
+    ])
+}
+
+fn truncated_reply(text: &str) -> (u16, String) {
+    let body = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": text },
+            "finish_reason": "length"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    (200, body.to_string())
+}
+
+/// Messages as JSON, to compare them.
+fn messages_json(messages: &[ChatMessage]) -> Value {
+    serde_json::to_value(messages).unwrap()
+}
+
+#[tokio::test]
+async fn run_returns_only_the_new_messages() {
+    let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
+    let history = vec![
+        ChatMessage::user("earlier question"),
+        ChatMessage::assistant("earlier answer"),
+    ];
+
+    let result: RunResult<String> = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run("question")
+        .history(&history)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "done");
+    // prompt, assistant tool call, tool response, final answer
+    assert_eq!(result.new_messages.len(), 4);
+    let new = messages_json(&result.new_messages);
+    assert!(!new.to_string().contains("earlier"));
+    assert!(!new.to_string().contains("\"system\""));
+    assert_eq!(result.usage.total_tokens, Some(4));
+    assert_eq!(result.iterations, 2);
+    assert!(matches!(result.stop_reason, Some(StopReason::Completed(_))));
+
+    // The request carries the system prompt and the history before the prompt
+    let messages = request_json(&llm, 0)["messages"].clone();
+    assert_eq!(messages[0]["role"], json!("system"));
+    assert_eq!(messages[0]["content"], json!("system"));
+    assert_eq!(messages[1]["content"], json!("earlier question"));
+    assert_eq!(messages[2]["content"], json!("earlier answer"));
+    assert_eq!(messages[3]["content"], json!("question"));
+}
+
+#[tokio::test]
+async fn appended_messages_continue_the_conversation() {
+    let llm = MockLlm::start(vec![text_reply("first"), text_reply("second")]).await;
+    let agent = llm.agent();
+    let mut history = Vec::new();
+
+    let result: RunResult<String> = agent.run("one").history(&history).await.unwrap();
+    history.extend(result.new_messages);
+    let result: RunResult<String> = agent.run("two").history(&history).await.unwrap();
+    history.extend(result.new_messages);
+
+    assert_eq!(history.len(), 4);
+    let contents: Vec<Value> = request_json(&llm, 1)["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["content"].clone())
+        .collect();
+    assert_eq!(
+        contents,
+        vec![json!("system"), json!("one"), json!("first"), json!("two")]
+    );
+}
+
+#[tokio::test]
+async fn run_options_replace_the_agent_settings() {
+    let llm = MockLlm::start(vec![tool_call_reply(), text_reply("unused")]).await;
+    let toolbox = FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    };
+
+    let err = llm
+        .agent()
+        .run::<String>("question")
+        .with_options(
+            RunOptions::default()
+                .with_model("other-model")
+                .with_max_iterations(1)
+                .with_toolbox(toolbox),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentError::MaxIterationsReached(1)));
+    let request = request_json(&llm, 0);
+    assert_eq!(request["model"], json!("other-model"));
+    assert_eq!(request["tools"][0]["function"]["name"], json!("echo"));
+}
+
+#[tokio::test]
+async fn a_run_without_a_model_fails_before_calling_the_model() {
+    let llm = MockLlm::start(vec![]).await;
+    let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
+
+    let err = agent.run::<String>("question").await.unwrap_err();
+    assert!(matches!(err, AgentError::MissingModel));
+    let err = agent
+        .run::<String>("question")
+        .stream()
+        .finish()
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AgentError::MissingModel));
+    assert!(llm.requests().is_empty());
+
+    // A model set for the run is enough
+    let llm = MockLlm::start(vec![text_reply("hi")]).await;
+    let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
+    let result: RunResult<String> = agent.run("question").model("m").await.unwrap();
+    assert_eq!(result.answer, "hi");
+}
+
+#[tokio::test]
+async fn truncated_answer_is_reported() {
+    let llm = MockLlm::start(vec![truncated_reply(r#"{"value":"#)]).await;
+
+    let err = llm.agent().run::<String>("question").await.unwrap_err();
+
+    match err {
+        AgentError::MaxTokens { raw } => assert_eq!(raw, r#"{"value":"#),
+        other => panic!("expected AgentError::MaxTokens, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn stream_sends_deltas_tool_events_and_the_result() {
+    use futures_util::StreamExt;
+
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+
+    let mut stream = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run::<String>("question")
+        .stream();
+    let mut events = Vec::new();
+    let mut result = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            AgentEvent::TextDelta(text) => events.push(format!("text:{text}")),
+            AgentEvent::ToolCall(call) => events.push(format!("call:{}", call.fn_name)),
+            AgentEvent::ToolResult {
+                tool,
+                content,
+                is_error,
+                ..
+            } => events.push(format!("result:{tool}:{content}:{is_error}")),
+            AgentEvent::Finished(res) => result = Some(res),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+
+    assert_eq!(
+        events,
+        vec![
+            "call:echo",
+            "result:echo:echoed:false",
+            "text:Hel",
+            "text:lo"
+        ]
+    );
+    let result = result.expect("the stream ends with Finished");
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(result.new_messages.len(), 4);
+    assert_eq!(result.usage.total_tokens, Some(4));
+    assert_eq!(request_json(&llm, 0)["stream"], json!(true));
+}
+
+#[tokio::test]
+async fn streamed_and_awaited_runs_produce_the_same_messages() {
+    let awaited_llm = MockLlm::start(vec![tool_call_reply(), text_reply("Hello")]).await;
+    let awaited: RunResult<String> = awaited_llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run("question")
+        .await
+        .unwrap();
+
+    let streamed_llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let streamed = streamed_llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run::<String>("question")
+        .stream()
+        .finish()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        messages_json(&streamed.new_messages),
+        messages_json(&awaited.new_messages)
+    );
+    // Both send the same conversation to the model in the second call
+    assert_eq!(
+        request_json(&streamed_llm, 1)["messages"],
+        request_json(&awaited_llm, 1)["messages"]
+    );
+}
+
+#[tokio::test]
+async fn streamed_structured_output_is_parsed_at_the_end() {
+    #[derive(Deserialize, JsonSchema, Debug)]
+    struct Answer {
+        value: u32,
+    }
+    let llm = MockLlm::start(vec![streamed_text_reply(&[r#"{"val"#, r#"ue": 7}"#])]).await;
+
+    let result = llm
+        .agent()
+        .run::<Answer>("question")
+        .stream()
+        .finish()
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer.value, 7);
+}
+
+#[tokio::test]
+async fn fatal_tool_error_ends_the_stream() {
+    use futures_util::StreamExt;
+
+    let llm = MockLlm::start(vec![streamed_tool_call_reply()]).await;
+    let toolbox = FailingToolBox {
+        make_error: || ToolError::Configuration("missing API key".to_string()),
+    };
+
+    let mut stream = llm
+        .agent()
+        .with_toolbox(toolbox)
+        .run::<String>("q")
+        .stream();
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(AgentEvent::ToolCall(_)))
+    ));
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(AgentEvent::ToolResult { is_error: true, .. }))
+    ));
+    assert!(matches!(
+        stream.next().await,
+        Some(Err(AgentError::Tool { .. }))
+    ));
+    assert!(stream.next().await.is_none());
+}
+
+#[test]
+fn runs_and_streams_can_be_moved_to_other_tasks() {
+    fn assert_send_static<T: Send + 'static>(_: &T) {}
+    let agent = Agent::new_with_url("http://localhost/", "key", "system").unwrap();
+    let history = vec![ChatMessage::user("hi")];
+    let stream = agent.run::<String>("q").history(&history).stream();
+    assert_send_static(&stream);
+    let future = std::future::IntoFuture::into_future(agent.run::<String>("q").history(&history));
+    assert_send_static(&future);
+    fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
+    assert_send_sync_clone::<Agent>();
 }

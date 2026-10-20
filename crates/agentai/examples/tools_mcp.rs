@@ -1,5 +1,5 @@
-use agentai::Agent;
 use agentai::tool::mcp::McpToolBox;
+use agentai::{Agent, RunResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use schemars::JsonSchema;
@@ -27,14 +27,15 @@ async fn main() -> Result<()> {
     let model =
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
+    let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?.with_model(&model);
 
     let mcp_tools =
         McpToolBox::new("uvx", ["mcp-server-time", "--local-timezone", "UTC"], None).await?;
 
-    let answer: Answer = agent.run(&model, question, Some(&mcp_tools)).await?;
+    // The toolbox can also be set for one run only
+    let result: RunResult<Answer> = agent.run(question).toolbox(mcp_tools).await?;
 
-    info!("{:#?}", answer);
+    info!("{:#?}", result.answer);
 
     Ok(())
 }
