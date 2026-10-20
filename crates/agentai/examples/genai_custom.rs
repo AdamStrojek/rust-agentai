@@ -23,13 +23,14 @@ async fn main() -> Result<()> {
 
     // Remember about providing what model you want to use
     // Some models may require providing authorization details
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("gemini-2.0-flash".to_string());
+    let model =
+        std::env::var("AGENTAI_MODEL").unwrap_or("minimax/minimax-m3.1-flash:free".to_string());
 
     let question = "Why sky is blue?";
 
     let target_resolver = ServiceTargetResolver::from_resolver_fn(
         |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-            let endpoint = Endpoint::from_static("https://models.github.ai/inference/");
+            let endpoint = Endpoint::from_static("https://openrouter.ai/api/v1/");
             let auth = AuthData::from_env("AGENTAI_API_KEY");
             let ServiceTarget { model, .. } = service_target;
             let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
