@@ -32,6 +32,8 @@ AgentAI now uses [genai](https://crates.io/crates/genai) 0.7, schemars 1.x and R
 Models that return text together with tool calls now work: the tool calls are no longer dropped.
 `Agent::new` and `Agent::new_with_url` now return `Result`, and a tool call without a toolbox
 is answered with an error message to the model instead of a panic.
+`McpToolBox` now uses the official MCP SDK (`rmcp`) and can also
+connect to running servers over Streamable HTTP.
 
 #### `ToolBox` (version 0.1.5)
 
@@ -68,7 +70,7 @@ cargo add agentai -F mcp-client
 
 Features list:
 
-- `mcp-client` _(enabled by default)_ — Enables experimental support for Agent Tools based on MCP Servers
+- `mcp-client` _(enabled by default)_ — Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
 - `macros` _(enabled by default)_ — Enables support for macro [`#[toolbox]`](https://docs.rs/agentai/latest/agentai/tool/attr.toolbox.html)
 - `tools-buildin` _(enabled by default)_ — Enables support for [buildin tools](https://docs.rs/agentai/latest/agentai/tool/buildin/index.html)
 - `tools-web` _(enabled by default)_ — Enables support for [web tools](https://docs.rs/agentai/latest/agentai/tool/web/index.html)

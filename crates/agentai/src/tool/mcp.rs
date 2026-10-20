@@ -1,61 +1,113 @@
 //! # Model Context Protocol Tools
 //!
-//! This module external tools that can connect with MCP Servers.
+//! This module provides [`McpToolBox`], a [`ToolBox`] that exposes all tools of an
+//! MCP server to an agent. It is built on the official MCP Rust SDK, [`rmcp`](https://crates.io/crates/rmcp).
 //!
 //! Supported connection types:
-//! - `stdio`
+//! - `stdio`: the server is started as a child process ([`McpToolBox::new`]).
+//! - Streamable HTTP: the server is already running and reachable by URL ([`McpToolBox::new_http`]).
 //!
-//!
+//! The server's tool list is read once, when the toolbox is created.
 
 use crate::tool::{Tool, ToolBox, ToolError};
-use anyhow::Result as AnyhowResult;
+use anyhow::{Result as AnyhowResult, anyhow};
 use async_trait::async_trait;
 use log::trace;
-use mcp_client_rs::{
-    MessageContent,
-    client::{Client, ClientBuilder},
-};
+use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::service::RunningService;
+use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
+use rmcp::{RoleClient, ServiceExt};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
+use tokio::process::Command;
 
+/// A [`ToolBox`] backed by an MCP server.
 pub struct McpToolBox {
-    client: Arc<Client>,
+    client: RunningService<RoleClient, ()>,
     tools: Vec<Tool>,
 }
 
 impl McpToolBox {
+    /// Starts an MCP server as a child process and connects to it over stdio.
+    ///
+    /// # Arguments
+    ///
+    /// * `cmd` - Command that starts the server, for example `uvx`.
+    /// * `args` - Arguments for the command, for example `["mcp-server-time"]`.
+    /// * `envs` - Extra environment variables for the server process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the process cannot be started, the MCP handshake fails,
+    /// or the tool list cannot be read.
     pub async fn new(
         cmd: &str,
         args: impl IntoIterator<Item = impl AsRef<str>>,
         envs: Option<HashMap<String, String>>,
     ) -> AnyhowResult<Self> {
         trace!("McpToolBox::new for cmd: {cmd}");
-        let mut builder = ClientBuilder::new(cmd).args(args);
-
-        if let Some(envs) = envs {
-            for (k, v) in envs {
-                builder = builder.env(&k, &v);
+        let args: Vec<String> = args.into_iter().map(|a| a.as_ref().to_string()).collect();
+        let command = Command::new(cmd).configure(|command| {
+            command.args(&args);
+            if let Some(envs) = envs {
+                command.envs(envs);
             }
-        }
+        });
+        let transport = TokioChildProcess::new(command)?;
+        let client = ().serve(transport).await?;
+        trace!("McpToolBox::new client initialized");
 
-        let client = builder.spawn_and_initialize().await?;
-        trace!("McpToolBox::new for client initialized");
+        Self::from_client(client).await
+    }
 
-        let mut tools = vec![];
+    /// Connects to a running MCP server over the Streamable HTTP transport.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - Endpoint of the MCP server, for example `http://localhost:8000/mcp`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the MCP handshake fails or the tool list cannot be read.
+    pub async fn new_http(url: &str) -> AnyhowResult<Self> {
+        trace!("McpToolBox::new_http for url: {url}");
+        let transport = StreamableHttpClientTransport::from_uri(url.to_string());
+        let client = ().serve(transport).await?;
+        trace!("McpToolBox::new_http client initialized");
 
-        for tool_desc in client.list_tools().await?.tools {
-            tools.push(
-                Tool::new(tool_desc.name)
-                    .with_description(tool_desc.description)
-                    .with_schema(tool_desc.input_schema),
-            );
-        }
+        Self::from_client(client).await
+    }
 
-        Ok(Self {
-            client: Arc::new(client),
-            tools,
-        })
+    async fn from_client(client: RunningService<RoleClient, ()>) -> AnyhowResult<Self> {
+        let tools = client
+            .list_all_tools()
+            .await?
+            .into_iter()
+            .map(|mcp_tool| {
+                let mut tool = Tool::new(mcp_tool.name.to_string())
+                    .with_schema(Value::Object(mcp_tool.input_schema.as_ref().clone()));
+                tool.description = mcp_tool.description.map(|d| d.to_string());
+                tool
+            })
+            .collect();
+
+        Ok(Self { client, tools })
+    }
+}
+
+/// Joins the text blocks of an MCP tool result. Falls back to the structured content
+/// when the server returned no text.
+fn result_to_text(result: &CallToolResult) -> String {
+    let text = result
+        .content
+        .iter()
+        .filter_map(|block| block.as_text().map(|t| t.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    match (&result.structured_content, text.is_empty()) {
+        (Some(structured), true) => structured.to_string(),
+        _ => text,
     }
 }
 
@@ -66,24 +118,38 @@ impl ToolBox for McpToolBox {
     }
 
     async fn call_tool(&self, tool_name: String, arguments: Value) -> Result<String, ToolError> {
-        let call_result = self
+        // Lets `ToolBoxSet` try the next toolbox for tools this server does not have
+        if !self.tools.iter().any(|t| t.name.as_str() == tool_name) {
+            return Err(ToolError::NoToolFound(tool_name));
+        }
+
+        let arguments = match arguments {
+            Value::Object(map) => Some(map),
+            Value::Null => None,
+            other => {
+                return Err(ToolError::LLMError(format!(
+                    "Arguments for tool '{tool_name}' must be a JSON object, got: {other}"
+                )));
+            }
+        };
+
+        let mut params = CallToolRequestParams::new(tool_name.clone());
+        if let Some(arguments) = arguments {
+            params = params.with_arguments(arguments);
+        }
+
+        let result = self
             .client
-            .call_tool(&tool_name, arguments)
+            .call_tool(params)
             .await
-            .map_err(anyhow::Error::new)?;
+            .map_err(|err| ToolError::Other(anyhow!(err)))?;
 
-        // TODO: Right now we supports only text response from tool
-        let msg = call_result
-            .content
-            .iter()
-            .filter_map(|msg| match msg {
-                MessageContent::Text { text } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(msg)
+        let text = result_to_text(&result);
+        if result.is_error == Some(true) {
+            // The server reports a tool-level failure; pass its message to the model
+            return Err(ToolError::LLMError(text));
+        }
+        Ok(text)
     }
 }
 
@@ -162,8 +228,39 @@ mod tests {
             .call_tool("non_existent_tool".to_string(), arguments)
             .await;
 
-        // Assert that calling a non-existent tool returns an error
-        assert!(result.is_err());
+        // Unknown tools return NoToolFound, so ToolBoxSet can try the next toolbox
+        assert!(matches!(result, Err(ToolError::NoToolFound(_))));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_server_error_reaches_model() -> AnyhowResult<()> {
+        let mcp_tools = create_test_toolbox().await?;
+
+        // An unknown timezone makes the server report a tool error
+        let arguments = json!({ "timezone": "Not/AZone" });
+        let result = mcp_tools
+            .call_tool("get_current_time".to_string(), arguments)
+            .await;
+
+        match result {
+            Err(ToolError::LLMError(message)) => assert!(!message.is_empty()),
+            other => panic!("Expected ToolError::LLMError, got {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_rejects_non_object_arguments() -> AnyhowResult<()> {
+        let mcp_tools = create_test_toolbox().await?;
+
+        let result = mcp_tools
+            .call_tool("get_current_time".to_string(), json!("Europe/Warsaw"))
+            .await;
+
+        assert!(matches!(result, Err(ToolError::LLMError(_))));
 
         Ok(())
     }

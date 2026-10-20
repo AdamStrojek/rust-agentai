@@ -25,7 +25,7 @@ Key facts for code generation:
 - [struct_output.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/struct_output.rs): answer deserialized into a struct
 - [tools_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_custom.rs): custom tool written with `#[toolbox]`
 - [tools_web.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_web.rs): Brave web search plus page fetch combined in a `ToolBoxSet`
-- [tools_mcp.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_mcp.rs): tools from an MCP server started over stdio
+- [tools_mcp.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_mcp.rs): tools from an MCP server started over stdio (`McpToolBox::new_http` connects to a running server instead)
 - [genai_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/genai_custom.rs): agent with a hand-configured `genai` client
 
 ## Optional
