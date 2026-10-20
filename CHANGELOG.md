@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.5...agentai-v0.2.0) - 2026-10-20
 
+### Breaking changes
+
+Steps to migrate from 0.1.x:
+
+- **Toolchain and dependencies**
+  - Minimum Rust version is 1.88, and the crates use edition 2024.
+  - `genai` 0.3 → 0.7 (also re-exported as `agentai::genai`). Code that builds its own genai client must follow genai's migration guides; for example, `Client::builder().build()` now returns `Result` and `Client::default()` is gone.
+  - Answer types and tool parameter types must derive `JsonSchema` from `schemars` 1.x (was 0.9).
+  - `reqwest` 0.13 with rustls by default (was native-tls).
+- **`Agent` constructors and `run`**
+  - `Agent::new` and `Agent::new_with_url` return `Result<Agent, AgentError>`. Add `?`.
+  - `Agent::run` returns `Result<D, AgentError>` instead of `anyhow::Result<D>`. `?` inside an `anyhow` function keeps working. To handle errors, match on `AgentError` (`ClientInit`, `Llm`, `Schema`, `InvalidAnswer`, `MaxIterationsReached`, `Tool`), and use `is_transient()` to decide on retries.
+  - With `new_with_url`, model names with a foreign genai namespace (for example `anthropic::...`) now fail with an adapter mismatch error. Plain names such as `vendor/model:free` work as before.
+- **Tools**
+  - `agentai::tool::Tool` is genai 0.7's `Tool`: `name` is a `ToolName` (compare with `.as_str()`), and the struct has more fields. Build it with `Tool::new(name).with_description(..).with_schema(..)` instead of a struct literal.
+  - `ToolError` variants:
+    - `NoToolFound` is renamed to `NotFound`;
+    - `LLMError` is replaced by `InvalidArguments` or `Failed`;
+    - `ExecutionError`, `ToolsDefinitionNotReady` and `Other(anyhow::Error)` are removed. Use `Configuration`, `Fatal`, or `ToolError::fatal(err)`.
+  - `ToolError` is `#[non_exhaustive]`, and there is no `From<anyhow::Error>` any more. Map errors inside tool methods to a `ToolError`.
+  - Fatal tool errors (`Configuration`, `Fatal`) now stop `Agent::run` with `AgentError::Tool`. Recoverable errors (`NotFound`, `InvalidArguments`, `Failed`) are still sent to the model.
+  - `#[toolbox]` no longer replaces errors with `ExecutionError`. Errors returned by a tool reach the model as they are, and invalid arguments become `InvalidArguments`.
+  - `McpToolBox::call_tool` returns `NotFound` for tools the server does not have, and `Failed` for errors the server reports (`isError`). Before, it returned `Ok` with the error text.
+
 ### New features
 - *(macros)* add #[tool(strict)] for strict tool schemas ([#61](https://github.com/AdamStrojek/rust-agentai/pull/61)) (by @AdamStrojek)
 - *(agent)* configurable max_iterations and ChatOptions ([#59](https://github.com/AdamStrojek/rust-agentai/pull/59)) (by @AdamStrojek)
