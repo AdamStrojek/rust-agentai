@@ -26,29 +26,38 @@ This library is under heavy development. The interface may change at any time wi
 - **Connect to any major LLM provider**: Support for OpenAI, Anthropic, Gemini, Ollama, and other OpenAI-compatible APIs.
 - **Choose the right model for the job**: Flexibly select the best-suited model for each step in your agent's workflow.
 - **Build custom tools with ease**: A simple interface for creating and managing your own tools using the [`ToolBox`](https://docs.rs/agentai/latest/agentai/tool/trait.ToolBox.html).
-- **MCP Server Support**: Leverage existing solutions based on the Model-Context-Protocol, eliminating the need to build agent tools from scratch.
+- **MCP Server Support, local and remote**: Use tools from any Model Context Protocol server, whether you start it locally over **stdio** or connect to a running or hosted server over **Streamable HTTP** (with optional bearer token). Built on the official MCP Rust SDK.
 - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 
 ## What's New
 
-#### genai 0.7 (version 0.2.0)
+#### 0.2.0 - Agent providers, remote MCP and configuration
 
-AgentAI now uses [genai](https://crates.io/crates/genai) 0.7, schemars 1.x and Rust edition 2024 (MSRV 1.88).
-Models that return text together with tool calls now work: the tool calls are no longer dropped.
-`Agent::new` and `Agent::new_with_url` now return `Result`, and a tool call without a toolbox
-is answered with an error message to the model instead of a panic.
-`McpToolBox` now uses the official MCP SDK (`rmcp`) and can also
-connect to running servers over Streamable HTTP.
-`Agent::new_with_provider` binds an agent to any genai provider,
-for example the native OpenRouter adapter (`AdapterKind::OpenRouter`), with an explicit API key.
-`Agent::with_max_iterations` and
-`Agent::with_chat_options` configure the loop limit and the model
-options (temperature, max tokens, tool choice, reasoning effort, ...). The `genai` crate is
-re-exported as `agentai::genai`.
-`#[tool(strict)]` marks a tool definition as strict, so supporting providers make the model's
-arguments match the parameter schema exactly.
+- **Creating agents**: `Agent::new_with_provider` binds an agent to any
+  genai provider with an explicit API key, for example the native OpenRouter adapter, which needs no base URL:
+  `Agent::new_with_provider(AdapterKind::OpenRouter, None, &api_key, system)?`. `Agent::new` and
+  `Agent::new_with_url` now return `Result`, and the agent reports typed errors
+  (`AgentError`). Tool errors are either recoverable (sent back to the model, which can
+  try again) or fatal (they stop the run).
+- **Remote MCP servers, not only stdio**: `McpToolBox` now connects to MCP
+  servers over **Streamable HTTP**, so agents can use running and hosted servers, including ones that need a
+  bearer token (`McpToolBox::new_http`, `McpToolBox::new_http_with_bearer`). Starting a local server over
+  **stdio** (`McpToolBox::new`) works as before. MCP support is now built on `rmcp`, the official MCP Rust SDK.
+- **Agent configuration**: `Agent::with_max_iterations` and
+  `Agent::with_chat_options` set the loop limit and the model options
+  (temperature, max tokens, tool choice, reasoning effort, ...).
+- **Strict tools**: `#[tool(strict)]` marks a tool as strict, so providers that support it make the model's
+  arguments match the parameter schema exactly.
+- **Dependencies**: genai 0.7 (re-exported as `agentai::genai`; tool calls are no longer lost when a model
+  also returns text), schemars 1, reqwest 0.13, syn 3, Rust edition 2024 and MSRV 1.88.
 
-#### `ToolBox` (version 0.1.5)
+**Breaking changes**: `Agent::new`, `Agent::new_with_url` and `Agent::run` return `AgentError` instead of
+`anyhow` errors, `ToolError` variants are renamed and split, `Tool` is built with `Tool::new`, and answer
+and tool parameter types need `schemars` 1.x. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading: it lists
+every breaking change and how to migrate.
+
+#### 0.1.5 - `ToolBox`
 
 This release introduces the [`ToolBox`](https://docs.rs/agentai/latest/agentai/tool/trait.ToolBox.html), a new feature providing an easy-to-use interface for supplying tools to AI agents.
 

@@ -45,6 +45,8 @@ History is kept across `run` calls on the same `Agent`, so reusing an agent cont
 
 ## Documentation conventions
 
+- Describe changes from the library user's point of view: what they can now do, or must do differently, when building agents. This applies to "What's New", changelog notes, PR descriptions and `llms*.txt`. Order items by how much they change the user's code or what they can build. Put internal work last and keep it short, for example dependency upgrades, refactors and CI. For a dependency upgrade, name the user-visible effect (for example "tool calls are no longer lost"), not just the version.
+- "What's New" entries (in `lib.rs`, mirrored in the README) use the heading format `#### X.Y.Z - <highlights>`. If the release has breaking changes, end the entry with a short **Breaking changes** paragraph that names them and tells the user to read the CHANGELOG before upgrading.
 - `README.md` between `<!-- cargo-rdme start/end -->` is generated from the crate docs in `crates/agentai/src/lib.rs` by cargo-rdme. Edit `lib.rs` and then regenerate; do not edit that section by hand.
 - Feature-flag docs come from the `## ` / `#!` comments in `crates/agentai/Cargo.toml` (via `document-features`).
 - `llms.txt` (index, llmstxt.org format) and `llms-full.txt` (complete usage guide) in the repo root are hand-written summaries of the public API for LLMs. When a change touches the public API, feature flags, tool names or `Agent::run` behaviour, update both files and the version they name.
