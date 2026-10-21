@@ -1,7 +1,7 @@
 //! The agent loop shared by every way of running an agent.
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
-use crate::message::{Message, ToolCall, ToolResponse};
+use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::tool::ToolBox;
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt, pin_mut};
@@ -30,7 +30,7 @@ struct Step {
     tool_calls: Vec<ToolCall>,
     /// Assistant message to store when the model asked for tools. Keeps text, reasoning and
     /// provider continuation data next to the tool calls.
-    tool_use_message: Option<Message>,
+    tool_use_message: Message,
     texts: Vec<String>,
     usage: Usage,
     stop_reason: Option<StopReason>,
@@ -69,14 +69,17 @@ where
                 .with_capture_reasoning_content(true);
         }
 
+        // The history does not change during the run: convert it once
+        let history: Vec<genai::chat::ChatMessage> =
+            history.into_iter().map(Message::into_genai).collect();
+
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
             let mut chat_req = ChatRequest::from_messages(
                 history
                     .iter()
-                    .chain(&new_messages)
                     .cloned()
-                    .map(Message::into_genai)
+                    .chain(new_messages.iter().cloned().map(Message::into_genai))
                     .collect(),
             );
             if !run.system.is_empty() {
@@ -117,12 +120,16 @@ where
             };
             usage += step.usage;
 
+            // A cut-off answer is incomplete: tool arguments may be truncated JSON, and a
+            // reasoning-only answer would only use up iterations
+            if step.stop_reason.as_ref().is_some_and(StopReason::is_max_tokens) {
+                Err(AgentError::MaxTokens { raw: step.texts.join("") })?;
+            }
+
             // Some models return text (e.g. "Let me check...") together with tool calls; the
             // tool calls win.
             if !step.tool_calls.is_empty() {
-                if let Some(message) = step.tool_use_message {
-                    new_messages.push(message);
-                }
+                new_messages.push(step.tool_use_message);
                 let mut fatal: Option<AgentError> = None;
                 for tool_call in step.tool_calls {
                     if fatal.is_some() {
@@ -160,9 +167,6 @@ where
             // Structured output may be split across several text parts
             let raw = step.texts.join("");
             debug!("Agent Answer: {raw}");
-            if step.stop_reason.as_ref().is_some_and(StopReason::is_max_tokens) {
-                Err(AgentError::MaxTokens { raw: raw.clone() })?;
-            }
             new_messages.push(Message::assistant(raw.clone()));
             let answer = parse_answer::<D>(raw, is_answer_string)?;
             yield AgentEvent::Finished(AgentResult {
@@ -214,13 +218,13 @@ async fn exec_step(
     let stop_reason = resp.stop_reason.clone().map(StopReason::from_genai);
     let reasoning_content = resp.reasoning_content.clone();
     let (tool_use_message, texts) = if tool_calls.is_empty() {
-        (None, resp.content.into_texts())
-    } else {
         (
-            resp.into_assistant_message_for_tool_use()
-                .map(Message::from_genai),
-            Vec::new(),
+            Message::new(Role::Assistant, Vec::new()),
+            resp.content.into_texts(),
         )
+    } else {
+        let message = resp.into_assistant_message_for_tool_use();
+        (tool_use_message(message, &tool_calls), Vec::new())
     };
     Ok(Step {
         tool_calls,
@@ -230,6 +234,18 @@ async fn exec_step(
         stop_reason,
         reasoning_content,
     })
+}
+
+/// The assistant message that holds the tool calls. genai builds it with the text, reasoning and
+/// provider data of the answer; if it does not, the tool calls alone keep the conversation valid.
+fn tool_use_message(message: Option<genai::chat::ChatMessage>, tool_calls: &[ToolCall]) -> Message {
+    match message {
+        Some(message) => Message::from_genai(message),
+        None => Message::new(
+            Role::Assistant,
+            tool_calls.iter().cloned().map(Part::ToolCall).collect(),
+        ),
+    }
 }
 
 /// Builds a step from the end of a streamed answer.
@@ -252,13 +268,13 @@ fn step_from_stream_end(end: StreamEnd) -> Step {
     let stop_reason = end.captured_stop_reason.clone().map(StopReason::from_genai);
     let reasoning_content = end.captured_reasoning_content.clone();
     let (tool_use_message, texts) = if tool_calls.is_empty() {
-        (None, end.into_texts().unwrap_or_default())
-    } else {
         (
-            end.into_assistant_message_for_tool_use()
-                .map(Message::from_genai),
-            Vec::new(),
+            Message::new(Role::Assistant, Vec::new()),
+            end.into_texts().unwrap_or_default(),
         )
+    } else {
+        let message = end.into_assistant_message_for_tool_use();
+        (tool_use_message(message, &tool_calls), Vec::new())
     };
     Step {
         tool_calls,

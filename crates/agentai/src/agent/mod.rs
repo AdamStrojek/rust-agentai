@@ -51,8 +51,9 @@ pub enum AgentError {
         #[source]
         source: serde_json::Error,
     },
-    /// The final answer was cut off by the token limit (for example `max_tokens` in
-    /// [`ChatOptions`]). Holds the truncated text. Raise the limit or ask for a shorter answer.
+    /// An answer of the model was cut off by the token limit (for example `max_tokens` in
+    /// [`ChatOptions`]). Holds the truncated text, which is empty when the cut-off answer had only
+    /// reasoning or tool calls (the tools are not run). Raise the limit or ask for a shorter answer.
     #[error("the model answer was truncated by the token limit")]
     MaxTokens {
         /// Truncated text returned by the model.
@@ -416,7 +417,8 @@ impl Agent {
     /// Awaiting checks the configuration (a missing model, the schema of `D`) before anything is
     /// sent; errors during the run are the last item of the stream. The stream owns everything
     /// it needs, so it is `Send + 'static`: move it into a spawned task or return it from a web
-    /// handler.
+    /// handler. Read it with `StreamExt` from the `futures-util` (or `futures`) crate, which you
+    /// add to your own dependencies.
     ///
     /// ```no_run
     /// use agentai::{Agent, AgentEvent, Message};

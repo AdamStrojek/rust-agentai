@@ -747,3 +747,78 @@ fn runs_and_streams_can_be_moved_to_other_tasks() {
     fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
     assert_send_sync_clone::<Agent>();
 }
+
+/// Toolbox that counts its calls.
+struct CountingToolBox(Arc<Mutex<usize>>);
+
+#[async_trait]
+impl ToolBox for CountingToolBox {
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        Ok(vec![Tool::new("echo")])
+    }
+
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult {
+        *self.0.lock().unwrap() += 1;
+        Ok("echoed".to_string())
+    }
+}
+
+fn truncated_tool_call_reply() -> (u16, String) {
+    let body = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": { "name": "echo", "arguments": "{}" }
+                }]
+            },
+            "finish_reason": "length"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    (200, body.to_string())
+}
+
+#[tokio::test]
+async fn truncated_tool_calls_are_not_run() {
+    let llm = MockLlm::start(vec![truncated_tool_call_reply()]).await;
+    let calls = Arc::new(Mutex::new(0));
+
+    let err = llm
+        .agent()
+        .with_toolbox(CountingToolBox(calls.clone()))
+        .run::<String>("question")
+        .await
+        .unwrap_err();
+
+    match err {
+        AgentError::MaxTokens { raw } => assert_eq!(raw, ""),
+        other => panic!("expected AgentError::MaxTokens, got {other:?}"),
+    }
+    assert_eq!(*calls.lock().unwrap(), 0);
+    assert_eq!(llm.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn truncated_answer_without_text_does_not_use_up_iterations() {
+    let body = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": "" },
+            "finish_reason": "length"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    let llm = MockLlm::start(vec![(200, body.to_string())]).await;
+
+    let err = llm.agent().run::<String>("question").await.unwrap_err();
+
+    assert!(matches!(err, AgentError::MaxTokens { .. }));
+    assert_eq!(llm.requests().len(), 1);
+}

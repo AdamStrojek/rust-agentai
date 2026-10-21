@@ -172,8 +172,9 @@ while let Some(event) = stream.next().await {
 1. The prompt becomes a user message after your history.
 2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
 3. The agent calls the model at most `max_iterations` times (5 by default, see Configuration). Each round sends the system prompt, your history, the messages of this run so far and the toolbox's tool definitions, with the run's `ChatOptions`.
+   - If a reply was cut off by the token limit, the run fails with `AgentError::MaxTokens { raw }` at once, whatever the reply contains: tool calls in it are not run (their arguments may be incomplete) and a reasoning-only reply does not start another round.
    - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are added to the run's messages, and the loop continues. When a tool returns a recoverable error (`ToolError::is_recoverable()`), its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. A fatal tool error stops the run with `AgentError::Tool`. If the run has no toolbox, the model gets a "tool is not available" result instead.
-   - If the reply has only text, all text parts are joined and parsed into `D`. If the model stopped because of the token limit, the run fails with `AgentError::MaxTokens { raw }` instead.
+   - If the reply has only text, all text parts are joined and parsed into `D`.
    - An empty reply starts the next round.
 4. If there is still no text answer after `max_iterations` rounds, the run returns `AgentError::MaxIterationsReached(max_iterations)`.
 
@@ -186,7 +187,7 @@ A run returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built wi
 - `Llm(LlmError)`: the request to the model failed (network, HTTP status, provider error). `LlmError` has `status() -> Option<u16>`, `is_transient()` and a `Display` message.
 - `Schema(String)`: the JSON schema of `D` could not be generated or is not an object.
 - `InvalidAnswer { raw, source }`: the final answer could not be parsed into `D`; `raw` is the text of the model.
-- `MaxTokens { raw }`: the final answer was cut off by the token limit; `raw` is the truncated text.
+- `MaxTokens { raw }`: a reply was cut off by the token limit; `raw` is the truncated text (empty when the reply had only reasoning or tool calls, which are not run).
 - `MaxIterationsReached(usize)`: no final answer after that many rounds.
 - `Tool { tool, source }`: a tool failed with a fatal `ToolError`.
 
