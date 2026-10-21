@@ -5,7 +5,7 @@
 //! results before the final answer.
 
 use agentai::tool::buildin::CurrentDateAndTimeToolBox;
-use agentai::{Agent, AgentEvent, ChatMessage};
+use agentai::{Agent, AgentEvent, Message};
 use anyhow::Result;
 use futures_util::StreamExt;
 use std::io::Write;
@@ -23,15 +23,15 @@ async fn main() -> Result<()> {
         .with_model(&model)
         .with_toolbox(CurrentDateAndTimeToolBox {});
 
-    let mut history: Vec<ChatMessage> = Vec::new();
+    let mut history: Vec<Message> = Vec::new();
     let question = "What day of the week is it today? Answer with a short poem about it.";
     println!("Question: {question}\n");
 
     // The stream is `Send + 'static`, so it could also be moved into a spawned task
     let mut stream = agent
-        .run::<String>(question)
+        .run_stream::<String>(question)
         .with_history(&history)
-        .stream();
+        .await?;
     while let Some(event) = stream.next().await {
         match event? {
             AgentEvent::TextDelta(text) => {
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
                 std::io::stdout().flush()?;
             }
             AgentEvent::ToolCall(call) => {
-                println!("[tool call] {}({})", call.fn_name, call.fn_arguments)
+                println!("[tool call] {}({})", call.name, call.arguments)
             }
             AgentEvent::ToolResult { tool, content, .. } => {
                 println!("[tool result] {tool}: {content}")

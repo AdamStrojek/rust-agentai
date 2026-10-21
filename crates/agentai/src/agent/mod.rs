@@ -10,29 +10,17 @@
 
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
-/// Provider (genai adapter) selector used by [`Agent::new_with_provider`], re-exported from genai.
-pub use genai::adapter::AdapterKind;
-/// A message of the conversation history, re-exported from genai. The history is yours: pass it
-/// to [`AgentRun::with_history`] and append [`RunResult::new_messages`] to it after a run.
-pub use genai::chat::ChatMessage;
-/// Model options (temperature, max tokens, tool choice, reasoning effort, ...) used by
-/// [`Agent::with_chat_options`], re-exported from genai.
-pub use genai::chat::ChatOptions;
-/// Why the model stopped, re-exported from genai. See [`RunResult::stop_reason`].
-pub use genai::chat::StopReason;
-/// A tool call requested by the model, re-exported from genai.
-pub use genai::chat::ToolCall;
-/// Token usage, re-exported from genai. See [`RunResult::usage`].
-pub use genai::chat::Usage;
 use genai::resolver::{AuthData, Endpoint};
 use std::sync::Arc;
 use thiserror::Error;
 
 mod core;
-mod run;
+mod model;
+mod request;
 mod stream;
 
-pub use run::{AgentRun, RunOptions, RunResult};
+pub use model::{ChatOptions, Provider, ReasoningEffort, StopReason, ToolChoice, Usage};
+pub use request::{AgentRequest, Complete, RunOptions, RunResult, Streaming};
 pub use stream::{AgentEvent, AgentStream};
 
 #[cfg(test)]
@@ -46,12 +34,12 @@ mod tests;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum AgentError {
-    /// The genai client could not be built (TLS, configuration).
+    /// The LLM client could not be built (TLS, configuration).
     #[error("failed to create the LLM client: {0}")]
-    ClientInit(#[source] genai::Error),
+    ClientInit(#[source] LlmError),
     /// The request to the model failed (network, HTTP status, provider error).
     #[error("LLM request failed: {0}")]
-    Llm(#[source] genai::Error),
+    Llm(#[source] LlmError),
     /// The JSON schema of the answer type could not be generated or is not an object.
     #[error("invalid answer schema: {0}")]
     Schema(String),
@@ -71,8 +59,8 @@ pub enum AgentError {
         raw: String,
     },
     /// No model was set, neither with [`Agent::with_model`] nor for the run
-    /// ([`AgentRun::with_model`]).
-    #[error("no model set: use Agent::with_model or AgentRun::with_model")]
+    /// ([`AgentRequest::with_model`]).
+    #[error("no model set: use Agent::with_model or AgentRequest::with_model")]
     MissingModel,
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
@@ -93,25 +81,63 @@ impl AgentError {
     /// Returns `true` when trying again may succeed: the provider answered with HTTP 408, 425,
     /// 429 or 5xx, or the request failed because of a timeout or a connection problem.
     pub fn is_transient(&self) -> bool {
-        let Self::Llm(err) = self else {
-            return false;
-        };
-        if let Some(status) = err.status() {
-            return status.is_server_error() || matches!(status.as_u16(), 408 | 425 | 429);
-        }
-        match err {
-            genai::Error::WebModelCall { webc_error, .. }
-            | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
-                genai::webc::Error::Reqwest(err) => err.is_timeout() || err.is_connect(),
-                _ => false,
-            },
-            genai::Error::WebStream { .. } => true,
+        match self {
+            Self::Llm(err) => err.is_transient(),
             _ => false,
         }
     }
 }
 
-/// Default number of model calls in one [`Agent::run`].
+/// Error of the LLM client: a failed request, or a client that could not be built.
+///
+/// The message describes the failure, [`status`](LlmError::status) gives the HTTP status when
+/// the provider answered with one, and [`is_transient`](LlmError::is_transient) tells whether a
+/// retry may succeed.
+#[derive(Error, Debug)]
+#[error("{source}")]
+pub struct LlmError {
+    status: Option<u16>,
+    transient: bool,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl LlmError {
+    /// HTTP status returned by the provider, if any.
+    pub fn status(&self) -> Option<u16> {
+        self.status
+    }
+
+    /// Returns `true` when trying again may succeed: HTTP 408, 425, 429 or 5xx, a timeout or a
+    /// connection problem.
+    pub fn is_transient(&self) -> bool {
+        self.transient
+    }
+}
+
+impl LlmError {
+    pub(crate) fn from_genai(err: genai::Error) -> Self {
+        let status = err.status().map(|status| status.as_u16());
+        let transient = match status {
+            Some(status) => status >= 500 || matches!(status, 408 | 425 | 429),
+            None => match &err {
+                genai::Error::WebModelCall { webc_error, .. }
+                | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
+                    genai::webc::Error::Reqwest(err) => err.is_timeout() || err.is_connect(),
+                    _ => false,
+                },
+                genai::Error::WebStream { .. } => true,
+                _ => false,
+            },
+        };
+        Self {
+            status,
+            transient,
+            source: Box::new(err),
+        }
+    }
+}
+
+/// Default number of model calls in one run.
 pub const DEFAULT_MAX_ITERATIONS: usize = 5;
 
 /// Default temperature sent with every request, unless [`Agent::with_chat_options`] replaces it.
@@ -119,15 +145,14 @@ pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
 ///
-/// An agent is configuration only: the genai client, the system prompt, the default model and
-/// toolbox, how many model calls one [`run`](Agent::run) may make, and the [`ChatOptions`] sent
-/// with every request. It does not keep the conversation. You own the history, pass it to
-/// [`AgentRun::with_history`] and append [`RunResult::new_messages`] to it, so one agent can serve
-/// many conversations at once. Cloning an agent is cheap.
+/// An agent is configuration only: the LLM client, the system prompt, the default model and
+/// toolbox, how many model calls one run may make, and the [`ChatOptions`] sent with every
+/// request. It does not keep the conversation. You own the history, pass it to
+/// [`AgentRequest::with_history`] and append [`RunResult::new_messages`] to it, so one agent can
+/// serve many conversations at once. Cloning an agent is cheap.
 ///
 /// ```no_run
-/// use agentai::Agent;
-/// use agentai::genai::chat::{ChatOptions, ReasoningEffort};
+/// use agentai::{Agent, ChatOptions, ReasoningEffort};
 ///
 /// # fn main() -> Result<(), agentai::AgentError> {
 /// let agent = Agent::new("You are a useful assistant")?
@@ -144,7 +169,7 @@ pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 /// ```
 #[derive(Clone)]
 pub struct Agent {
-    /// Reference to GenAI Client
+    /// LLM client
     client: Client,
 
     /// System prompt sent with every request. It is not part of the history.
@@ -156,7 +181,7 @@ pub struct Agent {
     /// Toolbox used when the run does not set one
     toolbox: Option<Arc<dyn ToolBox>>,
 
-    /// Maximum number of model calls in one `run`
+    /// Maximum number of model calls in one run
     max_iterations: usize,
 
     /// Options sent with every request
@@ -164,11 +189,12 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Creates a new `Agent` instance.
+    /// Creates a new `Agent` that picks the provider from the model name.
     ///
-    /// This creation method will create a new agent instance with a default GenAI client.
-    /// genai picks the provider from the model name and reads the provider's API key
-    /// from its usual environment variable.
+    /// `gpt-*` models go to OpenAI, `claude-*` to Anthropic, `gemini-*` to Gemini, and so on; a
+    /// `provider::model` prefix such as `open_router::vendor/model` selects a provider
+    /// explicitly. The API key is read from the provider's usual environment variable, for
+    /// example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPEN_ROUTER_API_KEY`.
     ///
     /// # Arguments
     ///
@@ -176,24 +202,85 @@ impl Agent {
     ///
     /// # Errors
     ///
-    /// Returns an error when the GenAI client cannot be created.
+    /// Returns an error when the LLM client cannot be created.
     pub fn new(system: &str) -> Result<Self, AgentError> {
-        let client = Client::new().map_err(AgentError::ClientInit)?;
-
-        Ok(Self::new_with_client(client, system))
+        let client =
+            Client::new().map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
+        Ok(Self::from_client(client, system))
     }
 
-    /// Creates a new `Agent` instance with provided GenAI Client
+    /// Creates a new `Agent` that talks to an OpenAI-compatible endpoint
+    /// (OpenAI, OpenRouter, LiteLLM, Ollama, ...).
+    ///
+    /// Every model name is sent to `base_url` with the OpenAI Chat Completions API,
+    /// authenticated with `api_key`. Model names are passed as they are, so names like
+    /// `openai/gpt-4.1-mini` or `vendor/model:free` work.
     ///
     /// # Arguments
     ///
-    /// * `client` - User provided GenAI Client
+    /// * `base_url` - Base URL of the API, for example `https://openrouter.ai/api/v1/`.
+    /// * `api_key` - API key sent with every request.
     /// * `system` - The system prompt sent with every request.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// A new `Agent` instance.
-    pub fn new_with_client(client: Client, system: &str) -> Self {
+    /// Returns an error when the LLM client cannot be created.
+    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self, AgentError> {
+        Self::new_with_provider(Provider::OpenAI, Some(base_url), api_key, system)
+    }
+
+    /// Creates a new `Agent` bound to one provider, with an explicit API key and, optionally, a
+    /// custom endpoint.
+    ///
+    /// Every model name is sent to `provider` as it is. For example, with
+    /// [`Provider::OpenRouter`] the model `nvidia/nemotron-3.5-super-vl:free` goes to OpenRouter.
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, Provider};
+    ///
+    /// # fn main() -> Result<(), agentai::AgentError> {
+    /// let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    /// // OpenRouter with its default endpoint
+    /// let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, "You are helpful")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - provider to use, for example [`Provider::OpenRouter`],
+    ///   [`Provider::Anthropic`] or [`Provider::OpenAI`].
+    /// * `base_url` - Endpoint override. `None` keeps the provider's default endpoint, for
+    ///   example `https://openrouter.ai/api/v1/` for OpenRouter.
+    /// * `api_key` - API key sent with every request.
+    /// * `system` - The system prompt sent with every request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the LLM client cannot be created.
+    pub fn new_with_provider(
+        provider: Provider,
+        base_url: Option<&str>,
+        api_key: &str,
+        system: &str,
+    ) -> Result<Self, AgentError> {
+        let adapter = provider.into_genai();
+        let auth = AuthData::from_single(api_key);
+        let builder = Client::builder().with_adapter_kind(adapter);
+        let builder = match base_url {
+            Some(base_url) => builder.append_provider_config(
+                adapter,
+                (Endpoint::from_owned(base_url.to_string()), auth),
+            ),
+            None => builder.append_provider_config(adapter, auth),
+        };
+        let client = builder
+            .build()
+            .map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
+        Ok(Self::from_client(client, system))
+    }
+
+    fn from_client(client: Client, system: &str) -> Self {
         Self {
             client,
             system: system.trim().to_string(),
@@ -204,15 +291,15 @@ impl Agent {
         }
     }
 
-    /// Sets the model used by every [`run`](Agent::run), unless the run sets its own with
-    /// [`AgentRun::with_model`]. Without a model, a run returns [`AgentError::MissingModel`].
+    /// Sets the model used by every run, unless the run sets its own with
+    /// [`AgentRequest::with_model`]. Without a model, a run returns [`AgentError::MissingModel`].
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
         self
     }
 
-    /// Sets the toolbox used by every [`run`](Agent::run), unless the run sets its own with
-    /// [`AgentRun::with_toolbox`]. Combine several toolboxes with
+    /// Sets the toolbox used by every run, unless the run sets its own with
+    /// [`AgentRequest::with_toolbox`]. Combine several toolboxes with
     /// [`ToolBoxSet`](crate::tool::ToolBoxSet).
     pub fn with_toolbox(self, toolbox: impl ToolBox) -> Self {
         self.with_toolbox_arc(Arc::new(toolbox))
@@ -225,11 +312,11 @@ impl Agent {
         self
     }
 
-    /// Sets the maximum number of model calls in one [`run`](Agent::run).
+    /// Sets the maximum number of model calls in one run.
     ///
     /// Every answer with tool calls uses one iteration, so raise it for tasks that need many
-    /// tool rounds. When the limit is reached without a final answer, `run` returns
-    /// [`AgentError::MaxIterationsReached`]. With `0`, `run` returns that error without
+    /// tool rounds. When the limit is reached without a final answer, the run returns
+    /// [`AgentError::MaxIterationsReached`]. With `0`, the run returns that error without
     /// calling the model. The default is [`DEFAULT_MAX_ITERATIONS`].
     pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
         self.max_iterations = max_iterations;
@@ -237,28 +324,15 @@ impl Agent {
     }
 
     /// Sets the [`ChatOptions`] sent with every request, for example temperature, max tokens,
-    /// [tool choice](genai::chat::ToolChoice) or [reasoning effort](genai::chat::ReasoningEffort).
+    /// [tool choice](ToolChoice) or [reasoning effort](ReasoningEffort).
     ///
     /// The options replace the defaults, including the default temperature
     /// ([`DEFAULT_TEMPERATURE`]); set `with_temperature` yourself if you want to keep one.
-    /// For structured output (`run::<D>` with `D` other than `String`), `run` always sets the
-    /// response format, so a response format given here is replaced.
-    ///
-    /// Options set on a custom genai client passed to [`new_with_client`](Agent::new_with_client)
-    /// still apply. genai uses them for every field these options leave unset.
+    /// For structured output (`D` other than `String`), the run always sets the response
+    /// format itself.
     pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {
         self.chat_options = chat_options;
         self
-    }
-
-    /// Returns the maximum number of model calls in one [`run`](Agent::run).
-    pub fn max_iterations(&self) -> usize {
-        self.max_iterations
-    }
-
-    /// Returns the [`ChatOptions`] sent with every request.
-    pub fn chat_options(&self) -> &ChatOptions {
-        &self.chat_options
     }
 
     /// Returns the system prompt sent with every request.
@@ -276,19 +350,28 @@ impl Agent {
         self.toolbox.as_ref()
     }
 
-    /// Starts a run: sends `prompt` to the model, runs the tools the model asks for and
+    /// Returns the maximum number of model calls in one run.
+    pub fn max_iterations(&self) -> usize {
+        self.max_iterations
+    }
+
+    /// Returns the [`ChatOptions`] sent with every request.
+    pub fn chat_options(&self) -> &ChatOptions {
+        &self.chat_options
+    }
+
+    /// Prepares a run: sends `prompt` to the model, runs the tools the model asks for and
     /// returns the final answer as `D`.
     ///
-    /// The returned [`AgentRun`] is configured with builder methods and executed with
-    /// `.await`, or streamed with [`AgentRun::stream`]. Pass the conversation so far with [`AgentRun::with_history`], and change the model,
-    /// toolbox or options for this run only with [`AgentRun::with_model`], [`AgentRun::with_toolbox`] or
-    /// [`AgentRun::with_options`].
+    /// Configure the returned [`AgentRequest`] with its `with_*` methods, then `.await` it to
+    /// get a [`RunResult`]. [`run_stream`](Agent::run_stream) takes the same configuration and
+    /// streams the run instead.
     ///
     /// ```no_run
-    /// use agentai::{Agent, ChatMessage, RunResult};
+    /// use agentai::{Agent, Message, RunResult};
     ///
     /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
-    /// let mut history: Vec<ChatMessage> = Vec::new();
+    /// let mut history: Vec<Message> = Vec::new();
     ///
     /// let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     /// println!("{}", result.answer);
@@ -321,78 +404,38 @@ impl Agent {
     /// answers in plain text, with any other type the model is asked for JSON matching its schema.
     ///
     /// For more information go to [crate::structured_output]
-    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRun<'_, D> {
-        AgentRun::new(self, prompt.into())
+    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Complete> {
+        AgentRequest::new(self, prompt.into())
     }
 
-    /// Creates a new `Agent` instance that talks to an OpenAI-compatible endpoint
-    /// (OpenAI, OpenRouter, LiteLLM, Ollama, ...).
+    /// Prepares a streamed run. It takes the same configuration as [`run`](Agent::run), but
+    /// awaiting it returns an [`AgentStream`] of [`AgentEvent`]s: text and reasoning as the
+    /// model writes them, tool calls and their results, and finally the [`RunResult`] in
+    /// [`AgentEvent::Finished`].
     ///
-    /// Every model name is sent through genai's OpenAI adapter to `base_url`, authenticated
-    /// with `api_key`. Model names are passed as they are, so names like `openai/gpt-4.1-mini`
-    /// or `vendor/model:free` work. A name with another genai namespace, such as
-    /// `anthropic::claude-sonnet-4-5`, fails with an adapter mismatch error.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_url` - Base URL of the API, for example `https://openrouter.ai/api/v1/`.
-    /// * `api_key` - API key sent with every request.
-    /// * `system` - The system prompt sent with every request.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the GenAI client cannot be created.
-    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self, AgentError> {
-        Self::new_with_provider(AdapterKind::OpenAI, Some(base_url), api_key, system)
-    }
-
-    /// Creates a new `Agent` instance bound to one genai provider (adapter), with an explicit
-    /// API key and, optionally, a custom endpoint.
-    ///
-    /// Every model name is sent through the adapter for `provider`, so bare names work without a
-    /// genai namespace. For example, with [`AdapterKind::OpenRouter`] the model
-    /// `nvidia/nemotron-3.5-super-vl:free` goes to OpenRouter as is. A name with another genai
-    /// namespace, such as `anthropic::claude-sonnet-4-5`, fails with an adapter mismatch error.
+    /// Awaiting checks the configuration (a missing model, the schema of `D`) before anything is
+    /// sent; errors during the run are the last item of the stream. The stream owns everything
+    /// it needs, so it is `Send + 'static`: move it into a spawned task or return it from a web
+    /// handler.
     ///
     /// ```no_run
-    /// use agentai::{AdapterKind, Agent};
+    /// use agentai::{Agent, AgentEvent, Message};
+    /// use futures_util::StreamExt;
     ///
-    /// # fn main() -> Result<(), agentai::AgentError> {
-    /// let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-    /// // Native OpenRouter adapter with its default endpoint
-    /// let agent = Agent::new_with_provider(AdapterKind::OpenRouter, None, &api_key, "You are helpful")?;
+    /// # async fn example(agent: Agent, mut history: Vec<Message>) -> Result<(), agentai::AgentError> {
+    /// let mut stream = agent.run_stream::<String>("Tell me a story").with_history(&history).await?;
+    /// while let Some(event) = stream.next().await {
+    ///     match event? {
+    ///         AgentEvent::TextDelta(text) => print!("{text}"),
+    ///         AgentEvent::ToolCall(call) => println!("\n[calling {}]", call.name),
+    ///         AgentEvent::Finished(result) => history.extend(result.new_messages),
+    ///         _ => {}
+    ///     }
+    /// }
     /// # Ok(())
     /// # }
     /// ```
-    ///
-    /// # Arguments
-    ///
-    /// * `provider` - genai adapter to use, for example [`AdapterKind::OpenRouter`],
-    ///   [`AdapterKind::Anthropic`] or [`AdapterKind::OpenAI`].
-    /// * `base_url` - Endpoint override. `None` keeps the provider's default endpoint, for
-    ///   example `https://openrouter.ai/api/v1/` for OpenRouter.
-    /// * `api_key` - API key sent with every request.
-    /// * `system` - The system prompt sent with every request.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the GenAI client cannot be created.
-    pub fn new_with_provider(
-        provider: AdapterKind,
-        base_url: Option<&str>,
-        api_key: &str,
-        system: &str,
-    ) -> Result<Self, AgentError> {
-        let auth = AuthData::from_single(api_key);
-        let builder = Client::builder().with_adapter_kind(provider);
-        let builder = match base_url {
-            Some(base_url) => builder.append_provider_config(
-                provider,
-                (Endpoint::from_owned(base_url.to_string()), auth),
-            ),
-            None => builder.append_provider_config(provider, auth),
-        };
-        let client = builder.build().map_err(AgentError::ClientInit)?;
-        Ok(Self::new_with_client(client, system))
+    pub fn run_stream<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Streaming> {
+        AgentRequest::new(self, prompt.into())
     }
 }

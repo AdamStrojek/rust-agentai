@@ -84,7 +84,7 @@ use syn::{
 /// - `name = "..."`: Overrides the default tool name. This name must be unique within the toolbox.
 /// - `strict` (or `strict = true` / `strict = false`): Marks the tool definition as strict, so
 ///   providers that support it (OpenAI and compatible APIs) force the model's arguments to match
-///   the parameter schema exactly. genai adapts the schema to the provider's strict rules, for
+///   the parameter schema exactly. The schema is adapted to the provider's strict rules, for
 ///   example every parameter becomes required and `additionalProperties` is set to `false`;
 ///   use `Option<T>` for parameters the model may leave empty (`null`). Not every provider (or
 ///   every model behind a gateway such as OpenRouter) supports strict tools, so it is opt-in.

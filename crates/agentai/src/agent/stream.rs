@@ -1,12 +1,13 @@
 //! Streaming a run: [`AgentEvent`] and [`AgentStream`].
 
 use super::core::finish;
-use super::{AgentError, RunResult, ToolCall};
+use super::{AgentError, RunResult};
+use crate::message::ToolCall;
 use futures_util::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// Something that happened during a streamed run, see [`AgentRun::stream`](super::AgentRun::stream).
+/// Something that happened during a streamed run, see [`Agent::run_stream`](super::Agent::run_stream).
 ///
 /// The last event of a successful run is always [`Finished`](AgentEvent::Finished).
 #[derive(Debug)]
@@ -23,7 +24,7 @@ pub enum AgentEvent<D> {
     ToolCall(ToolCall),
     /// A tool call finished, and its result will be sent to the model.
     ToolResult {
-        /// Id of the tool call, the same as in [`ToolCall::call_id`].
+        /// Id of the tool call, the same as in [`ToolCall::id`].
         call_id: String,
         /// Name of the tool.
         tool: String,
@@ -37,7 +38,8 @@ pub enum AgentEvent<D> {
     Finished(RunResult<D>),
 }
 
-/// Stream of [`AgentEvent`]s of one run, created by [`AgentRun::stream`](super::AgentRun::stream).
+/// Stream of [`AgentEvent`]s of one run, returned by awaiting
+/// [`Agent::run_stream`](super::Agent::run_stream).
 ///
 /// It is `Send + 'static`: you can move it into a spawned task or return it from a web handler,
 /// for example as server-sent events. An error ends the stream. Dropping the stream cancels the

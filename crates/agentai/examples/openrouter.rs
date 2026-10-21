@@ -1,11 +1,11 @@
 //! OpenRouter Example
 //!
-//! This example uses genai's native OpenRouter adapter through `Agent::new_with_provider`.
-//! No base URL is needed: the adapter knows OpenRouter's endpoint, and every model name
+//! This example uses OpenRouter through `Agent::new_with_provider(Provider::OpenRouter, ..)`.
+//! No base URL is needed: agentai knows OpenRouter's endpoint, and every model name
 //! (for example `nvidia/nemotron-3.5-super-vl:free`) is sent to OpenRouter as is.
 
 use agentai::tool::buildin::CurrentDateAndTimeToolBox;
-use agentai::{AdapterKind, Agent, RunResult};
+use agentai::{Agent, Provider, RunResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
         std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
     // `None` keeps the default OpenRouter endpoint
-    let agent = Agent::new_with_provider(AdapterKind::OpenRouter, None, &api_key, SYSTEM)?
+    let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, SYSTEM)?
         .with_model(&model)
         .with_toolbox(CurrentDateAndTimeToolBox {});
 

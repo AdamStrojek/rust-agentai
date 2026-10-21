@@ -37,7 +37,6 @@ pub mod web;
 use serde_json::Value;
 use thiserror::Error;
 
-// Re-export Tool structure, it is being used by ToolBoxes
 /// Represents a tool definition that can be exposed to an agent.
 ///
 /// This structure is used by `ToolBox` implementations in their `tools_definitions`
@@ -49,7 +48,59 @@ use thiserror::Error;
 ///
 /// The `name` field is required, while `description` and `schema` are optional
 /// but highly recommended for effective tool use by the agent.
-pub use genai::chat::Tool;
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Tool {
+    /// Name of the tool. It must be unique within the toolbox.
+    pub name: String,
+    /// What the tool does and when to use it. The model reads it.
+    pub description: Option<String>,
+    /// JSON schema of the arguments.
+    pub schema: Option<serde_json::Value>,
+    /// Asks providers that support it to make the arguments match the schema exactly.
+    pub strict: Option<bool>,
+}
+
+impl Tool {
+    /// Creates a tool definition with a name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: None,
+            schema: None,
+            strict: None,
+        }
+    }
+
+    /// Sets the description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Sets the JSON schema of the arguments.
+    pub fn with_schema(mut self, schema: serde_json::Value) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
+    /// Marks the tool as strict, see [`Tool::strict`].
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = Some(strict);
+        self
+    }
+}
+
+impl Tool {
+    pub(crate) fn into_genai(self) -> genai::chat::Tool {
+        let tool = self;
+        let mut out = genai::chat::Tool::new(tool.name);
+        out.description = tool.description;
+        out.schema = tool.schema;
+        out.strict = tool.strict;
+        out
+    }
+}
 
 pub type ToolResult = Result<String, ToolError>;
 

@@ -1,4 +1,4 @@
-use agentai::{Agent, ChatMessage, RunResult};
+use agentai::{Agent, Message, RunResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
 
     // The agent does not remember the conversation: you keep the history and pass it to
     // every run.
-    let mut history: Vec<ChatMessage> = Vec::new();
+    let mut history: Vec<Message> = Vec::new();
 
     let question = "Why sky is blue?";
     info!("Question: {}", question);

@@ -1,11 +1,13 @@
-//! A single run of an [`Agent`]: per-run options, the [`AgentRun`] builder and its result.
+//! A single run of an [`Agent`]: the [`AgentRequest`] builder, per-run options and the result.
 
-use super::core::{ResolvedRun, finish, run_loop};
+use super::core::{ResolvedRun, finish, response_format, run_loop};
 use super::stream::AgentStream;
-use super::{Agent, AgentError, ChatMessage, ChatOptions, StopReason, Usage};
+use super::{Agent, AgentError, ChatOptions, StopReason, Usage};
+use crate::message::Message;
 use crate::tool::ToolBox;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
+use std::any::TypeId;
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -13,11 +15,9 @@ use std::sync::Arc;
 
 /// Settings that replace the [`Agent`] configuration for one run.
 ///
-/// Like [`Agent`] and [`AgentRun`], it is configured with `with_*` methods.
-///
 /// Every field left as `None` keeps the agent's setting. Keep a `RunOptions` around to reuse
 /// the same overrides, for example a cheaper model for simple questions, and pass it to
-/// [`AgentRun::with_options`].
+/// [`AgentRequest::with_options`].
 ///
 /// ```no_run
 /// use agentai::{Agent, RunOptions, RunResult};
@@ -30,6 +30,7 @@ use std::sync::Arc;
 /// # }
 /// ```
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct RunOptions {
     /// Model to use instead of [`Agent::with_model`].
     pub model: Option<String>,
@@ -93,7 +94,7 @@ pub struct RunResult<D> {
     /// results and the final answer. The history you passed and the system prompt are not
     /// included. Append them to your history to continue the conversation:
     /// `history.extend(result.new_messages)`.
-    pub new_messages: Vec<ChatMessage>,
+    pub new_messages: Vec<Message>,
     /// Tokens used by all model calls of the run together.
     pub usage: Usage,
     /// Why the model stopped writing the final answer.
@@ -104,36 +105,46 @@ pub struct RunResult<D> {
     pub iterations: usize,
 }
 
-/// A configured run of an [`Agent`], created by [`Agent::run`].
+/// Mode of an [`AgentRequest`] created by [`Agent::run`]: awaiting it returns a [`RunResult`].
+#[derive(Debug, Clone, Copy)]
+pub struct Complete;
+
+/// Mode of an [`AgentRequest`] created by [`Agent::run_stream`]: awaiting it returns an
+/// [`AgentStream`].
+#[derive(Debug, Clone, Copy)]
+pub struct Streaming;
+
+/// A prepared run of an [`Agent`], created by [`Agent::run`] or [`Agent::run_stream`].
 ///
-/// Set the history and per-run options with the builder methods, then `.await` it to get a
-/// [`RunResult`], or call [`stream`](AgentRun::stream) to receive the answer as it is written.
-/// Nothing is sent to the model before the run is awaited or the stream is polled.
-#[must_use = "a run does nothing until it is awaited or streamed"]
-pub struct AgentRun<'a, D = String> {
+/// Both create the same request with the same `with_*` methods; only the result of `.await`
+/// differs. The mode `M` is [`Complete`] for `run` (a [`RunResult`]) and [`Streaming`] for
+/// `run_stream` (an [`AgentStream`]). Nothing is sent to the model before the request is
+/// awaited.
+#[must_use = "a request does nothing until it is awaited"]
+pub struct AgentRequest<'a, D = String, M = Complete> {
     agent: &'a Agent,
     prompt: String,
-    history: &'a [ChatMessage],
+    history: &'a [Message],
     options: RunOptions,
-    answer: PhantomData<fn() -> D>,
+    marker: PhantomData<fn() -> (D, M)>,
 }
 
-impl<'a, D> AgentRun<'a, D> {
+impl<'a, D, M> AgentRequest<'a, D, M> {
     pub(super) fn new(agent: &'a Agent, prompt: String) -> Self {
         Self {
             agent,
             prompt,
             history: &[],
             options: RunOptions::default(),
-            answer: PhantomData,
+            marker: PhantomData,
         }
     }
 
     /// Sets the conversation so far. The prompt is sent after these messages.
     ///
     /// The history is only read, never changed. Add [`RunResult::new_messages`] to it yourself
-    /// once the run succeeds. Do not put the system prompt in it: the agent sends its own.
-    pub fn with_history(mut self, history: &'a [ChatMessage]) -> Self {
+    /// once the run succeeds. The system prompt is not part of it: the agent sends its own.
+    pub fn with_history(mut self, history: &'a [Message]) -> Self {
         self.history = history;
         self
     }
@@ -173,53 +184,18 @@ impl<'a, D> AgentRun<'a, D> {
         self
     }
 
-    /// Streams the run: text and reasoning as the model writes them, tool calls and their
-    /// results, and finally the [`RunResult`] in [`AgentEvent::Finished`](super::AgentEvent::Finished).
-    ///
-    /// Every model call of the loop is streamed, and the run works like an awaited run: tools
-    /// are called, recoverable tool errors are sent to the model, and structured output is
-    /// parsed at the end. The stream owns everything it needs, so it is `Send + 'static`.
-    ///
-    /// ```no_run
-    /// use agentai::{Agent, AgentEvent, ChatMessage};
-    /// use futures_util::StreamExt;
-    ///
-    /// # async fn example(agent: Agent, mut history: Vec<ChatMessage>) -> Result<(), agentai::AgentError> {
-    /// let mut stream = agent.run::<String>("Tell me a story").with_history(&history).stream();
-    /// while let Some(event) = stream.next().await {
-    ///     match event? {
-    ///         AgentEvent::TextDelta(text) => print!("{text}"),
-    ///         AgentEvent::ToolCall(call) => println!("\n[calling {}]", call.fn_name),
-    ///         AgentEvent::Finished(result) => history.extend(result.new_messages),
-    ///         _ => {}
-    ///     }
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// Errors are the same as for an awaited run (see [`Agent::run`]); an error is the last item
-    /// of the stream.
-    pub fn stream(self) -> AgentStream<D>
+    /// Combines the agent configuration with the overrides of this run and checks it.
+    fn resolve(self) -> Result<(ResolvedRun, Vec<Message>, String), AgentError>
     where
-        D: DeserializeOwned + JsonSchema + Send + 'static,
+        D: JsonSchema + 'static,
     {
-        match self.resolve() {
-            Ok((run, history, prompt)) => {
-                AgentStream::new(run_loop::<D>(run, history, prompt, true))
-            }
-            Err(err) => AgentStream::new(futures_util::stream::once(async move { Err(err) })),
-        }
-    }
-
-    /// Combines the agent configuration with the overrides of this run.
-    fn resolve(self) -> Result<(ResolvedRun, Vec<ChatMessage>, String), AgentError> {
         let agent = self.agent;
         let options = self.options;
         let model = options
             .model
             .or_else(|| agent.model.clone())
             .ok_or(AgentError::MissingModel)?;
+        let is_answer_string = TypeId::of::<String>() == TypeId::of::<D>();
         let run = ResolvedRun {
             client: agent.client.clone(),
             system: agent.system.clone(),
@@ -229,12 +205,17 @@ impl<'a, D> AgentRun<'a, D> {
             chat_options: options
                 .chat_options
                 .unwrap_or_else(|| agent.chat_options.clone()),
+            response_format: if is_answer_string {
+                None
+            } else {
+                Some(response_format::<D>()?)
+            },
         };
         Ok((run, self.history.to_vec(), self.prompt))
     }
 }
 
-impl<D> IntoFuture for AgentRun<'_, D>
+impl<D> IntoFuture for AgentRequest<'_, D, Complete>
 where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
@@ -246,6 +227,22 @@ where
         Box::pin(async move {
             let (run, history, prompt) = resolved?;
             finish(run_loop::<D>(run, history, prompt, false)).await
+        })
+    }
+}
+
+impl<D> IntoFuture for AgentRequest<'_, D, Streaming>
+where
+    D: DeserializeOwned + JsonSchema + Send + 'static,
+{
+    type Output = Result<AgentStream<D>, AgentError>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + 'static>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        let resolved = self.resolve();
+        Box::pin(async move {
+            let (run, history, prompt) = resolved?;
+            Ok(AgentStream::new(run_loop::<D>(run, history, prompt, true)))
         })
     }
 }

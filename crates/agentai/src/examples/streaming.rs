@@ -1,6 +1,6 @@
 //! # Streaming Example
 //!
-//! This example streams a run with [`AgentRun::stream`](crate::AgentRun::stream) and prints
+//! This example streams a run with [`Agent::run_stream`](crate::Agent::run_stream) and prints
 //! the answer as the model writes it. The stream also reports the tool calls the agent makes
 //! and their results, and ends with [`AgentEvent::Finished`](crate::AgentEvent::Finished),
 //! which holds the same [`RunResult`](crate::RunResult) as an awaited run. The new messages

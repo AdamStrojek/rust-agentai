@@ -1,4 +1,5 @@
 use super::*;
+use crate::message::Message;
 use crate::tool::{Tool, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -297,8 +298,6 @@ async fn default_options_send_the_default_temperature() {
 
 #[tokio::test]
 async fn chat_options_are_sent_with_every_request() {
-    use genai::chat::ToolChoice;
-
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
     let options = ChatOptions::default()
         .with_temperature(0.7)
@@ -478,7 +477,7 @@ fn truncated_reply(text: &str) -> (u16, String) {
 }
 
 /// Messages as JSON, to compare them.
-fn messages_json(messages: &[ChatMessage]) -> Value {
+fn messages_json(messages: &[Message]) -> Value {
     serde_json::to_value(messages).unwrap()
 }
 
@@ -486,8 +485,8 @@ fn messages_json(messages: &[ChatMessage]) -> Value {
 async fn run_returns_only_the_new_messages() {
     let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
     let history = vec![
-        ChatMessage::user("earlier question"),
-        ChatMessage::assistant("earlier answer"),
+        Message::user("earlier question"),
+        Message::assistant("earlier answer"),
     ];
 
     let result: RunResult<String> = llm
@@ -504,9 +503,9 @@ async fn run_returns_only_the_new_messages() {
     let new = messages_json(&result.new_messages);
     assert!(!new.to_string().contains("earlier"));
     assert!(!new.to_string().contains("\"system\""));
-    assert_eq!(result.usage.total_tokens, Some(4));
+    assert_eq!(result.usage.total_tokens, 4);
     assert_eq!(result.iterations, 2);
-    assert!(matches!(result.stop_reason, Some(StopReason::Completed(_))));
+    assert!(matches!(result.stop_reason, Some(StopReason::Completed)));
 
     // The request carries the system prompt and the history before the prompt
     let messages = request_json(&llm, 0)["messages"].clone();
@@ -573,12 +572,7 @@ async fn a_run_without_a_model_fails_before_calling_the_model() {
 
     let err = agent.run::<String>("question").await.unwrap_err();
     assert!(matches!(err, AgentError::MissingModel));
-    let err = agent
-        .run::<String>("question")
-        .stream()
-        .finish()
-        .await
-        .unwrap_err();
+    let err = agent.run_stream::<String>("question").await.err().unwrap();
     assert!(matches!(err, AgentError::MissingModel));
     assert!(llm.requests().is_empty());
 
@@ -614,14 +608,15 @@ async fn stream_sends_deltas_tool_events_and_the_result() {
     let mut stream = llm
         .agent()
         .with_toolbox(EchoToolBox)
-        .run::<String>("question")
-        .stream();
+        .run_stream::<String>("question")
+        .await
+        .unwrap();
     let mut events = Vec::new();
     let mut result = None;
     while let Some(event) = stream.next().await {
         match event.unwrap() {
             AgentEvent::TextDelta(text) => events.push(format!("text:{text}")),
-            AgentEvent::ToolCall(call) => events.push(format!("call:{}", call.fn_name)),
+            AgentEvent::ToolCall(call) => events.push(format!("call:{}", call.name)),
             AgentEvent::ToolResult {
                 tool,
                 content,
@@ -645,7 +640,7 @@ async fn stream_sends_deltas_tool_events_and_the_result() {
     let result = result.expect("the stream ends with Finished");
     assert_eq!(result.answer, "Hello");
     assert_eq!(result.new_messages.len(), 4);
-    assert_eq!(result.usage.total_tokens, Some(4));
+    assert_eq!(result.usage.total_tokens, 4);
     assert_eq!(request_json(&llm, 0)["stream"], json!(true));
 }
 
@@ -667,8 +662,9 @@ async fn streamed_and_awaited_runs_produce_the_same_messages() {
     let streamed = streamed_llm
         .agent()
         .with_toolbox(EchoToolBox)
-        .run::<String>("question")
-        .stream()
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
         .finish()
         .await
         .unwrap();
@@ -694,8 +690,9 @@ async fn streamed_structured_output_is_parsed_at_the_end() {
 
     let result = llm
         .agent()
-        .run::<Answer>("question")
-        .stream()
+        .run_stream::<Answer>("question")
+        .await
+        .unwrap()
         .finish()
         .await
         .unwrap();
@@ -715,8 +712,9 @@ async fn fatal_tool_error_ends_the_stream() {
     let mut stream = llm
         .agent()
         .with_toolbox(toolbox)
-        .run::<String>("q")
-        .stream();
+        .run_stream::<String>("q")
+        .await
+        .unwrap();
     assert!(matches!(
         stream.next().await,
         Some(Ok(AgentEvent::ToolCall(_)))
@@ -735,13 +733,17 @@ async fn fatal_tool_error_ends_the_stream() {
 #[test]
 fn runs_and_streams_can_be_moved_to_other_tasks() {
     fn assert_send_static<T: Send + 'static>(_: &T) {}
+    fn assert_send_static_type<T: Send + 'static>() {}
     let agent = Agent::new_with_url("http://localhost/", "key", "system").unwrap();
-    let history = vec![ChatMessage::user("hi")];
-    let stream = agent.run::<String>("q").with_history(&history).stream();
-    assert_send_static(&stream);
+    let history = vec![Message::user("hi")];
     let future =
         std::future::IntoFuture::into_future(agent.run::<String>("q").with_history(&history));
     assert_send_static(&future);
+    let future = std::future::IntoFuture::into_future(
+        agent.run_stream::<String>("q").with_history(&history),
+    );
+    assert_send_static(&future);
+    assert_send_static_type::<AgentStream<String>>();
     fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
     assert_send_sync_clone::<Agent>();
 }

@@ -24,29 +24,37 @@
 //!
 //! #### 0.3.0 - Streaming, conversation history in your hands, run details
 //!
-//! - **Streaming**: [`AgentRun::stream`](crate::AgentRun::stream) streams a run as
-//!   [`AgentEvent`](crate::AgentEvent)s: text and reasoning as the model writes them, each tool call and its
-//!   result, and finally the result of the run. Runs with tool calls and structured output stream too. The
-//!   stream is `Send + 'static`, so you can spawn it or return it from a web handler.
+//! - **Streaming**: [`Agent::run_stream`](crate::Agent::run_stream) takes the same configuration as
+//!   [`Agent::run`](crate::Agent::run), and awaiting it returns a stream of [`AgentEvent`](crate::AgentEvent)s:
+//!   text and reasoning as the model writes them, each tool call and its result, and finally the result of
+//!   the run. Runs with tool calls and structured output stream too. The stream is `Send + 'static`, so you
+//!   can spawn it or return it from a web handler.
 //! - **You manage the history**: the agent no longer keeps the conversation. Pass your history with
-//!   `.with_history(&history)` and add the run's [`new_messages`](crate::RunResult::new_messages) to it when you want
-//!   to continue: `history.extend(result.new_messages)`. You can store, trim, persist or reset it however you
-//!   like (`ChatMessage` is serializable), and your history is never changed by a failed or cancelled run.
-//!   The system prompt is not part of the history: the agent sends it with every request.
+//!   `.with_history(&history)` and add the run's [`new_messages`](crate::RunResult::new_messages) to it when you
+//!   want to continue: `history.extend(result.new_messages)`. Store, trim, persist or reset it however you
+//!   like: [`Message`](crate::Message) has its own stable JSON format. A failed or cancelled run never changes
+//!   your history, and the system prompt is not part of it: the agent sends it with every request.
 //! - **One agent, many conversations**: the model and toolbox now belong to the agent
 //!   ([`Agent::with_model`](crate::Agent::with_model), [`Agent::with_toolbox`](crate::Agent::with_toolbox)), and
 //!   running takes `&self`, so one agent can be cloned cheaply and shared between tasks. Change the model,
-//!   toolbox, iteration limit or options for a single run with the builder methods of
-//!   [`AgentRun`](crate::AgentRun) or a reusable [`RunOptions`](crate::RunOptions).
+//!   toolbox, iteration limit or options for a single run with the `with_*` methods of
+//!   [`AgentRequest`](crate::AgentRequest) or a reusable [`RunOptions`](crate::RunOptions).
 //! - **Run details**: awaiting a run returns a [`RunResult`](crate::RunResult) with the answer, token usage summed
 //!   over all model calls, the stop reason, the model's reasoning and the number of model calls. An answer cut
 //!   off by the token limit is reported as [`AgentError::MaxTokens`](crate::AgentError::MaxTokens) instead of a
 //!   confusing parse error.
+//! - **An API of its own**: `agentai` no longer exposes genai types. Messages, options, usage, providers,
+//!   tool definitions and errors are `agentai` types ([`Message`](crate::Message),
+//!   [`ChatOptions`](crate::ChatOptions), [`Usage`](crate::Usage), [`Provider`](crate::Provider),
+//!   [`Tool`](crate::tool::Tool), [`LlmError`](crate::LlmError)), so upgrading the LLM client inside `agentai`
+//!   no longer breaks your code or your stored history.
 //!
 //! **Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
 //! `agent.run(prompt).with_history(&history).await`, which returns a `RunResult` instead of the bare answer; the
 //! model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
-//! no longer remembers earlier runs. Read the
+//! no longer remembers earlier runs. genai types are no longer exposed: `pub use genai`,
+//! `Agent::new_with_client` and the `genai_custom` example are removed, `AdapterKind` is replaced by
+//! `Provider`, and `ChatOptions`, `Tool` and `AgentError::Llm` use `agentai` types. Read the
 //! [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading.
 //!
 //! #### 0.2.0 - Agent providers, remote MCP and configuration
@@ -105,14 +113,14 @@
 //! Here is a basic example of how to create an AI agent using AgentAI:
 //!
 //! ```no_run
-//! use agentai::{Agent, ChatMessage, RunResult};
+//! use agentai::{Agent, Message, RunResult};
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!     let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
 //!
 //!     // The conversation history is yours
-//!     let mut history: Vec<ChatMessage> = Vec::new();
+//!     let mut history: Vec<Message> = Vec::new();
 //!
 //!     let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
 //!     println!("Answer: {}", result.answer);
@@ -122,18 +130,18 @@
 //! }
 //! ```
 //!
-//! To show the answer while it is written, stream the run:
+//! To show the answer while it is written, use `run_stream` with the same configuration:
 //!
 //! ```no_run
 //! use agentai::{Agent, AgentEvent};
 //! use futures_util::StreamExt;
 //!
 //! # async fn run(agent: Agent) -> Result<(), agentai::AgentError> {
-//! let mut stream = agent.run::<String>("Why is the sky blue?").stream();
+//! let mut stream = agent.run_stream::<String>("Why is the sky blue?").await?;
 //! while let Some(event) = stream.next().await {
 //!     match event? {
 //!         AgentEvent::TextDelta(text) => print!("{text}"),
-//!         AgentEvent::Finished(result) => println!("\n{:?} tokens", result.usage.total_tokens),
+//!         AgentEvent::Finished(result) => println!("\n{} tokens", result.usage.total_tokens),
 //!         _ => {}
 //!     }
 //! }
@@ -187,10 +195,7 @@
 )]
 
 pub mod agent;
-/// The [genai](https://crates.io/crates/genai) crate `agentai` is built on, re-exported so you can use
-/// its types (`ChatOptions`, `ToolChoice`, `ReasoningEffort`, custom clients, ...) without
-/// adding a matching `genai` dependency.
-pub use genai;
+pub mod message;
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.
@@ -202,6 +207,7 @@ pub mod structured_output;
 
 #[allow(unused_imports)]
 pub use agent::*;
+pub use message::{Media, MediaSource, Message, Part, ProviderData, Role, ToolCall, ToolResponse};
 
 /// Compile-fail checks for the `#[tool(...)]` options. Only built for doc tests.
 ///
