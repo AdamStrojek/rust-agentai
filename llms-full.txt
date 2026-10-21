@@ -1,8 +1,8 @@
 # agentai
 
-> `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` keeps a conversation history, calls a model, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`.
+> `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.2.0 (genai 0.7, schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.3.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -10,6 +10,7 @@ This guide was written for `agentai` 0.2.0 (genai 0.7, schemars 1.x, Rust 1.88+)
 cargo add agentai
 cargo add tokio --features full
 cargo add anyhow
+cargo add futures-util   # only for streaming (StreamExt)
 ```
 
 Add `serde` (with `derive`) and `schemars` 1.x (with `derive`) for structured output. Add `async-trait`, `serde`, `serde_json` and `schemars` to write your own tools with `#[toolbox]`, because the code it generates names those crates.
@@ -25,75 +26,88 @@ All features are on by default.
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
 
-For a minimal build: `agentai = { version = "0.2", default-features = false, features = ["macros"] }`.
+For a minimal build: `agentai = { version = "0.3", default-features = false, features = ["macros"] }`.
 
 ## Creating an agent
 
-`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. `new`, `new_with_url` and `new_with_provider` return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building a genai client can fail.
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. Then set the model with `.with_model(..)` (required, either on the agent or on each run) and, if the agent uses tools, the toolbox with `.with_toolbox(..)`. The constructors return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building the LLM client can fail.
 
 ```rust
-use agentai::Agent;
+use agentai::{Agent, Provider};
 
-// 1. Default genai client. genai picks the provider from the model name
-//    and reads its API key from the provider's usual environment variable
-//    (for example OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
-let mut agent = Agent::new("You are a useful assistant")?;
+// 1. Provider picked from the model name (gpt-* OpenAI, claude-* Anthropic,
+//    gemini-* Gemini, ...). The API key is read from the provider's usual
+//    environment variable (for example OPENAI_API_KEY, ANTHROPIC_API_KEY).
+let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
 
 // 2. Any OpenAI-compatible endpoint (OpenAI, GitHub Models, OpenRouter,
-//    LiteLLM, Ollama, ...). Every model name is sent through the OpenAI
-//    adapter to this URL with this key. Names such as "openai/gpt-4.1-mini"
-//    or "vendor/model:free" are passed as they are; only "::" is a genai
-//    namespace, and a foreign one ("anthropic::...") fails with an
-//    adapter mismatch error.
-let mut agent = Agent::new_with_url(
+//    LiteLLM, Ollama, ...). Every model name is sent with the OpenAI Chat
+//    Completions API to this URL with this key. Names such as
+//    "openai/gpt-4.1-mini" or "vendor/model:free" are passed as they are.
+let agent = Agent::new_with_url(
     "https://openrouter.ai/api/v1/",
     &std::env::var("OPENROUTER_API_KEY")?,
     "You are a useful assistant",
 )?;
 
-// 3. One genai provider (adapter) with an explicit key. Bare model names go
-//    to that provider. `None` keeps its default endpoint; pass Some(url)
-//    to override it. `AdapterKind` is re-exported from genai.
-use agentai::AdapterKind;
-let mut agent = Agent::new_with_provider(
-    AdapterKind::OpenRouter,
+// 3. One provider with an explicit key. Model names go to that provider as
+//    they are. `None` keeps its default endpoint; pass Some(url) to override it.
+let agent = Agent::new_with_provider(
+    Provider::OpenRouter,
     None,
     &std::env::var("OPENROUTER_API_KEY")?,
     "You are a useful assistant",
 )?;
-
-// 4. Your own genai::Client, for custom resolvers or default chat options.
-let client = genai::Client::new()?;
-let mut agent = Agent::new_with_client(client, "You are a useful assistant");
 ```
 
-`new_with_url(url, key, system)` is the same as `new_with_provider(AdapterKind::OpenAI, Some(url), key, system)`.
+`new_with_url(url, key, system)` is the same as `new_with_provider(Provider::OpenAI, Some(url), key, system)`. `Provider` (`#[non_exhaustive]`) has `OpenAI`, `OpenAIResponses`, `Anthropic`, `Gemini`, `Vertex`, `OpenRouter`, `Groq`, `DeepSeek`, `Mistral`, `Xai`, `Cohere`, `Ollama`, `Fireworks`, `Together`, `Nebius`, `Moonshot`, `Zai` and `Aliyun`.
 
-With `Agent::new` you can still pick a provider per call through genai's model namespaces, for example `open_router::nvidia/nemotron-3.5-super-vl:free`. genai then reads the key from the provider's environment variable (`OPEN_ROUTER_API_KEY` for OpenRouter). An agent created with `new_with_url` or `new_with_provider` is bound to one provider: a model name with another namespace fails with an adapter mismatch error.
+With `Agent::new` you can also pick a provider per model with a `provider::` prefix, for example `open_router::nvidia/nemotron-3.5-super-vl:free`; the key is then read from the provider's environment variable (`OPEN_ROUTER_API_KEY` for OpenRouter). An agent created with `new_with_url` or `new_with_provider` is bound to one provider.
 
-`Agent` implements `Clone`. A clone copies the conversation history so far, so you can branch a conversation.
+`Agent` is configuration only: client, system prompt, model, toolbox, iteration limit and `ChatOptions`. It implements `Clone` (cheap: the client and the toolbox are shared) and is `Send + Sync`, so one agent can serve many conversations and tasks at once. It does not remember earlier runs.
+
+Other builder methods: `with_toolbox_arc(Arc<dyn ToolBox>)` for a toolbox you already share, and the getters `model()`, `system()`, `toolbox()`, `max_iterations()`, `chat_options()`.
 
 ## Asking a question
 
 ```rust
-pub async fn run<D>(
-    &mut self,
-    model: &str,
-    prompt: &str,
-    toolbox: Option<&dyn ToolBox>,
-) -> Result<D, AgentError>
-where
-    D: serde::de::DeserializeOwned + schemars::JsonSchema + 'static;
+impl Agent {
+    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Complete>;
+    pub fn run_stream<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Streaming>;
+}
 ```
 
-- `model` is passed to genai as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `new_with_url`, the endpoint's own name such as `"openai/gpt-4.1-mini"`. You can pick a different model on every call.
-- The return type selects the output mode, so always annotate it: `let answer: String = ...` or `agent.run::<String>(...)`.
-- Pass `None` when no tools are needed.
+Both return the same `AgentRequest` builder with the same methods; only the result of `.await` differs (it implements `IntoFuture`, the future is `Send + 'static`). Nothing is sent before it is awaited. Builder methods:
+
+- `.with_history(&history)`: the conversation so far, as `&[Message]`. Default: empty.
+- `.with_model(name)`, `.with_toolbox(toolbox)`, `.with_toolbox_arc(arc)`, `.with_max_iterations(n)`, `.with_chat_options(options)`: replace the agent's setting for this run only.
+- `.with_options(RunOptions)`: apply a reusable set of overrides (`RunOptions::default().with_model(..).with_max_iterations(..)`, fields left `None` keep the agent's setting).
+
+Every setter in the crate is `with_*` (on `Agent`, `AgentRequest`, `RunOptions`, `ChatOptions`, `Tool`); getters are bare names (`agent.model()`, `agent.max_iterations()`).
+
+Awaiting `run` returns `Result<AgentResult<D>, AgentError>`:
+
+```rust
+pub struct AgentResult<D> {
+    pub answer: D,                         // the final answer parsed into D
+    pub new_messages: Vec<Message>,        // messages added in this run (see History)
+    pub usage: Usage,                      // tokens of all model calls of the run together
+    pub stop_reason: Option<StopReason>,   // why the model stopped writing the final answer
+    pub reasoning_content: Option<String>, // reasoning returned with the final answer, if any
+    pub iterations: usize,                 // number of model calls
+}
+```
+
+- `Usage` has `input_tokens`, `cached_input_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` and `total_tokens` (`u64`, `0` when the provider does not report a count).
+- `StopReason` is `Completed`, `MaxTokens`, `ToolCall`, `ContentFilter`, `StopSequence` or `Other(String)`.
+- The model name is passed to the provider as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `new_with_url`, the endpoint's own name such as `"openai/gpt-4.1-mini"`.
+- The answer type selects the output mode, so always annotate it: `let result: AgentResult<String> = ...` or `agent.run::<String>(...)`.
+- `D` must be `DeserializeOwned + JsonSchema + Send + 'static`.
 
 Complete program:
 
 ```rust
-use agentai::Agent;
+use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -101,56 +115,102 @@ async fn main() -> anyhow::Result<()> {
     let api_key = std::env::var("AGENTAI_API_KEY")?;
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
-    let mut agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?;
-    let answer: String = agent.run(&model, "Why is the sky blue?", None).await?;
-    println!("{answer}");
+    let agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?.with_model(&model);
+
+    let mut history: Vec<Message> = Vec::new();
+    let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+    println!("{}", result.answer);
+    history.extend(result.new_messages);
+
+    let result: AgentResult<String> = agent.run("Say it in one sentence.").with_history(&history).await?;
+    println!("{}", result.answer);
+    history.extend(result.new_messages);
     Ok(())
 }
 ```
 
-### How `run` works
+### History
 
-1. The prompt is appended to the agent's history as a user message.
+You own the conversation history; the agent never stores it.
+
+- Pass it with `.with_history(&history)`. It is only read.
+- `result.new_messages` holds only the messages of this run, in order: your prompt, the assistant messages with tool calls, the tool results and the final answer. Append them to continue: `history.extend(result.new_messages)`. This matches `new_messages()` in pydantic-ai.
+- The system prompt is not in the history: the agent sends its own with every request. Do not put a system message in the history. The same history can therefore be used with a different agent.
+- A failed or cancelled run (an error, or a dropped stream) leaves your history unchanged and never leaves a tool call without a result. You can retry with the same history.
+- `Message { role: Role, parts: Vec<Part> }` is an `agentai` type with its own stable JSON format (`Serialize`/`Deserialize`, `Clone`, `PartialEq`), so you can persist, trim or summarize the history however you want and it keeps working across `agentai` upgrades. `Role` is `User`, `Assistant` or `Tool`. `Part` is `Text`, `ToolCall(ToolCall { id, name, arguments })`, `ToolResponse(ToolResponse { call_id, name, content })`, `Reasoning`, `ReasoningSignature`, `Media(Media)` or `ProviderData(ProviderData)`; keep signatures and provider data as they are, providers need them back to continue a conversation with reasoning. Build messages with `Message::user(text)`, `Message::assistant(text)` or `Message::new(role, parts)`; read them with `message.text()` and `message.tool_calls()`. Reset it with `history.clear()`. When trimming, keep an assistant message with tool calls together with its tool results.
+
+### Streaming
+
+```rust
+use agentai::{Agent, AgentEvent};
+use futures_util::StreamExt;
+
+let mut stream = agent.run_stream::<String>("Tell me a story").with_history(&history).await?;
+while let Some(event) = stream.next().await {
+    match event? {
+        AgentEvent::TextDelta(text) => print!("{text}"),
+        AgentEvent::ReasoningDelta(_) => {}
+        AgentEvent::ToolCall(call) => println!("[calling {}({})]", call.name, call.arguments),
+        AgentEvent::ToolResult { tool, content, is_error, .. } => println!("[{tool}: {content} error={is_error}]"),
+        AgentEvent::Finished(result) => history.extend(result.new_messages),
+        _ => {} // AgentEvent is #[non_exhaustive]
+    }
+}
+```
+
+- `run_stream` takes the same configuration as `run`. Awaiting it checks the configuration (missing model, schema of `D`) and returns `Result<AgentStream<D>, AgentError>`.
+- `AgentStream<D>` is a `Stream<Item = Result<AgentEvent<D>, AgentError>>` that is `Send + 'static`: it can be moved into `tokio::spawn` or returned from a web handler (for example axum server-sent events).
+- Every model call of the loop is streamed. Tools run between model calls exactly as in an awaited run.
+- Events: `TextDelta(String)`, `ReasoningDelta(String)`, `ToolCall(ToolCall)` (before the tool runs), `ToolResult { call_id, tool, content, is_error }`, and `Finished(AgentResult<D>)`, which is always the last event of a successful run. An error during the run is the last item of the stream.
+- Text the model writes before it asks for tools is also streamed as `TextDelta`, so not every delta belongs to the final answer. Use `result.answer` for the final answer.
+- Structured output streams too: the deltas are pieces of the JSON, and the answer is parsed at the end.
+- `stream.finish().await` reads the remaining events and returns the `AgentResult`.
+- Dropping the stream cancels the run.
+
+### How a run works
+
+1. The prompt becomes a user message after your history.
 2. If `D` is not `String`, a JSON schema of `D` is sent as the response format (see Structured output).
-3. The agent calls the model at most `max_iterations` times (5 by default, see Configuration). Each round sends the whole history and the toolbox's tool definitions to the model, with the agent's `ChatOptions`.
-   - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are appended to the history, and the loop continues. When a tool returns a recoverable error (`ToolError::is_recoverable()`), its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. A fatal tool error stops the run and `run` returns `AgentError::Tool`; the history stays valid, because every tool call still gets a result. If `run` got `None` as the toolbox, the model gets a "tool is not available" result instead.
-   - If the reply has only text, all text parts are joined, appended to the history and parsed into `D`.
+3. The agent calls the model at most `max_iterations` times (5 by default, see Configuration). Each round sends the system prompt, your history, the messages of this run so far and the toolbox's tool definitions, with the run's `ChatOptions`.
+   - If a reply was cut off by the token limit, the run fails with `AgentError::MaxTokens { raw }` at once, whatever the reply contains: tool calls in it are not run (their arguments may be incomplete) and a reasoning-only reply does not start another round.
+   - If the reply contains tool calls, each call is run through `ToolBox::call_tool`. The assistant message (with any text or reasoning that came with the calls) and the tool results are added to the run's messages, and the loop continues. When a tool returns a recoverable error (`ToolError::is_recoverable()`), its message (`ToolError`'s `Display`) is sent to the model as the tool result instead of stopping the run. A fatal tool error stops the run with `AgentError::Tool`. If the run has no toolbox, the model gets a "tool is not available" result instead.
+   - If the reply has only text, all text parts are joined and parsed into `D`.
    - An empty reply starts the next round.
-4. If there is still no text answer after `max_iterations` rounds, `run` returns `AgentError::MaxIterationsReached(max_iterations)`.
+4. If there is still no text answer after `max_iterations` rounds, the run returns `AgentError::MaxIterationsReached(max_iterations)`.
 
 ### Errors
 
-`Agent` returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built with `thiserror`):
+A run returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built with `thiserror`):
 
-- `ClientInit(genai::Error)`: the genai client could not be built (`new`, `new_with_url`).
-- `Llm(genai::Error)`: the request to the model failed (network, HTTP status, provider error).
+- `ClientInit(LlmError)`: the LLM client could not be built (`new`, `new_with_url`, `new_with_provider`).
+- `MissingModel`: no model was set on the agent or the run.
+- `Llm(LlmError)`: the request to the model failed (network, HTTP status, provider error). `LlmError` has `status() -> Option<u16>`, `is_transient()` and a `Display` message.
 - `Schema(String)`: the JSON schema of `D` could not be generated or is not an object.
 - `InvalidAnswer { raw, source }`: the final answer could not be parsed into `D`; `raw` is the text of the model.
+- `MaxTokens { raw }`: a reply was cut off by the token limit; `raw` is the truncated text (empty when the reply had only reasoning or tool calls, which are not run).
 - `MaxIterationsReached(usize)`: no final answer after that many rounds.
 - `Tool { tool, source }`: a tool failed with a fatal `ToolError`.
 
 `AgentError::is_transient()` is true for `Llm` errors that may succeed on a retry: HTTP 408, 425, 429 and 5xx, timeouts and connection failures.
 
 ```rust
-match agent.run::<String>(&model, question, Some(&tools)).await {
-    Ok(answer) => println!("{answer}"),
-    Err(err) if err.is_transient() => { /* retry later */ }
+match agent.run::<String>(question).with_history(&history).await {
+    Ok(result) => println!("{}", result.answer),
+    Err(err) if err.is_transient() => { /* retry later with the same history */ }
     Err(AgentError::InvalidAnswer { raw, .. }) => eprintln!("unexpected answer: {raw}"),
     Err(err) => return Err(err.into()),
 }
 ```
 
-The history is kept between `run` calls, so a second `run` on the same agent continues the same conversation. There is no API yet to clear or trim the history: create a new `Agent` (or keep a clone made before the conversation) to start fresh.
-
 ## Configuration
 
-Every constructor returns an agent with the defaults: at most 5 model calls per `run` (`DEFAULT_MAX_ITERATIONS`) and temperature 0.2 (`DEFAULT_TEMPERATURE`). Change them with the builder methods:
+Every constructor returns an agent with the defaults: at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and temperature 0.2 (`DEFAULT_TEMPERATURE`). Change them with the builder methods:
 
 ```rust
-use agentai::Agent;
-use agentai::genai::chat::{ChatOptions, ReasoningEffort, ToolChoice};
+use agentai::{Agent, ChatOptions, ReasoningEffort, ToolChoice};
 
-let mut agent = Agent::new("You are a useful assistant")?
+let agent = Agent::new("You are a useful assistant")?
+    .with_model("gpt-4o")
     .with_max_iterations(10)
     .with_chat_options(
         ChatOptions::default()
@@ -161,17 +221,18 @@ let mut agent = Agent::new("You are a useful assistant")?
     );
 ```
 
-- `with_max_iterations(n)`: maximum model calls in one `run`. Every reply with tool calls uses one, so raise it for tasks with many tool rounds. `0` makes `run` fail at once with `MaxIterationsReached(0)`.
-- `with_chat_options(options)`: `ChatOptions` sent with every request. They replace the defaults, including temperature 0.2. For structured output, `run` always sets the response format itself. Options set on a custom genai client still apply to the fields these options leave unset.
+- `with_max_iterations(n)`: maximum model calls in one run. Every reply with tool calls uses one, so raise it for tasks with many tool rounds. `0` makes a run fail at once with `MaxIterationsReached(0)`.
+- `with_chat_options(options)`: `ChatOptions` sent with every request. They replace the defaults, including temperature 0.2. For structured output, the run always sets the response format itself.
+- `ChatOptions` (`#[non_exhaustive]`, `Default`) has `temperature`, `max_tokens`, `top_p`, `stop_sequences`, `tool_choice` (`ToolChoice::{Auto, None, Required, Tool(name)}`) and `reasoning_effort` (`ReasoningEffort::{Low, Medium, High, Budget(tokens)}`), each with a `with_*` setter.
 - `max_iterations()` and `chat_options()` return the current values.
-- `agentai::genai` re-exports the genai crate, and `agentai::ChatOptions` its options type. You do not need your own `genai` dependency for them.
+- Any of these can be replaced for a single run, see Asking a question.
 
 ## Structured output
 
 Any type that implements `Deserialize` and `JsonSchema` can be the answer type. `agentai` generates its JSON schema with schemars, removes the top-level `$schema` and `title` keys (Gemini rejects them), and asks the model to answer in that format. The reply is then parsed with `serde_json`.
 
 ```rust
-use agentai::Agent;
+use agentai::{Agent, AgentResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -185,26 +246,26 @@ struct Answer {
     answer: String,
 }
 
-let answer: Answer = agent.run(&model, "Why is the sky blue?", None).await?;
-println!("{}", answer.answer);
+let result: AgentResult<Answer> = agent.run("Why is the sky blue?").await?;
+println!("{}", result.answer.answer);
 ```
 
 Tips:
 
 - Doc comments on fields become field descriptions in the schema, and the model reads them as instructions.
 - A first field for reasoning (here `_thinking`) tends to give better answers and helps debugging.
-- The model and provider must support JSON-schema response formats. If the reply does not match the type, `run` returns a `serde_json` error.
+- The model and provider must support JSON-schema response formats. If the reply does not match the type, the run returns `AgentError::InvalidAnswer`.
 
 ## Tools
 
 Tools let the model call your code. They are grouped in toolboxes. Everything lives in `agentai::tool`:
 
 - `ToolBox`: a trait with `tools_definitions()` and `call_tool(name, arguments)`.
-- `Tool`: a tool definition (`name`, optional `description`, optional JSON `schema`), re-exported from `genai::chat::Tool`.
+- `Tool`: a tool definition (`name`, optional `description`, optional JSON `schema`, optional `strict`).
 - `ToolResult`: `Result<String, ToolError>`. A tool always returns text for the model.
 - `ToolError` (`#[non_exhaustive]`) separates errors the model can fix from errors that end the run. `is_recoverable()` tells them apart.
   - Recoverable, sent to the model as the tool result while the loop continues: `NotFound(String)` (the tool is not in this toolbox), `InvalidArguments(String)` (missing, malformed or invalid arguments), `Failed(String)` (the tool ran but failed in a way the model can react to, such as an HTTP 404).
-  - Fatal, `Agent::run` stops and returns `AgentError::Tool`: `Configuration(String)` (missing API key, server not running, definitions not ready), `Fatal(Box<dyn Error + Send + Sync>)` (anything else; build it with `ToolError::fatal(err)`).
+  - Fatal, the run stops and returns `AgentError::Tool`: `Configuration(String)` (missing API key, server not running, definitions not ready), `Fatal(Box<dyn Error + Send + Sync>)` (anything else; build it with `ToolError::fatal(err)`).
 - `ToolBoxSet`: combines several toolboxes into one.
 - `toolbox`: the attribute macro that writes the `ToolBox` impl for you.
 
@@ -247,20 +308,20 @@ impl WeatherToolBox {
     }
 }
 
-let tools = WeatherToolBox::new();
-let answer: String = agent.run(&model, "How warm is it in Paris in Fahrenheit?", Some(&tools)).await?;
+let agent = agent.with_toolbox(WeatherToolBox::new());
+let result: AgentResult<String> = agent.run("How warm is it in Paris in Fahrenheit?").await?;
 ```
 
 Rules:
 
 - The tool name is the method name. Override it with `#[tool(name = "...")]`. Names must be unique in the toolbox.
-- `#[tool(strict)]` (or `strict = true/false`, combinable as `#[tool(name = "x", strict)]`) marks the definition as strict: providers that support it (OpenAI and compatible APIs) make the model's arguments match the schema exactly. genai adapts the schema for strict mode: every parameter is listed as required and `additionalProperties` is `false`, so use `Option<T>` for parameters the model may leave out (it then sends `null`). Not every provider or OpenRouter model supports strict tools, so it is opt-in.
+- `#[tool(strict)]` (or `strict = true/false`, combinable as `#[tool(name = "x", strict)]`) marks the definition as strict: providers that support it (OpenAI and compatible APIs) make the model's arguments match the schema exactly. agentai adapts the schema for strict mode: every parameter is listed as required and `additionalProperties` is `false`, so use `Option<T>` for parameters the model may leave out (it then sends `null`). Not every provider or OpenRouter model supports strict tools, so it is opt-in.
 - The method's doc comment is the tool description. Parameter doc comments become parameter descriptions. Write them for the model: say when to use the tool and what each argument means.
 - Each tool must take `&self` and return `ToolResult`. Both `fn` and `async fn` work.
 - Every parameter must implement `serde::Deserialize` and `schemars::JsonSchema`. Attributes on parameters, such as `#[serde(...)]` or `#[schemars(...)]`, are kept.
 - Methods without `#[tool]` (constructors, helpers) stay ordinary methods. An `impl` block with no `#[tool]` method does not compile.
 - `Tool`, `ToolBox`, `ToolError` and `ToolResult` must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
-- The type must be `Send + Sync + 'static`.
+- The type must be `Send + Sync + 'static`. The agent stores toolboxes in an `Arc`, so pass them by value (`with_toolbox(tb)`) or share one with `with_toolbox_arc(Arc::new(tb))`.
 
 Error handling in generated toolboxes: if the arguments do not deserialize, the generated code returns `ToolError::InvalidArguments`, so the model can fix them. Errors returned by your method pass through unchanged: return `ToolError::InvalidArguments` or `ToolError::Failed` with a helpful message (for example "unknown city") to let the model retry, or `ToolError::Configuration` / `ToolError::fatal(err)` to stop the run.
 
@@ -298,7 +359,7 @@ impl ToolBox for EchoToolBox {
 }
 ```
 
-Build `Tool` with `Tool::new(name)` and its `with_*` methods: it is genai's type, its `name` is a `ToolName` (compare with `tool.name.as_str()`), and it has more optional fields. Return `ToolError::NotFound` for names you do not handle. `ToolBoxSet` relies on it.
+Build `Tool` with `Tool::new(name)` and its `with_*` methods (`with_description`, `with_schema`, `with_strict`); its `name` is a `String`. Return `ToolError::NotFound` for names you do not handle. `ToolBoxSet` relies on it.
 
 ### Combining toolboxes
 
@@ -309,7 +370,7 @@ let mut tools = ToolBoxSet::new();
 tools.add_tool(WebSearchToolBox::new(&brave_api_key));
 tools.add_tool(WebFetchToolBox::new());
 
-let answer: String = agent.run(&model, question, Some(&tools)).await?;
+let agent = agent.with_toolbox(tools);
 ```
 
 `tools_definitions` joins the definitions of all toolboxes. `call_tool` tries the toolboxes in the order they were added and uses the first one that does not return `NotFound`. If two toolboxes define the same tool name, the first one wins.
@@ -359,7 +420,8 @@ let remote_tools = McpToolBox::new_http("http://localhost:8000/mcp").await?;
 // with a bearer token (without the "Bearer " prefix)
 let hosted_tools = McpToolBox::new_http_with_bearer("https://example.com/mcp", &token).await?;
 
-let answer: String = agent.run(&model, "What time is it in Poland?", Some(&mcp_tools)).await?;
+// per run, or for every run with agent.with_toolbox(mcp_tools)
+let result: AgentResult<String> = agent.run("What time is it in Poland?").with_toolbox(mcp_tools).await?;
 ```
 
 The server's tool list is read once, when the toolbox is created.
@@ -369,42 +431,12 @@ The server's tool list is read once, when the toolbox is created.
 - **Connecting:** `new`, `new_http` and `new_http_with_bearer` return `Result<McpToolBox, ToolError>`; a server that cannot be started or reached is `ToolError::Configuration`.
 - **Results:** text blocks of the result are joined with newlines. If there is no text, the structured content is returned as JSON. Images, audio and embedded resources are not forwarded; each becomes a placeholder such as `[image omitted]`.
 
-## Custom genai client
-
-Build a `genai::Client` yourself to change routing, authentication or default chat options, then pass it to `Agent::new_with_client`. This example sends every model to OpenRouter through the OpenAI adapter and limits the answer length (reasoning models count their thinking towards this limit):
-
-```rust
-use agentai::Agent;
-use genai::adapter::AdapterKind;
-use genai::chat::ChatOptions;
-use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client, ModelIden, ServiceTarget};
-
-let target_resolver = ServiceTargetResolver::from_resolver_fn(
-    |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
-        let endpoint = Endpoint::from_static("https://openrouter.ai/api/v1/");
-        let auth = AuthData::from_env("AGENTAI_API_KEY");
-        let ServiceTarget { model, .. } = service_target;
-        let model = ModelIden::new(AdapterKind::OpenAI, model.model_name);
-        Ok(ServiceTarget { endpoint, auth, model })
-    },
-);
-
-let client = Client::builder()
-    .with_chat_options(ChatOptions::default().with_max_tokens(2000))
-    .with_service_target_resolver(target_resolver)
-    .build()?;
-
-let mut agent = Agent::new_with_client(client, "You are a useful assistant");
-```
-
-`agentai` 0.2 uses genai 0.7, so use genai 0.7 types. In genai 0.7 `Client::builder().build()` returns a `Result`. For a fixed endpoint and key, `Client::builder().append_provider_config(AdapterKind::OpenAI, (endpoint, auth))` is simpler than a resolver.
-
 ## Logging
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.2.0
+## Limits in 0.3.0
 
-- No streaming, and no API to read or reset the history.
-- Only text and tool calls are used from a reply. Images or other binary parts returned by the model are ignored.
+- The prompt is text only; images or other parts in the prompt are not supported yet (put them in the history yourself as `Part::Media` in a `Message`).
+- Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.
+- There is no way to plug in a custom LLM client; use `new_with_url` or `new_with_provider`.

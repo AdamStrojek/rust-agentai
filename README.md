@@ -18,7 +18,6 @@ and maintainable code. Whether you're developing simple or complex AI agents, Ag
 a streamlined and efficient development process.
 
 ## Warning
-
 This library is under heavy development. The interface may change at any time without notice.
 
 ## Features
@@ -28,8 +27,45 @@ This library is under heavy development. The interface may change at any time wi
 - **Build custom tools with ease**: A simple interface for creating and managing your own tools using the [`ToolBox`](https://docs.rs/agentai/latest/agentai/tool/trait.ToolBox.html).
 - **MCP Server Support, local and remote**: Use tools from any Model Context Protocol server, whether you start it locally over **stdio** or connect to a running or hosted server over **Streamable HTTP** (with optional bearer token). Built on the official MCP Rust SDK.
 - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
+- **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
+- **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New
+
+#### 0.3.0 - Streaming, conversation history in your hands, run details
+
+- **Streaming**: `Agent::run_stream` takes the same configuration as
+  `Agent::run`, and awaiting it returns a stream of `AgentEvent`s:
+  text and reasoning as the model writes them, each tool call and its result, and finally the result of
+  the run. Runs with tool calls and structured output stream too. The stream is `Send + 'static`, so you
+  can spawn it or return it from a web handler.
+- **You manage the history**: the agent no longer keeps the conversation. Pass your history with
+  `.with_history(&history)` and add the run's `new_messages` to it when you
+  want to continue: `history.extend(result.new_messages)`. Store, trim, persist or reset it however you
+  like: `Message` has its own stable JSON format. A failed or cancelled run never changes
+  your history, and the system prompt is not part of it: the agent sends it with every request.
+- **One agent, many conversations**: the model and toolbox now belong to the agent
+  (`Agent::with_model`, `Agent::with_toolbox`), and
+  running takes `&self`, so one agent can be cloned cheaply and shared between tasks. Change the model,
+  toolbox, iteration limit or options for a single run with the `with_*` methods of
+  `AgentRequest` or a reusable `RunOptions`.
+- **Run details**: awaiting a run returns a `AgentResult` with the answer, token usage summed
+  over all model calls, the stop reason, the model's reasoning and the number of model calls. An answer cut
+  off by the token limit is reported as `AgentError::MaxTokens` instead of a
+  confusing parse error.
+- **An API of its own**: `agentai` no longer exposes genai types. Messages, options, usage, providers,
+  tool definitions and errors are `agentai` types (`Message`,
+  `ChatOptions`, `Usage`, `Provider`,
+  [`Tool`](https://docs.rs/agentai/latest/agentai/tool/struct.Tool.html), `LlmError`), so upgrading the LLM client inside `agentai`
+  no longer breaks your code or your stored history.
+
+**Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
+`agent.run(prompt).with_history(&history).await`, which returns a `AgentResult` instead of the bare answer; the
+model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
+no longer remembers earlier runs. genai types are no longer exposed: `pub use genai`,
+`Agent::new_with_client` and the `genai_custom` example are removed, `AdapterKind` is replaced by
+`Provider`, and `ChatOptions`, `Tool` and `AgentError::Llm` use `agentai` types. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading.
 
 #### 0.2.0 - Agent providers, remote MCP and configuration
 
@@ -39,7 +75,7 @@ This library is under heavy development. The interface may change at any time wi
   `Agent::new_with_url` now return `Result`, and the agent reports typed errors
   (`AgentError`). Tool errors are either recoverable (sent back to the model, which can
   try again) or fatal (they stop the run).
-- **Remote MCP servers, not only stdio**: `McpToolBox` now connects to MCP
+- **Remote MCP servers, not only stdio**: [`McpToolBox`](https://docs.rs/agentai/latest/agentai/tool/mcp/struct.McpToolBox.html) now connects to MCP
   servers over **Streamable HTTP**, so agents can use running and hosted servers, including ones that need a
   bearer token (`McpToolBox::new_http`, `McpToolBox::new_http_with_bearer`). Starting a local server over
   **stdio** (`McpToolBox::new`) works as before. MCP support is now built on `rmcp`, the official MCP Rust SDK.
@@ -65,8 +101,6 @@ This release introduces the [`ToolBox`](https://docs.rs/agentai/latest/agentai/t
 
 We are continuously working to improve AgentAI. These are the next features we plan; the linked issues have the details:
 
-- **Run details and history control** ([#46](https://github.com/AdamStrojek/rust-agentai/issues/46)): return token usage, the stop reason and reasoning from a run, and let you read and reset the conversation history.
-- **Streaming output** ([#49](https://github.com/AdamStrojek/rust-agentai/issues/49)): stream the answer as it is generated, including runs with tool calls.
 - **Agent Memory**: control what the agent remembers between runs, such as persistence, record limits and context management.
 - **User input during a run**: let an agent ask the user for more information or confirmation before it continues.
 
@@ -81,49 +115,57 @@ cargo add agentai
 This command adds the crate and its dependencies to your project.
 
 ## Feature Flags
-
 <!-- FEATURE FLAGS -->
-
-Available features for `agentai` crate.
-To enable any of these features, you need to enter this command:
-
-```bash
-cargo add agentai -F mcp-client
-```
-
-Features list:
-
-- `mcp-client` _(enabled by default)_ — Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
-- `macros` _(enabled by default)_ — Enables support for macro [`#[toolbox]`](https://docs.rs/agentai/latest/agentai/tool/attr.toolbox.html)
-- `tools-buildin` _(enabled by default)_ — Enables support for [buildin tools](https://docs.rs/agentai/latest/agentai/tool/buildin/index.html)
-- `tools-web` _(enabled by default)_ — Enables support for [web tools](https://docs.rs/agentai/latest/agentai/tool/web/index.html)
 
 ## Usage
 
 Here is a basic example of how to create an AI agent using AgentAI:
 
 ```rust
-use agentai::Agent;
+use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut agent = Agent::new("You are a useful assistant")?;
-    let answer: String = agent.run("gpt-4o", "Why is the sky blue?", None).await?;
-    println!("Answer: {}", answer);
+    let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
+
+    // The conversation history is yours
+    let mut history: Vec<Message> = Vec::new();
+
+    let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+    println!("Answer: {}", result.answer);
+    // Keep the question and the answer to continue the conversation
+    history.extend(result.new_messages);
     Ok(())
+}
+```
+
+To show the answer while it is written, use `run_stream` with the same configuration:
+
+```rust
+use agentai::{Agent, AgentEvent};
+use futures_util::StreamExt;
+
+let mut stream = agent.run_stream::<String>("Why is the sky blue?").await?;
+while let Some(event) = stream.next().await {
+    match event? {
+        AgentEvent::TextDelta(text) => print!("{text}"),
+        AgentEvent::Finished(result) => println!("\n{} tokens", result.usage.total_tokens),
+        _ => {}
+    }
 }
 ```
 
 ## Error handling
 
-`Agent::run` returns an `AgentError` that you can match on. Provider failures that may
-succeed on a second try report it with `AgentError::is_transient`:
+A run returns an [`AgentError`] that you can match on. Provider failures that may
+succeed on a second try report it with [`AgentError::is_transient`]. Your history is not
+changed by a failed run, so you can simply try again:
 
 ```rust
 use agentai::{Agent, AgentError};
 
-match agent.run::<String>("gpt-4o", "Why is the sky blue?", None).await {
-    Ok(answer) => println!("Answer: {answer}"),
+match agent.run::<String>("Why is the sky blue?").await {
+    Ok(result) => println!("Answer: {}", result.answer),
     Err(err) if err.is_transient() => println!("Try again later: {err}"),
     Err(AgentError::InvalidAnswer { raw, .. }) => println!("Unexpected answer: {raw}"),
     Err(err) => println!("Failed: {err}"),
@@ -133,7 +175,7 @@ match agent.run::<String>("gpt-4o", "Why is the sky blue?", None).await {
 Tools report failures with [`ToolError`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolError.html). Recoverable errors
 (`NotFound`, `InvalidArguments`, `Failed`) are sent to the model as the tool result and the
 run continues. Fatal errors (`Configuration`, `Fatal`) stop the run with
-`AgentError::Tool`. [`ToolError::is_recoverable`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolError.html#method.is_recoverable)
+[`AgentError::Tool`]. [`ToolError::is_recoverable`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolError.html#method.is_recoverable)
 tells the two groups apart.
 
 ## Examples
