@@ -1,4 +1,4 @@
-use agentai::{Agent, RunResult};
+use agentai::{Agent, AgentResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use schemars::JsonSchema;
@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
 
     let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?.with_model(&model);
 
-    let result: RunResult<Answer> = agent.run(question).await?;
+    let result: AgentResult<Answer> = agent.run(question).await?;
 
     info!("{:#?}", result.answer);
 

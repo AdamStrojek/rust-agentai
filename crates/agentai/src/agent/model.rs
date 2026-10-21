@@ -139,7 +139,7 @@ impl ReasoningEffort {
     }
 }
 
-/// Tokens used by a run. See [`RunResult::usage`](crate::RunResult::usage).
+/// Tokens used by a run. See [`AgentResult::usage`](crate::AgentResult::usage).
 ///
 /// Counts the provider does not report are `0`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,7 +188,7 @@ impl Usage {
     }
 }
 
-/// Why the model stopped writing. See [`RunResult::stop_reason`](crate::RunResult::stop_reason).
+/// Why the model stopped writing. See [`AgentResult::stop_reason`](crate::AgentResult::stop_reason).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

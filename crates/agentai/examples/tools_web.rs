@@ -2,7 +2,7 @@ use agentai::tool::{
     ToolBoxSet,
     web::{WebFetchToolBox, WebSearchToolBox},
 };
-use agentai::{Agent, RunResult};
+use agentai::{Agent, AgentResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use schemars::JsonSchema;
@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
         .with_model(&model)
         .with_toolbox(toolbox);
 
-    let result: RunResult<Answer> = agent.run(question).await?;
+    let result: AgentResult<Answer> = agent.run(question).await?;
 
     info!("{:#?}", result.answer);
 

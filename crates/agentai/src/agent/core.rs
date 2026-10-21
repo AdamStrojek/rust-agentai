@@ -1,6 +1,6 @@
 //! The agent loop shared by every way of running an agent.
 
-use super::{AgentError, AgentEvent, ChatOptions, LlmError, RunResult, StopReason, Usage};
+use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
 use crate::message::{Message, ToolCall, ToolResponse};
 use crate::tool::ToolBox;
 use async_stream::try_stream;
@@ -38,7 +38,7 @@ struct Step {
 }
 
 /// Runs the agent loop. The history is only read; the messages of this run are returned in
-/// [`RunResult::new_messages`]. With `streaming`, the model answers are streamed and text and
+/// [`AgentResult::new_messages`]. With `streaming`, the model answers are streamed and text and
 /// reasoning deltas are sent as events.
 pub(super) fn run_loop<D>(
     run: ResolvedRun,
@@ -165,7 +165,7 @@ where
             }
             new_messages.push(Message::assistant(raw.clone()));
             let answer = parse_answer::<D>(raw, is_answer_string)?;
-            yield AgentEvent::Finished(RunResult {
+            yield AgentEvent::Finished(AgentResult {
                 answer,
                 new_messages,
                 usage,
@@ -183,7 +183,7 @@ where
 /// Drives a run to the end and returns its result.
 pub(super) async fn finish<D>(
     events: impl Stream<Item = Result<AgentEvent<D>, AgentError>>,
-) -> Result<RunResult<D>, AgentError> {
+) -> Result<AgentResult<D>, AgentError> {
     pin_mut!(events);
     while let Some(event) = events.next().await {
         if let AgentEvent::Finished(result) = event? {

@@ -20,12 +20,12 @@ use std::sync::Arc;
 /// [`AgentRequest::with_options`].
 ///
 /// ```no_run
-/// use agentai::{Agent, RunOptions, RunResult};
+/// use agentai::{Agent, RunOptions, AgentResult};
 ///
 /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
 /// let cheap = RunOptions::default().with_model("gpt-4.1-mini").with_max_iterations(2);
 ///
-/// let result: RunResult<String> = agent.run("Say hello").with_options(cheap.clone()).await?;
+/// let result: AgentResult<String> = agent.run("Say hello").with_options(cheap.clone()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -87,7 +87,7 @@ impl RunOptions {
 /// The result of a successful run.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct RunResult<D> {
+pub struct AgentResult<D> {
     /// The final answer, parsed into `D`.
     pub answer: D,
     /// The messages added in this run, in order: your prompt, the model's tool calls, the tool
@@ -105,7 +105,7 @@ pub struct RunResult<D> {
     pub iterations: usize,
 }
 
-/// Mode of an [`AgentRequest`] created by [`Agent::run`]: awaiting it returns a [`RunResult`].
+/// Mode of an [`AgentRequest`] created by [`Agent::run`]: awaiting it returns a [`AgentResult`].
 #[derive(Debug, Clone, Copy)]
 pub struct Complete;
 
@@ -117,7 +117,7 @@ pub struct Streaming;
 /// A prepared run of an [`Agent`], created by [`Agent::run`] or [`Agent::run_stream`].
 ///
 /// Both create the same request with the same `with_*` methods; only the result of `.await`
-/// differs. The mode `M` is [`Complete`] for `run` (a [`RunResult`]) and [`Streaming`] for
+/// differs. The mode `M` is [`Complete`] for `run` (a [`AgentResult`]) and [`Streaming`] for
 /// `run_stream` (an [`AgentStream`]). Nothing is sent to the model before the request is
 /// awaited.
 #[must_use = "a request does nothing until it is awaited"]
@@ -142,7 +142,7 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
 
     /// Sets the conversation so far. The prompt is sent after these messages.
     ///
-    /// The history is only read, never changed. Add [`RunResult::new_messages`] to it yourself
+    /// The history is only read, never changed. Add [`AgentResult::new_messages`] to it yourself
     /// once the run succeeds. The system prompt is not part of it: the agent sends its own.
     pub fn with_history(mut self, history: &'a [Message]) -> Self {
         self.history = history;
@@ -219,7 +219,7 @@ impl<D> IntoFuture for AgentRequest<'_, D, Complete>
 where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
-    type Output = Result<RunResult<D>, AgentError>;
+    type Output = Result<AgentResult<D>, AgentError>;
     type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + 'static>>;
 
     fn into_future(self) -> Self::IntoFuture {

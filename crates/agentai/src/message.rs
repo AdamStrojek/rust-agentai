@@ -2,7 +2,7 @@
 //!
 //! The conversation history is a `Vec<Message>` that you own. Pass it to a run with
 //! [`AgentRequest::with_history`](crate::AgentRequest::with_history) and append
-//! [`RunResult::new_messages`](crate::RunResult::new_messages) to it to continue the
+//! [`AgentResult::new_messages`](crate::AgentResult::new_messages) to it to continue the
 //! conversation.
 //!
 //! Messages implement `Serialize` and `Deserialize` with a format defined by this crate, so a

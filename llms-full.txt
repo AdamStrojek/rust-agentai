@@ -85,10 +85,10 @@ Both return the same `AgentRequest` builder with the same methods; only the resu
 
 Every setter in the crate is `with_*` (on `Agent`, `AgentRequest`, `RunOptions`, `ChatOptions`, `Tool`); getters are bare names (`agent.model()`, `agent.max_iterations()`).
 
-Awaiting `run` returns `Result<RunResult<D>, AgentError>`:
+Awaiting `run` returns `Result<AgentResult<D>, AgentError>`:
 
 ```rust
-pub struct RunResult<D> {
+pub struct AgentResult<D> {
     pub answer: D,                         // the final answer parsed into D
     pub new_messages: Vec<Message>,        // messages added in this run (see History)
     pub usage: Usage,                      // tokens of all model calls of the run together
@@ -101,13 +101,13 @@ pub struct RunResult<D> {
 - `Usage` has `input_tokens`, `cached_input_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` and `total_tokens` (`u64`, `0` when the provider does not report a count).
 - `StopReason` is `Completed`, `MaxTokens`, `ToolCall`, `ContentFilter`, `StopSequence` or `Other(String)`.
 - The model name is passed to the provider as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `new_with_url`, the endpoint's own name such as `"openai/gpt-4.1-mini"`.
-- The answer type selects the output mode, so always annotate it: `let result: RunResult<String> = ...` or `agent.run::<String>(...)`.
+- The answer type selects the output mode, so always annotate it: `let result: AgentResult<String> = ...` or `agent.run::<String>(...)`.
 - `D` must be `DeserializeOwned + JsonSchema + Send + 'static`.
 
 Complete program:
 
 ```rust
-use agentai::{Agent, Message, RunResult};
+use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -118,11 +118,11 @@ async fn main() -> anyhow::Result<()> {
     let agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?.with_model(&model);
 
     let mut history: Vec<Message> = Vec::new();
-    let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+    let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     println!("{}", result.answer);
     history.extend(result.new_messages);
 
-    let result: RunResult<String> = agent.run("Say it in one sentence.").with_history(&history).await?;
+    let result: AgentResult<String> = agent.run("Say it in one sentence.").with_history(&history).await?;
     println!("{}", result.answer);
     history.extend(result.new_messages);
     Ok(())
@@ -161,10 +161,10 @@ while let Some(event) = stream.next().await {
 - `run_stream` takes the same configuration as `run`. Awaiting it checks the configuration (missing model, schema of `D`) and returns `Result<AgentStream<D>, AgentError>`.
 - `AgentStream<D>` is a `Stream<Item = Result<AgentEvent<D>, AgentError>>` that is `Send + 'static`: it can be moved into `tokio::spawn` or returned from a web handler (for example axum server-sent events).
 - Every model call of the loop is streamed. Tools run between model calls exactly as in an awaited run.
-- Events: `TextDelta(String)`, `ReasoningDelta(String)`, `ToolCall(ToolCall)` (before the tool runs), `ToolResult { call_id, tool, content, is_error }`, and `Finished(RunResult<D>)`, which is always the last event of a successful run. An error during the run is the last item of the stream.
+- Events: `TextDelta(String)`, `ReasoningDelta(String)`, `ToolCall(ToolCall)` (before the tool runs), `ToolResult { call_id, tool, content, is_error }`, and `Finished(AgentResult<D>)`, which is always the last event of a successful run. An error during the run is the last item of the stream.
 - Text the model writes before it asks for tools is also streamed as `TextDelta`, so not every delta belongs to the final answer. Use `result.answer` for the final answer.
 - Structured output streams too: the deltas are pieces of the JSON, and the answer is parsed at the end.
-- `stream.finish().await` reads the remaining events and returns the `RunResult`.
+- `stream.finish().await` reads the remaining events and returns the `AgentResult`.
 - Dropping the stream cancels the run.
 
 ### How a run works
@@ -231,7 +231,7 @@ let agent = Agent::new("You are a useful assistant")?
 Any type that implements `Deserialize` and `JsonSchema` can be the answer type. `agentai` generates its JSON schema with schemars, removes the top-level `$schema` and `title` keys (Gemini rejects them), and asks the model to answer in that format. The reply is then parsed with `serde_json`.
 
 ```rust
-use agentai::{Agent, RunResult};
+use agentai::{Agent, AgentResult};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -245,7 +245,7 @@ struct Answer {
     answer: String,
 }
 
-let result: RunResult<Answer> = agent.run("Why is the sky blue?").await?;
+let result: AgentResult<Answer> = agent.run("Why is the sky blue?").await?;
 println!("{}", result.answer.answer);
 ```
 
@@ -308,7 +308,7 @@ impl WeatherToolBox {
 }
 
 let agent = agent.with_toolbox(WeatherToolBox::new());
-let result: RunResult<String> = agent.run("How warm is it in Paris in Fahrenheit?").await?;
+let result: AgentResult<String> = agent.run("How warm is it in Paris in Fahrenheit?").await?;
 ```
 
 Rules:
@@ -420,7 +420,7 @@ let remote_tools = McpToolBox::new_http("http://localhost:8000/mcp").await?;
 let hosted_tools = McpToolBox::new_http_with_bearer("https://example.com/mcp", &token).await?;
 
 // per run, or for every run with agent.with_toolbox(mcp_tools)
-let result: RunResult<String> = agent.run("What time is it in Poland?").with_toolbox(mcp_tools).await?;
+let result: AgentResult<String> = agent.run("What time is it in Poland?").with_toolbox(mcp_tools).await?;
 ```
 
 The server's tool list is read once, when the toolbox is created.

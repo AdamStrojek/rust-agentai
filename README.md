@@ -49,7 +49,7 @@ This library is under heavy development. The interface may change at any time wi
   running takes `&self`, so one agent can be cloned cheaply and shared between tasks. Change the model,
   toolbox, iteration limit or options for a single run with the `with_*` methods of
   `AgentRequest` or a reusable `RunOptions`.
-- **Run details**: awaiting a run returns a `RunResult` with the answer, token usage summed
+- **Run details**: awaiting a run returns a `AgentResult` with the answer, token usage summed
   over all model calls, the stop reason, the model's reasoning and the number of model calls. An answer cut
   off by the token limit is reported as `AgentError::MaxTokens` instead of a
   confusing parse error.
@@ -60,7 +60,7 @@ This library is under heavy development. The interface may change at any time wi
   no longer breaks your code or your stored history.
 
 **Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
-`agent.run(prompt).with_history(&history).await`, which returns a `RunResult` instead of the bare answer; the
+`agent.run(prompt).with_history(&history).await`, which returns a `AgentResult` instead of the bare answer; the
 model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
 no longer remembers earlier runs. genai types are no longer exposed: `pub use genai`,
 `Agent::new_with_client` and the `genai_custom` example are removed, `AdapterKind` is replaced by
@@ -122,7 +122,7 @@ This command adds the crate and its dependencies to your project.
 Here is a basic example of how to create an AI agent using AgentAI:
 
 ```rust
-use agentai::{Agent, Message, RunResult};
+use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
     // The conversation history is yours
     let mut history: Vec<Message> = Vec::new();
 
-    let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+    let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     println!("Answer: {}", result.answer);
     // Keep the question and the answer to continue the conversation
     history.extend(result.new_messages);

@@ -5,7 +5,7 @@
 //!
 
 use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
-use agentai::{Agent, RunResult};
+use agentai::{Agent, AgentResult};
 use anyhow::Error;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Error> {
         .with_model(&model)
         .with_toolbox(toolbox);
 
-    let result: RunResult<String> = agent.run(question).await?;
+    let result: AgentResult<String> = agent.run(question).await?;
 
     info!("Answer: {}", result.answer);
 

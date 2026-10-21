@@ -30,7 +30,7 @@
 //!   the run. Runs with tool calls and structured output stream too. The stream is `Send + 'static`, so you
 //!   can spawn it or return it from a web handler.
 //! - **You manage the history**: the agent no longer keeps the conversation. Pass your history with
-//!   `.with_history(&history)` and add the run's [`new_messages`](crate::RunResult::new_messages) to it when you
+//!   `.with_history(&history)` and add the run's [`new_messages`](crate::AgentResult::new_messages) to it when you
 //!   want to continue: `history.extend(result.new_messages)`. Store, trim, persist or reset it however you
 //!   like: [`Message`](crate::Message) has its own stable JSON format. A failed or cancelled run never changes
 //!   your history, and the system prompt is not part of it: the agent sends it with every request.
@@ -39,7 +39,7 @@
 //!   running takes `&self`, so one agent can be cloned cheaply and shared between tasks. Change the model,
 //!   toolbox, iteration limit or options for a single run with the `with_*` methods of
 //!   [`AgentRequest`](crate::AgentRequest) or a reusable [`RunOptions`](crate::RunOptions).
-//! - **Run details**: awaiting a run returns a [`RunResult`](crate::RunResult) with the answer, token usage summed
+//! - **Run details**: awaiting a run returns a [`AgentResult`](crate::AgentResult) with the answer, token usage summed
 //!   over all model calls, the stop reason, the model's reasoning and the number of model calls. An answer cut
 //!   off by the token limit is reported as [`AgentError::MaxTokens`](crate::AgentError::MaxTokens) instead of a
 //!   confusing parse error.
@@ -50,7 +50,7 @@
 //!   no longer breaks your code or your stored history.
 //!
 //! **Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
-//! `agent.run(prompt).with_history(&history).await`, which returns a `RunResult` instead of the bare answer; the
+//! `agent.run(prompt).with_history(&history).await`, which returns a `AgentResult` instead of the bare answer; the
 //! model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
 //! no longer remembers earlier runs. genai types are no longer exposed: `pub use genai`,
 //! `Agent::new_with_client` and the `genai_custom` example are removed, `AdapterKind` is replaced by
@@ -113,7 +113,7 @@
 //! Here is a basic example of how to create an AI agent using AgentAI:
 //!
 //! ```no_run
-//! use agentai::{Agent, Message, RunResult};
+//! use agentai::{Agent, Message, AgentResult};
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
@@ -122,7 +122,7 @@
 //!     // The conversation history is yours
 //!     let mut history: Vec<Message> = Vec::new();
 //!
-//!     let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+//!     let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
 //!     println!("Answer: {}", result.answer);
 //!     // Keep the question and the answer to continue the conversation
 //!     history.extend(result.new_messages);

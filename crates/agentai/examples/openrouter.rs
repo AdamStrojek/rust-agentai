@@ -5,7 +5,7 @@
 //! (for example `nvidia/nemotron-3.5-super-vl:free`) is sent to OpenRouter as is.
 
 use agentai::tool::buildin::CurrentDateAndTimeToolBox;
-use agentai::{Agent, Provider, RunResult};
+use agentai::{Agent, AgentResult, Provider};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         .with_model(&model)
         .with_toolbox(CurrentDateAndTimeToolBox {});
 
-    let result: RunResult<String> = agent.run(question).await?;
+    let result: AgentResult<String> = agent.run(question).await?;
 
     info!("Answer: {}", result.answer);
 

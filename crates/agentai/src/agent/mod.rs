@@ -20,7 +20,7 @@ mod request;
 mod stream;
 
 pub use model::{ChatOptions, Provider, ReasoningEffort, StopReason, ToolChoice, Usage};
-pub use request::{AgentRequest, Complete, RunOptions, RunResult, Streaming};
+pub use request::{AgentRequest, AgentResult, Complete, RunOptions, Streaming};
 pub use stream::{AgentEvent, AgentStream};
 
 #[cfg(test)]
@@ -148,7 +148,7 @@ pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 /// An agent is configuration only: the LLM client, the system prompt, the default model and
 /// toolbox, how many model calls one run may make, and the [`ChatOptions`] sent with every
 /// request. It does not keep the conversation. You own the history, pass it to
-/// [`AgentRequest::with_history`] and append [`RunResult::new_messages`] to it, so one agent can
+/// [`AgentRequest::with_history`] and append [`AgentResult::new_messages`] to it, so one agent can
 /// serve many conversations at once. Cloning an agent is cheap.
 ///
 /// ```no_run
@@ -364,20 +364,20 @@ impl Agent {
     /// returns the final answer as `D`.
     ///
     /// Configure the returned [`AgentRequest`] with its `with_*` methods, then `.await` it to
-    /// get a [`RunResult`]. [`run_stream`](Agent::run_stream) takes the same configuration and
+    /// get a [`AgentResult`]. [`run_stream`](Agent::run_stream) takes the same configuration and
     /// streams the run instead.
     ///
     /// ```no_run
-    /// use agentai::{Agent, Message, RunResult};
+    /// use agentai::{Agent, Message, AgentResult};
     ///
     /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
     /// let mut history: Vec<Message> = Vec::new();
     ///
-    /// let result: RunResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
+    /// let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
     /// println!("{}", result.answer);
     /// history.extend(result.new_messages);
     ///
-    /// let result: RunResult<String> = agent.run("And why is it red at sunset?").with_history(&history).await?;
+    /// let result: AgentResult<String> = agent.run("And why is it red at sunset?").with_history(&history).await?;
     /// println!("{}", result.answer);
     /// history.extend(result.new_messages);
     /// # Ok(())
@@ -410,7 +410,7 @@ impl Agent {
 
     /// Prepares a streamed run. It takes the same configuration as [`run`](Agent::run), but
     /// awaiting it returns an [`AgentStream`] of [`AgentEvent`]s: text and reasoning as the
-    /// model writes them, tool calls and their results, and finally the [`RunResult`] in
+    /// model writes them, tool calls and their results, and finally the [`AgentResult`] in
     /// [`AgentEvent::Finished`].
     ///
     /// Awaiting checks the configuration (a missing model, the schema of `D`) before anything is

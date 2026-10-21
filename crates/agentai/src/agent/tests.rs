@@ -143,7 +143,7 @@ async fn recoverable_tool_error_lets_the_model_retry() {
         make_error: || ToolError::InvalidArguments("timezone is unknown".to_string()),
     };
 
-    let result: RunResult<String> = llm
+    let result: AgentResult<String> = llm
         .agent()
         .with_toolbox(toolbox)
         .run("question")
@@ -288,7 +288,7 @@ async fn default_options_send_the_default_temperature() {
 
     let agent = llm.agent();
     assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
-    let _: RunResult<String> = agent.run("question").await.unwrap();
+    let _: AgentResult<String> = agent.run("question").await.unwrap();
 
     assert_eq!(
         request_json(&llm, 0)["temperature"],
@@ -304,7 +304,7 @@ async fn chat_options_are_sent_with_every_request() {
         .with_max_tokens(123)
         .with_tool_choice(ToolChoice::Required);
 
-    let _: RunResult<String> = llm
+    let _: AgentResult<String> = llm
         .agent()
         .with_chat_options(options)
         .run("question")
@@ -330,7 +330,7 @@ async fn structured_output_keeps_custom_options() {
 
     let llm = MockLlm::start(vec![text_reply(r#"{"value": 7}"#)]).await;
 
-    let result: RunResult<Answer> = llm
+    let result: AgentResult<Answer> = llm
         .agent()
         .with_chat_options(ChatOptions::default().with_temperature(0.0))
         .run("question")
@@ -372,7 +372,7 @@ impl StrictTools {
 async fn strict_tools_are_sent_as_strict() {
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
 
-    let _: RunResult<String> = llm
+    let _: AgentResult<String> = llm
         .agent()
         .with_toolbox(StrictTools)
         .run("question")
@@ -489,7 +489,7 @@ async fn run_returns_only_the_new_messages() {
         Message::assistant("earlier answer"),
     ];
 
-    let result: RunResult<String> = llm
+    let result: AgentResult<String> = llm
         .agent()
         .with_toolbox(EchoToolBox)
         .run("question")
@@ -522,9 +522,9 @@ async fn appended_messages_continue_the_conversation() {
     let agent = llm.agent();
     let mut history = Vec::new();
 
-    let result: RunResult<String> = agent.run("one").with_history(&history).await.unwrap();
+    let result: AgentResult<String> = agent.run("one").with_history(&history).await.unwrap();
     history.extend(result.new_messages);
-    let result: RunResult<String> = agent.run("two").with_history(&history).await.unwrap();
+    let result: AgentResult<String> = agent.run("two").with_history(&history).await.unwrap();
     history.extend(result.new_messages);
 
     assert_eq!(history.len(), 4);
@@ -579,7 +579,7 @@ async fn a_run_without_a_model_fails_before_calling_the_model() {
     // A model set for the run is enough
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
     let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
-    let result: RunResult<String> = agent.run("question").with_model("m").await.unwrap();
+    let result: AgentResult<String> = agent.run("question").with_model("m").await.unwrap();
     assert_eq!(result.answer, "hi");
 }
 
@@ -647,7 +647,7 @@ async fn stream_sends_deltas_tool_events_and_the_result() {
 #[tokio::test]
 async fn streamed_and_awaited_runs_produce_the_same_messages() {
     let awaited_llm = MockLlm::start(vec![tool_call_reply(), text_reply("Hello")]).await;
-    let awaited: RunResult<String> = awaited_llm
+    let awaited: AgentResult<String> = awaited_llm
         .agent()
         .with_toolbox(EchoToolBox)
         .run("question")

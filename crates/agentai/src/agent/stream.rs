@@ -1,7 +1,7 @@
 //! Streaming a run: [`AgentEvent`] and [`AgentStream`].
 
 use super::core::finish;
-use super::{AgentError, RunResult};
+use super::{AgentError, AgentResult};
 use crate::message::ToolCall;
 use futures_util::Stream;
 use std::pin::Pin;
@@ -34,8 +34,8 @@ pub enum AgentEvent<D> {
         /// try again; a fatal error ends the stream with [`AgentError::Tool`] after this event.
         is_error: bool,
     },
-    /// The run finished. Holds the same [`RunResult`] that awaiting the run returns.
-    Finished(RunResult<D>),
+    /// The run finished. Holds the same [`AgentResult`] that awaiting the run returns.
+    Finished(AgentResult<D>),
 }
 
 /// Stream of [`AgentEvent`]s of one run, returned by awaiting
@@ -62,7 +62,7 @@ impl<D> AgentStream<D> {
     }
 
     /// Reads the remaining events and returns the result of the run.
-    pub async fn finish(self) -> Result<RunResult<D>, AgentError> {
+    pub async fn finish(self) -> Result<AgentResult<D>, AgentError> {
         finish(self).await
     }
 }
