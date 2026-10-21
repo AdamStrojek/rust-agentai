@@ -58,8 +58,8 @@ This library is under heavy development. The interface may change at any time wi
 `agent.run(prompt).with_history(&history).await`, which returns an `AgentResult` instead of the bare answer;
 the model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
 no longer remembers earlier runs. `Agent::new_with_provider` takes a `Provider`, and `Agent::new_with_client`
-is removed. Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before
-upgrading: it lists the steps to migrate from 0.2.
+is removed. Follow the [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md) to upgrade from 0.2.0: it shows each change with before and
+after code.
 
 #### 0.2.0 - Agent providers, remote MCP and configuration
 

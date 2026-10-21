@@ -11,45 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-Steps to migrate from 0.2.x:
+See [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#020--030-2026-10-21) for the steps to migrate from 0.2.0, with before and after code.
 
-- **Running the agent**
-  - Set the model and the toolbox on the agent, then pass only the prompt to `run`:
-
-    ```rust
-    // 0.2
-    let mut agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?;
-    let answer: String = agent.run(&model, question, Some(&tools)).await?;
-
-    // 0.3
-    let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?
-        .with_model(&model)
-        .with_toolbox(tools);
-    let result: AgentResult<String> = agent.run(question).await?;
-    let answer = result.answer;
-    ```
-
-  - `run` takes `&self`, so the agent no longer needs `mut` and can be cloned and shared between tasks. The toolbox is passed by value (or as an `Arc` with `with_toolbox_arc`).
-  - A run returns `AgentResult<D>`: the answer is in `answer`, next to `new_messages`, `usage`, `stop_reason`, `reasoning_content` and `iterations`.
-  - The model or toolbox can also be set for one run: `agent.run(question).with_model(..).with_toolbox(..)`.
-  - A run without a model fails with `AgentError::MissingModel`.
-- **Conversation history**
-  - The agent no longer remembers earlier runs. Calling `run` twice on the same agent used to continue the conversation; now keep the history yourself:
-
-    ```rust
-    let mut history: Vec<Message> = Vec::new();
-    let result: AgentResult<String> = agent.run(question).with_history(&history).await?;
-    history.extend(result.new_messages);
-    ```
-
-  - The system prompt is not part of the history; the agent sends it with every request.
-- **Errors**
-  - An answer cut off by the token limit fails with `AgentError::MaxTokens { raw }` instead of `AgentError::InvalidAnswer`. Tool calls in a cut-off answer are not run.
-  - `AgentError::Llm` and `AgentError::ClientInit` hold an `LlmError`; use `status()` and `is_transient()` on it (or `AgentError::is_transient()` as before).
-- **Creating agents**
-  - `Agent::new_with_provider` takes `agentai::Provider` instead of `AdapterKind`, for example `Provider::OpenRouter`.
-  - `Agent::new_with_client` is removed. Use `Agent::new`, `Agent::new_with_url` or `Agent::new_with_provider`.
-  - `ToolChoice` and `ReasoningEffort` for `ChatOptions` are imported from `agentai` (`use agentai::{ChatOptions, ReasoningEffort, ToolChoice};`).
+- `Agent::run(model, prompt, toolbox)` is replaced by `agent.run(prompt).await`, which returns `AgentResult<D>` instead of `D`; the model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox`, or per run.
+- The agent no longer remembers earlier runs: pass the history with `with_history(&history)` and append `result.new_messages`. The system prompt is not part of the history.
+- An answer cut off by the token limit is `AgentError::MaxTokens` instead of `AgentError::InvalidAnswer`; `AgentError::Llm` and `AgentError::ClientInit` hold an `LlmError`.
+- `Agent::new_with_provider` takes a `Provider` instead of `AdapterKind`; `Agent::new_with_client` is removed.
+- `ToolChoice` and `ReasoningEffort` are imported from `agentai`.
 
 ### New features
 - *(agent)* [**breaking**] streaming, caller-owned history, run details and agentai's own types ([#66](https://github.com/AdamStrojek/rust-agentai/pull/66)) (by @AdamStrojek)
@@ -65,6 +33,8 @@ Steps to migrate from 0.2.x:
 ## [0.2.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.5...agentai-v0.2.0) - 2026-10-20
 
 ### Breaking changes
+
+See also [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#015--020-2026-10-20) for before and after code.
 
 Steps to migrate from 0.1.x:
 

@@ -40,3 +40,4 @@ Key facts for code generation:
 
 - [README](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/README.md): project overview and roadmap
 - [CHANGELOG](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/CHANGELOG.md): changes between releases
+- [Migration guide](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/MIGRATION.md): how to upgrade code between consecutive releases, with before and after code
