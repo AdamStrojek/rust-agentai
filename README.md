@@ -133,7 +133,20 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-To show the answer while it is written, use `run_stream` with the same configuration:
+To show the answer while it is written, use `run_stream` with the same configuration and
+write the stream to the console, a file or any other `std::io::Write`:
+
+```rust
+use agentai::{Agent, AgentResult};
+
+let result: AgentResult<String> = agent
+    .run_stream("Why is the sky blue?")
+    .await?
+    .print_to(std::io::stdout())
+    .await?;
+```
+
+For your own handling, read the [`AgentEvent`]s of the stream:
 
 ```rust
 use agentai::{Agent, AgentEvent};

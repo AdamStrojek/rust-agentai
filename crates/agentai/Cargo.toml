@@ -42,7 +42,7 @@ time = { version = "0.3", features = [
 ], optional = true }
 time-tz = { version = "2.0.0", optional = true }
 async-stream = "0.3.6"
-futures-util = "0.3.34"
+futures-util = { version = "0.3.34", features = ["io"] }
 
 [dev-dependencies]
 anyhow = "1.0.104"
@@ -50,7 +50,7 @@ tokio = { version = "1.54.0", features = ["full"] }
 simplelog = "0.12.2"
 
 [features]
-default = ["mcp-client", "macros", "tools-buildin", "tools-web"]
+default = ["mcp-client", "macros", "tokio", "tools-buildin", "tools-web"]
 #! Available features for `agentai` crate.
 #! To enable any of these features, you need to enter this command:
 #!
@@ -63,6 +63,9 @@ default = ["mcp-client", "macros", "tools-buildin", "tools-web"]
 
 ## Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
 mcp-client = ["dep:rmcp", "dep:tokio"]
+## Enables tokio integrations, such as writing a stream to a tokio writer with
+## [`AgentStream::print_to_tokio`](crate::AgentStream::print_to_tokio)
+tokio = ["dep:tokio"]
 ## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
 macros = ["agentai-macros"]
 ## Enables support for [buildin tools](crate::tool::buildin)

@@ -1,4 +1,5 @@
 use super::*;
+use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
 use crate::message::Message;
 use crate::tool::{Tool, ToolResult};
 use async_trait::async_trait;
@@ -821,4 +822,240 @@ async fn truncated_answer_without_text_does_not_use_up_iterations() {
 
     assert!(matches!(err, AgentError::MaxTokens { .. }));
     assert_eq!(llm.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn print_to_writes_text_and_tool_calls() {
+    let llm = MockLlm::start(vec![
+        sse(vec![
+            sse_chunk(
+                json!({ "role": "assistant", "content": "Let me check." }),
+                None,
+            ),
+            sse_chunk(
+                json!({ "tool_calls": [{
+                    "index": 0, "id": "call_1", "type": "function",
+                    "function": { "name": "echo", "arguments": "{}" }
+                }]}),
+                None,
+            ),
+            sse_chunk(json!({}), Some("tool_calls")),
+            sse_usage(),
+        ]),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out = Vec::new();
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "Let me check.\n[tool call] echo({})\nHello\n"
+    );
+}
+
+#[tokio::test]
+async fn printer_options_choose_what_is_written() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["done"]),
+    ])
+    .await;
+    let mut out = Vec::new();
+
+    llm.agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .listen(
+            Printer::new(&mut out)
+                .with_tool_calls(false)
+                .with_tool_results(true),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "[tool result] echo: echoed\ndone\n"
+    );
+}
+
+/// Writer that always fails.
+struct BrokenWriter;
+
+impl std::io::Write for BrokenWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("disk full"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn print_to_reports_write_errors() {
+    let llm = MockLlm::start(vec![streamed_text_reply(&["Hello"])]).await;
+
+    let err = llm
+        .agent()
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to(BrokenWriter)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentError::Listener(_)));
+}
+
+#[tokio::test]
+async fn print_to_async_writes_to_a_futures_writer() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out = futures_util::io::Cursor::new(Vec::new());
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to_async(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        "[tool call] echo({})\nHello\n"
+    );
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn print_to_tokio_writes_to_a_tokio_writer() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out: Vec<u8> = Vec::new();
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to_tokio(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "[tool call] echo({})\nHello\n"
+    );
+}
+
+/// Listener that records what it sees, like a GUI would.
+#[derive(Default)]
+struct Recorder {
+    events: Vec<String>,
+}
+
+impl EventListener for Recorder {
+    fn on_event(&mut self, event: &RunEvent<'_>) -> Result<(), ListenerError> {
+        self.events.push(match event {
+            RunEvent::TextDelta(text) => format!("text:{text}"),
+            RunEvent::ToolCall(call) => format!("call:{}", call.name),
+            RunEvent::ToolResult { tool, content, .. } => format!("result:{tool}:{content}"),
+            RunEvent::Finished {
+                new_messages,
+                iterations,
+                ..
+            } => format!("finished:{}:{iterations}", new_messages.len()),
+            _ => "other".to_string(),
+        });
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn listen_passes_every_event_to_the_listener() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut recorder = Recorder::default();
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .listen(&mut recorder)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        recorder.events,
+        vec![
+            "call:echo",
+            "result:echo:echoed",
+            "text:Hel",
+            "text:lo",
+            "finished:4:2"
+        ]
+    );
+}
+
+/// Listener that fails on the first text.
+struct FailingListener;
+
+impl EventListener for FailingListener {
+    fn on_event(&mut self, event: &RunEvent<'_>) -> Result<(), ListenerError> {
+        match event {
+            RunEvent::TextDelta(_) => Err("window closed".into()),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_listener_error_stops_the_run() {
+    let llm = MockLlm::start(vec![streamed_text_reply(&["Hello"])]).await;
+
+    let err = llm
+        .agent()
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .listen(FailingListener)
+        .await
+        .unwrap_err();
+
+    match err {
+        AgentError::Listener(source) => assert_eq!(source.to_string(), "window closed"),
+        other => panic!("expected AgentError::Listener, got {other:?}"),
+    }
 }

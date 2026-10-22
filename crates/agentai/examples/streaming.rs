@@ -27,7 +27,12 @@ async fn main() -> Result<()> {
     let question = "What day of the week is it today? Answer with a short poem about it.";
     println!("Question: {question}\n");
 
-    // The stream is `Send + 'static`, so it could also be moved into a spawned task
+    // The stream is `Send + 'static`, so it could also be moved into a spawned task.
+    // Reading the events yourself gives full control. To just write the stream to stdout (or a
+    // file, or any other `std::io::Write`), replace the loop with
+    // `stream.print_to(std::io::stdout()).await?` (`print_to_async` and `print_to_tokio` for async
+    // writers). To change what is written, or to show the run elsewhere (a GUI, a log), pass a
+    // configured `agentai::listener::Printer` or your own `EventListener` to `stream.listen(..)`.
     let mut stream = agent
         .run_stream::<String>(question)
         .with_history(&history)

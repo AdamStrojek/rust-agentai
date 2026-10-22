@@ -124,7 +124,23 @@
 //! }
 //! ```
 //!
-//! To show the answer while it is written, use `run_stream` with the same configuration:
+//! To show the answer while it is written, use `run_stream` with the same configuration and
+//! write the stream to the console, a file or any other `std::io::Write`:
+//!
+//! ```no_run
+//! use agentai::{Agent, AgentResult};
+//!
+//! # async fn run(agent: Agent) -> Result<(), agentai::AgentError> {
+//! let result: AgentResult<String> = agent
+//!     .run_stream("Why is the sky blue?")
+//!     .await?
+//!     .print_to(std::io::stdout())
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! For your own handling, read the [`AgentEvent`]s of the stream:
 //!
 //! ```no_run
 //! use agentai::{Agent, AgentEvent};
@@ -189,6 +205,7 @@
 )]
 
 pub mod agent;
+pub mod listener;
 pub mod message;
 pub mod tool;
 

@@ -25,6 +25,7 @@ All features are on by default.
 | `tools-buildin` | `agentai::tool::buildin`: date, time, timezone and location tools (turns on `macros`) |
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
+| `tokio` | tokio integrations, such as `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
 
 For a minimal build: `agentai = { version = "0.3", default-features = false, features = ["macros"] }`.
 
@@ -165,6 +166,13 @@ while let Some(event) = stream.next().await {
 - Text the model writes before it asks for tools is also streamed as `TextDelta`, so not every delta belongs to the final answer. Use `result.answer` for the final answer.
 - Structured output streams too: the deltas are pieces of the JSON, and the answer is parsed at the end.
 - `stream.finish().await` reads the remaining events and returns the `AgentResult`.
+- `stream.print_to(out).await` writes the run to any `std::io::Write` (`std::io::stdout()`, `std::io::stderr()`, a `File`, a `Vec<u8>`) as it arrives and returns the `AgentResult`: the text as it is streamed, each tool call on its own line (`[tool call] name(args)`), the writer flushed after every piece. `print_to_async(out)` does the same for a `futures::io::AsyncWrite` (runtime-neutral: smol, async-std, ...) and `print_to_tokio(out)` for a `tokio::io::AsyncWrite` (feature `tokio`, on by default).
+- These are shortcuts for `stream.listen(listener)` / `stream.listen_async(listener)` with an `agentai::listener::Printer`. Build the printer yourself to choose what is written besides the text (defaults: tool calls on, tool results and reasoning off): `stream.listen(Printer::new(std::io::stderr()).with_tool_results(true).with_reasoning(true)).await?`; `Printer::tokio(out)` for a tokio writer.
+- `agentai::listener::EventListener` (`fn on_event(&mut self, event: &RunEvent<'_>) -> Result<(), ListenerError>`) and `AsyncEventListener` (async, `#[async_trait]`) let you show a run anywhere else, for example in a GUI. `RunEvent<'a>` borrows the event and does not depend on the answer type: `TextDelta(&str)`, `ReasoningDelta(&str)`, `ToolCall(&ToolCall)`, `ToolResult { call_id, tool, content, is_error }`, `Finished { new_messages, usage, stop_reason, iterations }`. A listener error (`ListenerError = Box<dyn Error + Send + Sync>`, including a failed write) stops the run with `AgentError::Listener`.
+
+  ```rust
+  let result: AgentResult<String> = agent.run_stream("Tell me a story").await?.print_to(std::io::stdout()).await?;
+  ```
 - Dropping the stream cancels the run.
 
 ### How a run works

@@ -63,6 +63,10 @@ pub enum AgentError {
     /// ([`AgentRequest::with_model`]).
     #[error("no model set: use Agent::with_model or AgentRequest::with_model")]
     MissingModel,
+    /// An [event listener](crate::listener) failed, for example writing the stream with
+    /// [`AgentStream::print_to`] failed.
+    #[error("event listener failed: {0}")]
+    Listener(#[source] crate::listener::ListenerError),
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
     MaxIterationsReached(usize),
