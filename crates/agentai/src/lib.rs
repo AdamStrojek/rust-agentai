@@ -43,19 +43,13 @@
 //!   over all model calls, the stop reason, the model's reasoning and the number of model calls. An answer cut
 //!   off by the token limit is reported as [`AgentError::MaxTokens`](crate::AgentError::MaxTokens) instead of a
 //!   confusing parse error.
-//! - **An API of its own**: `agentai` no longer exposes genai types. Messages, options, usage, providers,
-//!   tool definitions and errors are `agentai` types ([`Message`](crate::Message),
-//!   [`ChatOptions`](crate::ChatOptions), [`Usage`](crate::Usage), [`Provider`](crate::Provider),
-//!   [`Tool`](crate::tool::Tool), [`LlmError`](crate::LlmError)), so upgrading the LLM client inside `agentai`
-//!   no longer breaks your code or your stored history.
 //!
 //! **Breaking changes**: `agent.run(model, prompt, toolbox)` is replaced by
-//! `agent.run(prompt).with_history(&history).await`, which returns a `AgentResult` instead of the bare answer; the
-//! model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
-//! no longer remembers earlier runs. genai types are no longer exposed: `pub use genai`,
-//! `Agent::new_with_client` and the `genai_custom` example are removed, `AdapterKind` is replaced by
-//! `Provider`, and `ChatOptions`, `Tool` and `AgentError::Llm` use `agentai` types. Read the
-//! [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) before upgrading.
+//! `agent.run(prompt).with_history(&history).await`, which returns an `AgentResult` instead of the bare answer;
+//! the model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox` (or per run), and the agent
+//! no longer remembers earlier runs. `Agent::new_with_provider` takes a `Provider`, and `Agent::new_with_client`
+//! is removed. Follow the [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md) to upgrade from 0.2.0: it shows each change with before and
+//! after code.
 //!
 //! #### 0.2.0 - Agent providers, remote MCP and configuration
 //!

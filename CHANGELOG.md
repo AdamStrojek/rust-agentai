@@ -7,9 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.2.0...agentai-v0.3.0) - 2026-10-22
+
+### Breaking changes
+
+See [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#020--030-2026-10-22) for the steps to migrate from 0.2.0, with before and after code.
+
+- `Agent::run(model, prompt, toolbox)` is replaced by `agent.run(prompt).await`, which returns `AgentResult<D>` instead of `D`; the model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox`, or per run.
+- The agent no longer remembers earlier runs: pass the history with `with_history(&history)` and append `result.new_messages`. The system prompt is not part of the history.
+- An answer cut off by the token limit is `AgentError::MaxTokens` instead of `AgentError::InvalidAnswer`; `AgentError::Llm` and `AgentError::ClientInit` hold an `LlmError`.
+- `Agent::new_with_provider` takes a `Provider` instead of `AdapterKind`; `Agent::new_with_client` is removed.
+- `ToolChoice` and `ReasoningEffort` are imported from `agentai`.
+
+### New features
+- *(agent)* [**breaking**] streaming, caller-owned history, run details and agentai's own types ([#66](https://github.com/AdamStrojek/rust-agentai/pull/66)) (by @AdamStrojek)
+
+### Miscellaneous
+- reorder What's New for 0.2.0 by what matters to users ([#64](https://github.com/AdamStrojek/rust-agentai/pull/64)) (by @AdamStrojek) - #64
+- update Future Plans and fix the README logo on crates.io ([#63](https://github.com/AdamStrojek/rust-agentai/pull/63)) (by @AdamStrojek) - #63
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.2.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.1.5...agentai-v0.2.0) - 2026-10-20
 
 ### Breaking changes
+
+See also [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#015--020-2026-10-20) for before and after code.
 
 Steps to migrate from 0.1.x:
 
