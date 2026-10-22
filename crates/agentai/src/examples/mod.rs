@@ -11,6 +11,7 @@
 //!
 //! The list of all available examples can be found below
 
+pub mod event_listener;
 pub mod openrouter;
 pub mod simple;
 pub mod streaming;

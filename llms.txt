@@ -30,6 +30,7 @@ Key facts for code generation:
 
 - [simple.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/simple.rs): plain text answers from an OpenAI-compatible endpoint, with a follow-up question using the history
 - [streaming.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/streaming.rs): answer printed as it is streamed, with tool calls
+- [event_listener.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/event_listener.rs): a configured `Printer` and a custom `EventListener` following streamed runs
 - [struct_output.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/struct_output.rs): answer deserialized into a struct
 - [tools_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_custom.rs): custom tool written with `#[toolbox]`
 - [tools_web.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_web.rs): Brave web search plus page fetch combined in a `ToolBoxSet`

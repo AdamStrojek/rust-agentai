@@ -25,7 +25,7 @@ cargo test
 - Single test: `cargo test -p agentai <test_name>` (e.g. unit tests in `crates/agentai/src/agent/tests.rs`).
 - Offline tests only: `cargo test -p agentai --lib` (agent loop against a mock LLM in `agent/tests.rs`, message conversion in `message.rs`, plus `tool/buildin.rs` and `tool/mcp.rs`; the MCP tests need `uvx`, and `test_get_location` calls the live Nominatim API).
 - Doc tests only: `cargo test -p agentai --doc`. Every example is included as a runnable doc test (via `src/examples/*.rs`), so plain `cargo test` executes all examples against a live LLM and fails without the env vars below.
-- Example: `cargo run --example <name>` (`simple`, `streaming`, `struct_output`, `tools_custom`, `tools_web`, `tools_mcp`, `openrouter`; the last one needs `OPENROUTER_API_KEY`). `scripts/run-examples.sh` runs them all and writes logs to `logs/`.
+- Example: `cargo run --example <name>` (`simple`, `streaming`, `event_listener`, `struct_output`, `tools_custom`, `tools_web`, `tools_mcp`, `openrouter`; the last one needs `OPENROUTER_API_KEY`). `scripts/run-examples.sh` runs them all and writes logs to `logs/`.
 - Docs: `cargo doc -p agentai --open` (the `examples` and `structured_output` modules exist only under `#[cfg(doc)]`).
 
 Examples and tests that hit an LLM need `AGENTAI_BASE_URL`, `AGENTAI_API_KEY`, and optionally `AGENTAI_MODEL` (CI uses OpenRouter: `https://openrouter.ai/api/v1/`, the free model `nvidia/nemotron-3.5-super-vl:free`, key in the `OPENROUTER_API_KEY` secret). `tools_web` needs `BRAVE_API_KEY`; `tools_mcp` launches `uvx mcp-server-time`, so `uv` must be installed.
