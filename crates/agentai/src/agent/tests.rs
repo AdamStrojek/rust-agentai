@@ -822,3 +822,101 @@ async fn truncated_answer_without_text_does_not_use_up_iterations() {
     assert!(matches!(err, AgentError::MaxTokens { .. }));
     assert_eq!(llm.requests().len(), 1);
 }
+
+#[tokio::test]
+async fn print_to_writes_text_and_tool_calls() {
+    let llm = MockLlm::start(vec![
+        sse(vec![
+            sse_chunk(
+                json!({ "role": "assistant", "content": "Let me check." }),
+                None,
+            ),
+            sse_chunk(
+                json!({ "tool_calls": [{
+                    "index": 0, "id": "call_1", "type": "function",
+                    "function": { "name": "echo", "arguments": "{}" }
+                }]}),
+                None,
+            ),
+            sse_chunk(json!({}), Some("tool_calls")),
+            sse_usage(),
+        ]),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out = Vec::new();
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "Let me check.\n[tool call] echo({})\nHello\n"
+    );
+}
+
+#[tokio::test]
+async fn print_options_choose_what_is_written() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["done"]),
+    ])
+    .await;
+    let mut out = Vec::new();
+
+    llm.agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to_with(
+            &mut out,
+            PrintOptions::default()
+                .with_tool_calls(false)
+                .with_tool_results(true),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "[tool result] echo: echoed\ndone\n"
+    );
+}
+
+/// Writer that always fails.
+struct BrokenWriter;
+
+impl std::io::Write for BrokenWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("disk full"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn print_to_reports_write_errors() {
+    let llm = MockLlm::start(vec![streamed_text_reply(&["Hello"])]).await;
+
+    let err = llm
+        .agent()
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to(BrokenWriter)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AgentError::Output(_)));
+}

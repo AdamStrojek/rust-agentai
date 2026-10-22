@@ -21,7 +21,7 @@ mod stream;
 
 pub use model::{ChatOptions, Provider, ReasoningEffort, StopReason, ToolChoice, Usage};
 pub use request::{AgentRequest, AgentResult, Complete, RunOptions, Streaming};
-pub use stream::{AgentEvent, AgentStream};
+pub use stream::{AgentEvent, AgentStream, PrintOptions};
 
 #[cfg(test)]
 mod tests;
@@ -63,6 +63,9 @@ pub enum AgentError {
     /// ([`AgentRequest::with_model`]).
     #[error("no model set: use Agent::with_model or AgentRequest::with_model")]
     MissingModel,
+    /// Writing the stream with [`AgentStream::print_to`] failed.
+    #[error("failed to write the stream output: {0}")]
+    Output(#[source] std::io::Error),
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
     MaxIterationsReached(usize),

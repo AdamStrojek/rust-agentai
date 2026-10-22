@@ -165,6 +165,11 @@ while let Some(event) = stream.next().await {
 - Text the model writes before it asks for tools is also streamed as `TextDelta`, so not every delta belongs to the final answer. Use `result.answer` for the final answer.
 - Structured output streams too: the deltas are pieces of the JSON, and the answer is parsed at the end.
 - `stream.finish().await` reads the remaining events and returns the `AgentResult`.
+- `stream.print_to(out).await` writes the run to any `std::io::Write` (`std::io::stdout()`, `std::io::stderr()`, a `File`, a `Vec<u8>`) as it arrives and returns the `AgentResult`: the text as it is streamed, each tool call on its own line (`[tool call] name(args)`), the writer flushed after every piece. `print_to_with(out, PrintOptions::default().with_tool_results(true).with_reasoning(true).with_tool_calls(false))` chooses what is written besides the text (defaults: tool calls on, tool results and reasoning off). A failed write is `AgentError::Output(std::io::Error)`.
+
+  ```rust
+  let result: AgentResult<String> = agent.run_stream("Tell me a story").await?.print_to(std::io::stdout()).await?;
+  ```
 - Dropping the stream cancels the run.
 
 ### How a run works
