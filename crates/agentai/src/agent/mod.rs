@@ -63,7 +63,7 @@ pub enum AgentError {
     /// ([`AgentRequest::with_model`]).
     #[error("no model set: use Agent::with_model or AgentRequest::with_model")]
     MissingModel,
-    /// Writing the stream with [`AgentStream::print_to`] failed.
+    /// Writing the stream with [`AgentStream::print_to`] (or another `print_to_*` method) failed.
     #[error("failed to write the stream output: {0}")]
     Output(#[source] std::io::Error),
     /// The loop ended without a final answer. Holds the number of iterations.

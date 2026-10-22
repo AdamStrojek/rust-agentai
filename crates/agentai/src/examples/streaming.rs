@@ -9,9 +9,11 @@
 //! To write the stream to the console without handling the events yourself, use
 //! [`AgentStream::print_to`](crate::AgentStream::print_to): it writes the text as it arrives and
 //! each tool call on its own line to stdout, stderr, a file or any other `std::io::Write`, and
-//! returns the [`AgentResult`](crate::AgentResult).
-//! [`AgentStream::print_to_with`](crate::AgentStream::print_to_with) also chooses what is written
-//! ([`PrintOptions`](crate::PrintOptions)).
+//! returns the [`AgentResult`](crate::AgentResult). For async writers there are
+//! [`AgentStream::print_to_async`](crate::AgentStream::print_to_async) (`futures::io::AsyncWrite`)
+//! and [`AgentStream::print_to_tokio`](crate::AgentStream::print_to_tokio) (`tokio::io::AsyncWrite`).
+//! [`AgentStream::with_print_options`](crate::AgentStream::with_print_options) chooses what is
+//! written ([`PrintOptions`](crate::PrintOptions)).
 //!
 //! To run this example from the terminal, enter:
 //! ```bash

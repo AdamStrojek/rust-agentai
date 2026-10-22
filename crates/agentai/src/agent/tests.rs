@@ -877,12 +877,12 @@ async fn print_options_choose_what_is_written() {
         .run_stream::<String>("question")
         .await
         .unwrap()
-        .print_to_with(
-            &mut out,
+        .with_print_options(
             PrintOptions::default()
                 .with_tool_calls(false)
                 .with_tool_results(true),
         )
+        .print_to(&mut out)
         .await
         .unwrap();
 
@@ -919,4 +919,57 @@ async fn print_to_reports_write_errors() {
         .unwrap_err();
 
     assert!(matches!(err, AgentError::Output(_)));
+}
+
+#[tokio::test]
+async fn print_to_async_writes_to_a_futures_writer() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out = futures_util::io::Cursor::new(Vec::new());
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to_async(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        "[tool call] echo({})\nHello\n"
+    );
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn print_to_tokio_writes_to_a_tokio_writer() {
+    let llm = MockLlm::start(vec![
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["Hel", "lo"]),
+    ])
+    .await;
+    let mut out: Vec<u8> = Vec::new();
+
+    let result = llm
+        .agent()
+        .with_toolbox(EchoToolBox)
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .print_to_tokio(&mut out)
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Hello");
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "[tool call] echo({})\nHello\n"
+    );
 }

@@ -47,11 +47,13 @@ pub enum AgentEvent<D> {
 /// run; your history is not changed by a cancelled or failed run.
 ///
 /// Read it with [`StreamExt`](futures_util::StreamExt), call [`print_to`](AgentStream::print_to)
-/// to write the answer to the console (or any other writer) as it arrives, or call
+/// (or [`print_to_async`](AgentStream::print_to_async) / `print_to_tokio` for an async writer) to
+/// write the answer to the console or any other writer as it arrives, or call
 /// [`finish`](AgentStream::finish) to skip the remaining events and get the result.
 #[must_use = "streams do nothing unless polled"]
 pub struct AgentStream<D> {
     inner: Pin<Box<dyn Stream<Item = Result<AgentEvent<D>, AgentError>> + Send>>,
+    print_options: PrintOptions,
 }
 
 impl<D> AgentStream<D> {
@@ -60,6 +62,7 @@ impl<D> AgentStream<D> {
     ) -> Self {
         Self {
             inner: Box::pin(inner),
+            print_options: PrintOptions::default(),
         }
     }
 
@@ -68,13 +71,35 @@ impl<D> AgentStream<D> {
         finish(self).await
     }
 
+    /// Sets what [`print_to`](AgentStream::print_to), [`print_to_async`](AgentStream::print_to_async)
+    /// and `print_to_tokio` write besides the model's text.
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, PrintOptions};
+    ///
+    /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
+    /// agent
+    ///     .run_stream::<String>("What time is it?")
+    ///     .await?
+    ///     .with_print_options(PrintOptions::default().with_tool_results(true))
+    ///     .print_to(std::io::stderr())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_print_options(mut self, options: PrintOptions) -> Self {
+        self.print_options = options;
+        self
+    }
+
     /// Writes the run to `out` as it arrives and returns its result.
     ///
     /// The model's text is written as it is streamed, and each tool call is written on its own
-    /// line. `out` is anything that implements [`std::io::Write`]: [`std::io::stdout()`],
+    /// line ([`with_print_options`](AgentStream::with_print_options) chooses what else is written).
+    /// `out` is anything that implements [`std::io::Write`]: [`std::io::stdout()`],
     /// [`std::io::stderr()`], a [`File`](std::fs::File), a `Vec<u8>`, ... The writer is flushed
-    /// after every piece, so the text shows up right away. Use
-    /// [`print_to_with`](AgentStream::print_to_with) to choose what is written.
+    /// after every piece, so the text shows up right away. For an asynchronous writer use
+    /// [`print_to_async`](AgentStream::print_to_async) or `print_to_tokio`.
     ///
     /// ```no_run
     /// use agentai::{Agent, AgentResult};
@@ -92,33 +117,100 @@ impl<D> AgentStream<D> {
     /// # Errors
     ///
     /// The errors of the run, and [`AgentError::Output`] when writing to `out` fails.
-    pub async fn print_to(self, out: impl Write) -> Result<AgentResult<D>, AgentError> {
-        self.print_to_with(out, PrintOptions::default()).await
-    }
-
-    /// Same as [`print_to`](AgentStream::print_to), with [`PrintOptions`] that choose what is
-    /// written besides the model's text.
-    pub async fn print_to_with(
-        mut self,
-        mut out: impl Write,
-        options: PrintOptions,
-    ) -> Result<AgentResult<D>, AgentError> {
+    pub async fn print_to(mut self, mut out: impl Write) -> Result<AgentResult<D>, AgentError> {
         let mut printer = Printer::default();
-        while let Some(event) = self.next().await {
-            let event = event?;
-            if let AgentEvent::Finished(result) = event {
-                printer.end_line(&mut out).map_err(AgentError::Output)?;
+        while let Some(event) = self.inner.next().await {
+            let (text, result) = printer.render(event?, &self.print_options);
+            if !text.is_empty() {
+                out.write_all(text.as_bytes())
+                    .and_then(|()| out.flush())
+                    .map_err(AgentError::Output)?;
+            }
+            if let Some(result) = result {
                 return Ok(result);
             }
-            printer
-                .print(&mut out, &event, &options)
-                .map_err(AgentError::Output)?;
+        }
+        unreachable!("the agent loop ends with a result or an error")
+    }
+
+    /// Same as [`print_to`](AgentStream::print_to), for an asynchronous writer that implements
+    /// [`futures::io::AsyncWrite`](futures_util::io::AsyncWrite).
+    ///
+    /// This is the runtime-neutral async I/O trait used by smol and async-std, among others. For a
+    /// tokio writer (`tokio::io::stdout()`, `tokio::fs::File`, a TCP stream), use `print_to_tokio`
+    /// (feature `tokio`), or wrap it with `tokio_util::compat`.
+    ///
+    /// # Errors
+    ///
+    /// The errors of the run, and [`AgentError::Output`] when writing to `out` fails.
+    pub async fn print_to_async(
+        mut self,
+        mut out: impl futures_util::io::AsyncWrite + Unpin,
+    ) -> Result<AgentResult<D>, AgentError> {
+        use futures_util::io::AsyncWriteExt;
+
+        let mut printer = Printer::default();
+        while let Some(event) = self.inner.next().await {
+            let (text, result) = printer.render(event?, &self.print_options);
+            if !text.is_empty() {
+                out.write_all(text.as_bytes())
+                    .await
+                    .map_err(AgentError::Output)?;
+                out.flush().await.map_err(AgentError::Output)?;
+            }
+            if let Some(result) = result {
+                return Ok(result);
+            }
+        }
+        unreachable!("the agent loop ends with a result or an error")
+    }
+
+    /// Same as [`print_to`](AgentStream::print_to), for a tokio writer that implements
+    /// [`tokio::io::AsyncWrite`]: `tokio::io::stdout()`, `tokio::io::stderr()`,
+    /// `tokio::fs::File`, a TCP stream, ...
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, AgentResult};
+    ///
+    /// # async fn example(agent: Agent) -> Result<(), agentai::AgentError> {
+    /// let result: AgentResult<String> = agent
+    ///     .run_stream("Tell me a story")
+    ///     .await?
+    ///     .print_to_tokio(tokio::io::stdout())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// The errors of the run, and [`AgentError::Output`] when writing to `out` fails.
+    #[cfg(feature = "tokio")]
+    pub async fn print_to_tokio(
+        mut self,
+        mut out: impl tokio::io::AsyncWrite + Unpin,
+    ) -> Result<AgentResult<D>, AgentError> {
+        use tokio::io::AsyncWriteExt;
+
+        let mut printer = Printer::default();
+        while let Some(event) = self.inner.next().await {
+            let (text, result) = printer.render(event?, &self.print_options);
+            if !text.is_empty() {
+                out.write_all(text.as_bytes())
+                    .await
+                    .map_err(AgentError::Output)?;
+                out.flush().await.map_err(AgentError::Output)?;
+            }
+            if let Some(result) = result {
+                return Ok(result);
+            }
         }
         unreachable!("the agent loop ends with a result or an error")
     }
 }
 
-/// What [`AgentStream::print_to_with`] writes besides the model's text.
+/// What [`AgentStream::print_to`] and the other `print_to_*` methods write besides the model's
+/// text. Set it with [`AgentStream::with_print_options`].
 ///
 /// ```
 /// use agentai::PrintOptions;
@@ -176,35 +268,37 @@ enum Printed {
     Reasoning,
 }
 
+/// Turns stream events into the text that the `print_to*` methods write.
 #[derive(Default)]
 struct Printer {
     last: Printed,
 }
 
 impl Printer {
-    fn print<D>(
+    /// Returns the text to write for `event`, and the result when the run finished.
+    fn render<D>(
         &mut self,
-        out: &mut impl Write,
-        event: &AgentEvent<D>,
+        event: AgentEvent<D>,
         options: &PrintOptions,
-    ) -> std::io::Result<()> {
+    ) -> (String, Option<AgentResult<D>>) {
+        let mut out = String::new();
         match event {
             AgentEvent::TextDelta(text) => {
                 if self.last == Printed::Reasoning {
-                    self.end_line(out)?;
+                    self.end_line(&mut out);
                 }
-                self.write_text(out, text, Printed::Text)?;
+                self.push_text(&mut out, &text, Printed::Text);
             }
             AgentEvent::ReasoningDelta(text) if options.reasoning => {
                 if self.last != Printed::Reasoning {
-                    self.end_line(out)?;
-                    write!(out, "[reasoning] ")?;
+                    self.end_line(&mut out);
+                    out.push_str("[reasoning] ");
                 }
-                self.write_text(out, text, Printed::Reasoning)?;
+                self.push_text(&mut out, &text, Printed::Reasoning);
             }
             AgentEvent::ToolCall(call) if options.tool_calls => {
-                self.end_line(out)?;
-                writeln!(out, "[tool call] {}({})", call.name, call.arguments)?;
+                self.end_line(&mut out);
+                out.push_str(&format!("[tool call] {}({})\n", call.name, call.arguments));
             }
             AgentEvent::ToolResult {
                 tool,
@@ -212,45 +306,41 @@ impl Printer {
                 is_error,
                 ..
             } if options.tool_results => {
-                self.end_line(out)?;
-                let label = if *is_error {
+                self.end_line(&mut out);
+                let label = if is_error {
                     "tool error"
                 } else {
                     "tool result"
                 };
-                writeln!(out, "[{label}] {tool}: {content}")?;
+                out.push_str(&format!("[{label}] {tool}: {content}\n"));
             }
-            _ => return Ok(()),
+            AgentEvent::Finished(result) => {
+                self.end_line(&mut out);
+                return (out, Some(result));
+            }
+            _ => {}
         }
-        out.flush()
+        (out, None)
     }
 
-    fn write_text(
-        &mut self,
-        out: &mut impl Write,
-        text: &str,
-        kind: Printed,
-    ) -> std::io::Result<()> {
+    fn push_text(&mut self, out: &mut String, text: &str, kind: Printed) {
         if text.is_empty() {
-            return Ok(());
+            return;
         }
-        out.write_all(text.as_bytes())?;
+        out.push_str(text);
         self.last = if text.ends_with('\n') {
             Printed::LineStart
         } else {
             kind
         };
-        Ok(())
     }
 
     /// Ends the current line, if one is open.
-    fn end_line(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+    fn end_line(&mut self, out: &mut String) {
         if self.last != Printed::LineStart {
-            writeln!(out)?;
-            out.flush()?;
+            out.push('\n');
             self.last = Printed::LineStart;
         }
-        Ok(())
     }
 }
 
