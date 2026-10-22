@@ -127,7 +127,9 @@ impl<D> AgentStream<D> {
     /// `out` is anything that implements [`std::io::Write`]: [`std::io::stdout()`],
     /// [`std::io::stderr()`], a [`File`](std::fs::File), a `Vec<u8>`, ... It is a shortcut for
     /// [`listen`](AgentStream::listen) with a [`Printer`] with the default settings; to change
-    /// what is written, build the [`Printer`] yourself. For async writers use
+    /// what is written, build the [`Printer`] yourself. The writes are blocking calls inside the
+    /// async run, which is fine for stdout, stderr and files; for async writers, or writers that
+    /// can block for long such as sockets and pipes, use
     /// [`print_to_async`](AgentStream::print_to_async) or
     /// [`print_to_tokio`](AgentStream::print_to_tokio).
     ///

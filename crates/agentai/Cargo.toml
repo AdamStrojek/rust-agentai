@@ -65,7 +65,7 @@ default = ["mcp-client", "macros", "tokio", "tools-buildin", "tools-web"]
 mcp-client = ["dep:rmcp", "dep:tokio"]
 ## Enables tokio integrations, such as writing a stream to a tokio writer with
 ## [`AgentStream::print_to_tokio`](crate::AgentStream::print_to_tokio)
-tokio = ["dep:tokio", "tokio/io-util"]
+tokio = ["dep:tokio"]
 ## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
 macros = ["agentai-macros"]
 ## Enables support for [buildin tools](crate::tool::buildin)

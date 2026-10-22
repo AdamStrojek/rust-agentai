@@ -121,6 +121,10 @@ impl<L: EventListener + ?Sized> EventListener for Box<L> {
 /// runtime-neutral async I/O trait). For a tokio writer, use [`Printer::tokio`] (feature
 /// `tokio`). The writer is flushed after every piece, so the text shows up right away.
 ///
+/// As an [`EventListener`], the printer writes with blocking calls inside the async run. That is
+/// fine for stdout, stderr and files; for a writer that can block for long, such as a socket or a
+/// pipe, use an async writer instead.
+///
 /// By default it writes the text and the tool calls; the `with_*` methods choose what else is
 /// written.
 ///
@@ -137,17 +141,10 @@ pub struct Printer<W> {
     tool_calls: bool,
     tool_results: bool,
     reasoning: bool,
-    last: Printed,
-}
-
-/// What was written last, to put tool calls and reasoning on lines of their own.
-#[derive(Debug, Default, PartialEq)]
-enum Printed {
-    /// Nothing yet, or a complete line.
-    #[default]
-    LineStart,
-    Text,
-    Reasoning,
+    /// A line was started and not ended yet.
+    line_open: bool,
+    /// The last thing written was reasoning (it may span several lines).
+    in_reasoning: bool,
 }
 
 impl<W> Printer<W> {
@@ -158,7 +155,8 @@ impl<W> Printer<W> {
             tool_calls: true,
             tool_results: false,
             reasoning: false,
-            last: Printed::default(),
+            line_open: false,
+            in_reasoning: false,
         }
     }
 
@@ -190,20 +188,22 @@ impl<W> Printer<W> {
         let mut out = String::new();
         match *event {
             RunEvent::TextDelta(text) => {
-                if self.last == Printed::Reasoning {
-                    self.end_line(&mut out);
+                if self.in_reasoning {
+                    self.end_block(&mut out);
                 }
-                self.push_text(&mut out, text, Printed::Text);
+                self.push_text(&mut out, text);
             }
             RunEvent::ReasoningDelta(text) if self.reasoning => {
-                if self.last != Printed::Reasoning {
-                    self.end_line(&mut out);
+                if !self.in_reasoning {
+                    self.end_block(&mut out);
                     out.push_str("[reasoning] ");
+                    self.line_open = true;
+                    self.in_reasoning = true;
                 }
-                self.push_text(&mut out, text, Printed::Reasoning);
+                self.push_text(&mut out, text);
             }
             RunEvent::ToolCall(call) if self.tool_calls => {
-                self.end_line(&mut out);
+                self.end_block(&mut out);
                 out.push_str(&format!("[tool call] {}({})\n", call.name, call.arguments));
             }
             RunEvent::ToolResult {
@@ -212,7 +212,7 @@ impl<W> Printer<W> {
                 is_error,
                 ..
             } if self.tool_results => {
-                self.end_line(&mut out);
+                self.end_block(&mut out);
                 let label = if is_error {
                     "tool error"
                 } else {
@@ -220,30 +220,27 @@ impl<W> Printer<W> {
                 };
                 out.push_str(&format!("[{label}] {tool}: {content}\n"));
             }
-            RunEvent::Finished { .. } => self.end_line(&mut out),
+            RunEvent::Finished { .. } => self.end_block(&mut out),
             _ => {}
         }
         out
     }
 
-    fn push_text(&mut self, out: &mut String, text: &str, kind: Printed) {
+    fn push_text(&mut self, out: &mut String, text: &str) {
         if text.is_empty() {
             return;
         }
         out.push_str(text);
-        self.last = if text.ends_with('\n') {
-            Printed::LineStart
-        } else {
-            kind
-        };
+        self.line_open = !text.ends_with('\n');
     }
 
-    /// Ends the current line, if one is open.
-    fn end_line(&mut self, out: &mut String) {
-        if self.last != Printed::LineStart {
+    /// Ends the current line, if one is open, and the current reasoning block.
+    fn end_block(&mut self, out: &mut String) {
+        if self.line_open {
             out.push('\n');
-            self.last = Printed::LineStart;
+            self.line_open = false;
         }
+        self.in_reasoning = false;
     }
 }
 
@@ -320,3 +317,70 @@ mod tokio_writer {
 
 #[cfg(feature = "tokio")]
 pub use tokio_writer::TokioWriter;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Usage;
+
+    fn print(printer: Printer<Vec<u8>>, events: &[RunEvent<'_>]) -> String {
+        let mut printer = printer;
+        for event in events {
+            EventListener::on_event(&mut printer, event).unwrap();
+        }
+        String::from_utf8(printer.into_inner()).unwrap()
+    }
+
+    fn finished(usage: &Usage) -> RunEvent<'_> {
+        RunEvent::Finished {
+            new_messages: &[],
+            usage,
+            stop_reason: None,
+            iterations: 1,
+        }
+    }
+
+    #[test]
+    fn reasoning_over_several_lines_has_one_prefix() {
+        let usage = Usage::default();
+        let output = print(
+            Printer::new(Vec::new()).with_reasoning(true),
+            &[
+                RunEvent::ReasoningDelta("a\n"),
+                RunEvent::ReasoningDelta("b"),
+                RunEvent::TextDelta("answer"),
+                finished(&usage),
+            ],
+        );
+        assert_eq!(output, "[reasoning] a\nb\nanswer\n");
+    }
+
+    #[test]
+    fn reasoning_after_a_complete_line_starts_on_a_new_line() {
+        let usage = Usage::default();
+        let output = print(
+            Printer::new(Vec::new()).with_reasoning(true),
+            &[
+                RunEvent::TextDelta("intro\n"),
+                RunEvent::ReasoningDelta("think"),
+                RunEvent::TextDelta("done\n"),
+                finished(&usage),
+            ],
+        );
+        assert_eq!(output, "intro\n[reasoning] think\ndone\n");
+    }
+
+    #[test]
+    fn hidden_reasoning_writes_nothing() {
+        let usage = Usage::default();
+        let output = print(
+            Printer::new(Vec::new()),
+            &[
+                RunEvent::ReasoningDelta("think"),
+                RunEvent::TextDelta("answer"),
+                finished(&usage),
+            ],
+        );
+        assert_eq!(output, "answer\n");
+    }
+}
