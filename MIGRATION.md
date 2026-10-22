@@ -7,10 +7,10 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
-- [0.2.0 → 0.3.0 (2026-10-21)](#020--030-2026-10-21)
+- [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
 
-## 0.2.0 → 0.3.0 (2026-10-21)
+## 0.2.0 → 0.3.0 (2026-10-22)
 
 ### Set the model and the toolbox on the agent
 

@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.2.0...agentai-v0.3.0) - 2026-10-21
+## [0.3.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.2.0...agentai-v0.3.0) - 2026-10-22
 
 ### Breaking changes
 
-See [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#020--030-2026-10-21) for the steps to migrate from 0.2.0, with before and after code.
+See [MIGRATION.md](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#020--030-2026-10-22) for the steps to migrate from 0.2.0, with before and after code.
 
 - `Agent::run(model, prompt, toolbox)` is replaced by `agent.run(prompt).await`, which returns `AgentResult<D>` instead of `D`; the model and toolbox are set with `Agent::with_model` and `Agent::with_toolbox`, or per run.
 - The agent no longer remembers earlier runs: pass the history with `with_history(&history)` and append `result.new_messages`. The system prompt is not part of the history.
