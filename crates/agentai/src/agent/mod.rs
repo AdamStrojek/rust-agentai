@@ -146,9 +146,6 @@ impl LlmError {
 /// Default number of model calls in one run.
 pub const DEFAULT_MAX_ITERATIONS: usize = 5;
 
-/// Default temperature sent with every request, unless [`Agent::with_chat_options`] replaces it.
-pub const DEFAULT_TEMPERATURE: f64 = 0.2;
-
 /// The `Agent` struct represents an agent that interacts with a chat model.
 ///
 /// An agent is configuration only: the LLM client, the system prompt, the default model and
@@ -293,7 +290,7 @@ impl Agent {
             model: None,
             toolbox: None,
             max_iterations: DEFAULT_MAX_ITERATIONS,
-            chat_options: ChatOptions::default().with_temperature(DEFAULT_TEMPERATURE),
+            chat_options: ChatOptions::default(),
         }
     }
 
@@ -332,8 +329,6 @@ impl Agent {
     /// Sets the [`ChatOptions`] sent with every request, for example temperature, max tokens,
     /// [tool choice](ToolChoice) or [reasoning effort](ReasoningEffort).
     ///
-    /// The options replace the defaults, including the default temperature
-    /// ([`DEFAULT_TEMPERATURE`]); set `with_temperature` yourself if you want to keep one.
     /// For structured output (`D` other than `String`), the run always sets the response
     /// format itself.
     pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {

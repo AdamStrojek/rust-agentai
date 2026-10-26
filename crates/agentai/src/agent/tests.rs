@@ -284,17 +284,14 @@ async fn zero_iterations_do_not_call_the_model() {
 }
 
 #[tokio::test]
-async fn default_options_send_the_default_temperature() {
+async fn default_agent_sets_no_model_parameters() {
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
 
     let agent = llm.agent();
     assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
     let _: AgentResult<String> = agent.run("question").await.unwrap();
 
-    assert_eq!(
-        request_json(&llm, 0)["temperature"],
-        json!(DEFAULT_TEMPERATURE)
-    );
+    assert!(request_json(&llm, 0).get("temperature").is_none());
 }
 
 #[tokio::test]

@@ -230,7 +230,7 @@ match agent.run::<String>(question).with_history(&history).await {
 
 ## Configuration
 
-Every constructor returns an agent with the defaults: at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and temperature 0.2 (`DEFAULT_TEMPERATURE`). Change them with the builder methods:
+Every constructor returns an agent that makes at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and sends no model options of its own. Change both with the builder methods:
 
 ```rust
 use agentai::{Agent, ChatOptions, ReasoningEffort, ToolChoice};
@@ -248,7 +248,7 @@ let agent = Agent::new("You are a useful assistant")?
 ```
 
 - `with_max_iterations(n)`: maximum model calls in one run. Every reply with tool calls uses one, so raise it for tasks with many tool rounds. `0` makes a run fail at once with `MaxIterationsReached(0)`.
-- `with_chat_options(options)`: `ChatOptions` sent with every request. They replace the defaults, including temperature 0.2. For structured output, the run always sets the response format itself.
+- `with_chat_options(options)`: `ChatOptions` sent with every request. For structured output, the run always sets the response format itself.
 - `ChatOptions` (`#[non_exhaustive]`, `Default`) has `temperature`, `max_tokens`, `top_p`, `stop_sequences`, `tool_choice` (`ToolChoice::{Auto, None, Required, Tool(name)}`) and `reasoning_effort` (`ReasoningEffort::{Low, Medium, High, Budget(tokens)}`), each with a `with_*` setter.
 - `max_iterations()` and `chat_options()` return the current values.
 - Any of these can be replaced for a single run, see Asking a question.
