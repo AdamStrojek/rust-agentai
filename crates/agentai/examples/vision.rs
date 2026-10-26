@@ -1,4 +1,4 @@
-use agentai::{Agent, AgentResult, Prompt};
+use agentai::{Agent, AgentError, AgentResult, Prompt};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -31,16 +31,22 @@ async fn main() -> Result<()> {
 
     let agent = Agent::new(SYSTEM)?.with_model(&model);
 
-    // An image by URL: the provider downloads it
-    let prompt = Prompt::text("Describe this logo in one sentence.").with_image_url(LOGO_URL);
-    let result: AgentResult<String> = agent.run(prompt).await?;
-    info!("Logo from URL: {}", result.answer);
-
-    // The same image from its bytes: it is sent base64 encoded inside the request
+    // An image from its bytes: it is sent base64 encoded inside the request
     let prompt =
-        Prompt::text("What colours does this logo use?").with_image_bytes("image/png", LOGO_PNG);
+        Prompt::text("Describe this logo in one sentence.").with_image_bytes("image/png", LOGO_PNG);
     let result: AgentResult<String> = agent.run(prompt).await?;
     info!("Logo from bytes: {}", result.answer);
+
+    // The same image by URL: the provider downloads it. Not every provider accepts image URLs
+    // (local servers often take only base64 data); those reject the request with HTTP 400.
+    let prompt = Prompt::text("What colours does this logo use?").with_image_url(LOGO_URL);
+    match agent.run::<String>(prompt).await {
+        Ok(result) => info!("Logo from URL: {}", result.answer),
+        Err(AgentError::Llm(err)) if err.status() == Some(400) => {
+            info!("This provider does not accept image URLs, send the bytes instead: {err}")
+        }
+        Err(err) => return Err(err.into()),
+    }
 
     Ok(())
 }
