@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.3.2...agentai-v0.4.0) - 2026-10-26
+
+### Changed
+- *(agent)* [**breaking**] require the model in Agent::new and build custom clients with from_client ([#79](https://github.com/AdamStrojek/rust-agentai/pull/79)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.3.2](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.3.1...agentai-v0.3.2) - 2026-10-26
 
 ### New features
