@@ -8,6 +8,7 @@
 //!
 //! To read more about tool look into [crate::tool]
 
+use crate::prompt::IntoPrompt;
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
 use genai::resolver::{AuthData, Endpoint};
@@ -368,6 +369,9 @@ impl Agent {
     /// Prepares a run: sends `prompt` to the model, runs the tools the model asks for and
     /// returns the final answer as `D`.
     ///
+    /// The prompt is text (`&str`, `String`) or a [`Prompt`](crate::Prompt) with images or
+    /// other media for vision models; see [`IntoPrompt`].
+    ///
     /// Configure the returned [`AgentRequest`] with its `with_*` methods, then `.await` it to
     /// get a [`AgentResult`]. [`run_stream`](Agent::run_stream) takes the same configuration and
     /// streams the run instead.
@@ -409,8 +413,8 @@ impl Agent {
     /// answers in plain text, with any other type the model is asked for JSON matching its schema.
     ///
     /// For more information go to [crate::structured_output]
-    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Complete> {
-        AgentRequest::new(self, prompt.into())
+    pub fn run<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Complete> {
+        AgentRequest::new(self, prompt.into_prompt())
     }
 
     /// Prepares a streamed run. It takes the same configuration as [`run`](Agent::run), but
@@ -441,7 +445,7 @@ impl Agent {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn run_stream<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Streaming> {
-        AgentRequest::new(self, prompt.into())
+    pub fn run_stream<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Streaming> {
+        AgentRequest::new(self, prompt.into_prompt())
     }
 }

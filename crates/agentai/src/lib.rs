@@ -18,6 +18,7 @@
 //! - **MCP Server Support, local and remote**: Use tools from any Model Context Protocol server, whether you start it locally over **stdio** or connect to a running or hosted server over **Streamable HTTP** (with optional bearer token). Built on the official MCP Rust SDK.
 //! - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 //! - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
+//! - **Images for vision models**: Send text and images together in a [`Prompt`](crate::Prompt), by URL or from bytes. Plain text prompts work as before.
 //! - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 //!
 //! ## What's New
@@ -124,6 +125,20 @@
 //! }
 //! ```
 //!
+//! Models that support images take a [`Prompt`](crate::Prompt) with text and images, by URL or from bytes:
+//!
+//! ```no_run
+//! use agentai::{Agent, AgentResult, Prompt};
+//!
+//! # async fn run(agent: Agent, png: Vec<u8>) -> Result<(), agentai::AgentError> {
+//! let prompt = Prompt::text("Which of these logos is brighter?")
+//!     .with_image_url("https://example.com/logo.png")
+//!     .with_image_bytes("image/png", &png);
+//! let result: AgentResult<String> = agent.run(prompt).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! To show the answer while it is written, use `run_stream` with the same configuration and
 //! write the stream to the console, a file or any other `std::io::Write`:
 //!
@@ -207,6 +222,7 @@
 pub mod agent;
 pub mod listener;
 pub mod message;
+pub mod prompt;
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.
@@ -219,6 +235,7 @@ pub mod structured_output;
 #[allow(unused_imports)]
 pub use agent::*;
 pub use message::{Media, MediaSource, Message, Part, ProviderData, Role, ToolCall, ToolResponse};
+pub use prompt::{IntoPrompt, Prompt};
 
 /// Compile-fail checks for the `#[tool(...)]` options. Only built for doc tests.
 ///

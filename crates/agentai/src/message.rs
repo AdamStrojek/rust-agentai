@@ -178,6 +178,59 @@ impl Media {
             name: None,
         }
     }
+
+    /// Creates media the provider downloads from `url`. Not every provider accepts URLs; use
+    /// [`Media::from_bytes`] when yours does not.
+    pub fn from_url(content_type: impl Into<String>, url: impl Into<String>) -> Self {
+        Self::new(content_type, MediaSource::Url(url.into()))
+    }
+
+    /// Creates an image the provider downloads from `url`. The MIME type is guessed from the
+    /// file extension (`png`, `jpg`, `jpeg`, `gif`, `webp`); other URLs are sent as
+    /// `image/jpeg`. Use [`Media::from_url`] to set it yourself.
+    pub fn image_url(url: impl Into<String>) -> Self {
+        let url = url.into();
+        Self::from_url(image_type_from_url(&url), url)
+    }
+
+    /// Creates media from its bytes, for example an image read from a file. The bytes are
+    /// sent base64 encoded inside the request.
+    pub fn from_bytes(content_type: impl Into<String>, bytes: impl AsRef<[u8]>) -> Self {
+        use base64::Engine;
+        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Self::from_base64(content_type, data)
+    }
+
+    /// Creates media from bytes that are already base64 encoded.
+    pub fn from_base64(content_type: impl Into<String>, data: impl Into<String>) -> Self {
+        Self::new(content_type, MediaSource::Base64(data.into()))
+    }
+
+    /// Sets the file name. Some providers show it to the model.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Returns `true` when the MIME type is an image type.
+    pub fn is_image(&self) -> bool {
+        self.content_type.starts_with("image/")
+    }
+}
+
+/// Guesses the MIME type of an image from the extension of its URL.
+fn image_type_from_url(url: &str) -> &'static str {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let extension = path
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    }
 }
 
 /// Where the bytes of [`Media`] are.
@@ -393,6 +446,45 @@ mod tests {
         let message = every_part();
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), message);
+    }
+
+    #[test]
+    fn media_from_bytes_is_base64_encoded() {
+        let media = Media::from_bytes("image/png", b"hi").with_name("hi.png");
+        assert_eq!(media.source, MediaSource::Base64("aGk=".into()));
+        assert_eq!(media.content_type, "image/png");
+        assert_eq!(media.name.as_deref(), Some("hi.png"));
+        assert!(media.is_image());
+    }
+
+    #[test]
+    fn image_url_guesses_the_type_from_the_extension() {
+        let types: Vec<String> = [
+            "https://example.com/a.png",
+            "https://example.com/a.PNG?size=2#top",
+            "https://example.com/a.webp",
+            "https://example.com/a.gif",
+            "https://example.com/a.jpeg",
+            "https://example.com/image",
+        ]
+        .into_iter()
+        .map(|url| Media::image_url(url).content_type)
+        .collect();
+        assert_eq!(
+            types,
+            [
+                "image/png",
+                "image/png",
+                "image/webp",
+                "image/gif",
+                "image/jpeg",
+                "image/jpeg"
+            ]
+        );
+        assert_eq!(
+            Media::image_url("https://example.com/a.png").source,
+            MediaSource::Url("https://example.com/a.png".into())
+        );
     }
 
     #[test]

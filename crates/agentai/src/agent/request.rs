@@ -4,6 +4,7 @@ use super::core::{ResolvedRun, finish, response_format, run_loop};
 use super::stream::AgentStream;
 use super::{Agent, AgentError, ChatOptions, StopReason, Usage};
 use crate::message::Message;
+use crate::prompt::Prompt;
 use crate::tool::ToolBox;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -123,14 +124,14 @@ pub struct Streaming;
 #[must_use = "a request does nothing until it is awaited"]
 pub struct AgentRequest<'a, D = String, M = Complete> {
     agent: &'a Agent,
-    prompt: String,
+    prompt: Prompt,
     history: &'a [Message],
     options: RunOptions,
     marker: PhantomData<fn() -> (D, M)>,
 }
 
 impl<'a, D, M> AgentRequest<'a, D, M> {
-    pub(super) fn new(agent: &'a Agent, prompt: String) -> Self {
+    pub(super) fn new(agent: &'a Agent, prompt: Prompt) -> Self {
         Self {
             agent,
             prompt,
@@ -185,7 +186,7 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
     }
 
     /// Combines the agent configuration with the overrides of this run and checks it.
-    fn resolve(self) -> Result<(ResolvedRun, Vec<Message>, String), AgentError>
+    fn resolve(self) -> Result<(ResolvedRun, Vec<Message>, Prompt), AgentError>
     where
         D: JsonSchema + 'static,
     {

@@ -2,6 +2,7 @@
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
+use crate::prompt::Prompt;
 use crate::tool::ToolBox;
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt, pin_mut};
@@ -43,15 +44,17 @@ struct Step {
 pub(super) fn run_loop<D>(
     run: ResolvedRun,
     history: Vec<Message>,
-    prompt: String,
+    prompt: Prompt,
     streaming: bool,
 ) -> impl Stream<Item = Result<AgentEvent<D>, AgentError>> + Send + 'static
 where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
     try_stream! {
-        debug!("Agent Question: {prompt}");
-        let mut new_messages = vec![Message::user(prompt)];
+        let prompt = prompt.into_message();
+        let media = prompt.parts.iter().filter(|part| matches!(part, Part::Media(_))).count();
+        debug!("Agent Question: {} ({media} media)", prompt.text().unwrap_or_default());
+        let mut new_messages = vec![prompt];
         let mut usage = Usage::default();
 
         // Agent options, plus the response format for structured output
