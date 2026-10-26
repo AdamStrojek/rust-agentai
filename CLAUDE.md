@@ -28,7 +28,7 @@ cargo test
 - Example: `cargo run --example <name>` (`simple`, `streaming`, `event_listener`, `struct_output`, `tools_custom`, `tools_web`, `tools_mcp`, `vision`, `openrouter`; the last one needs `OPENROUTER_API_KEY`). `scripts/run-examples.sh` runs them all and writes logs to `logs/`.
 - Docs: `cargo doc -p agentai --open` (the `examples` and `structured_output` modules exist only under `#[cfg(doc)]`).
 
-Examples and tests that hit an LLM need `AGENTAI_BASE_URL`, `AGENTAI_API_KEY`, and optionally `AGENTAI_MODEL` (CI uses OpenRouter: `https://openrouter.ai/api/v1/`, the free model `nvidia/nemotron-3.5-super-vl:free`, key in the `OPENROUTER_API_KEY` secret). `tools_web` needs `BRAVE_API_KEY`; `tools_mcp` launches `uvx mcp-server-time`, so `uv` must be installed; `vision` needs a model that accepts images.
+Examples and tests that hit an LLM need `AGENTAI_BASE_URL`, `AGENTAI_API_KEY`, and optionally `AGENTAI_MODEL` (CI uses OpenRouter: `https://openrouter.ai/api/v1/`, the free model `nvidia/nemotron-3.5-super-vl:free`, key in the `OPENROUTER_API_KEY` secret). `tools_web` needs `BRAVE_API_KEY`; `tools_mcp` launches `uvx mcp-server-time`, so `uv` must be installed; `vision` needs a model that accepts images, taken from `AGENTAI_VISION_MODEL` (falls back to `AGENTAI_MODEL`; CI sets `openrouter/free`, because the free endpoint of the default model rejects images).
 
 ## Architecture
 

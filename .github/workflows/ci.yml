@@ -57,6 +57,8 @@ jobs:
           - name: nemotron-3.5-super-vl
             base_url: https://openrouter.ai/api/v1/
             model: nvidia/nemotron-3.5-super-vl:free
+            # The free endpoint of the default model does not accept images
+            vision_model: openrouter/free
             key_secret: OPENROUTER_API_KEY
     steps:
       - name: Checkout repository
@@ -81,6 +83,7 @@ jobs:
         env:
           AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
           AGENTAI_MODEL: ${{ matrix.llm.model }}
+          AGENTAI_VISION_MODEL: ${{ matrix.llm.vision_model }}
           AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
