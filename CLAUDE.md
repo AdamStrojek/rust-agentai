@@ -44,6 +44,23 @@ Examples and tests that hit an LLM read only `AGENTAI_MODEL` (default `claude-ha
 
 **`#[toolbox]` macro** (`agentai-macros/src/lib.rs`): applied to an `impl` block. Every method marked `#[tool]` (or `#[tool(name = "...")]`) must take `&self` and return `ToolResult`. For each tool the macro generates a hidden `<Method>Params` struct deriving serde and `JsonSchema` (draft 2020-12, no meta-schema), with parameter doc comments carried over as field descriptions. It then generates a `ToolBox` impl whose `call_tool` uses a `match` on the tool name; argument deserialization errors become `ToolError::InvalidArguments` and errors returned by the method pass through unchanged. The generated code refers to `Tool`, `ToolBox`, `ToolError`, `ToolResult`, `serde`, `serde_json`, `schemars`, and `async_trait` by unqualified or crate paths, so the caller's crate must have them in scope or as dependencies.
 
+## Tests
+
+Write a test only when it can catch a real bug in `agentai`. Before adding one, ask: which plausible change to our code would make it fail? If the answer is "none" or "a change in another crate", do not write it.
+
+Useful tests:
+- Our own logic with real branches or edge cases, for example `Media::image_url` guessing the MIME type (query strings, letter case, fallback), the agent loop's handling of tool errors and iteration limits.
+- How `agentai` works together with other libraries and providers: what actually goes over the wire (request bodies checked on the mock LLM server in `agent/tests.rs`), what we read back from replies, lossless conversions between our types and genai's.
+- A regression test for a bug that actually happened, at the level where it happened (for example the request body), not just the one-liner that fixed it.
+
+Pointless tests, do not write them:
+- Testing the behaviour of other libraries instead of our cooperation with them: that `base64` encodes, that serde round-trips a derive, that `Vec::push` keeps order, that a blanket `impl` converts a `&str`.
+- Tests the compiler already guarantees, or that repeat a trivial one-line impl or a builder setter.
+- Tests that check one field to "guard" a broad rule (for example "no temperature is sent" for "the library sets no model parameters"): they pass while the rule is broken.
+- Tests of a constant's value or of a renamed old test kept only so that something still passes.
+
+When a fix touches a provider's format that the unit tests cannot reach (for example Anthropic, while the mock speaks OpenAI), rely on the doc tests in CI instead of a unit test of our own conversion function.
+
 ## Documentation conventions
 
 - Describe changes from the library user's point of view: what they can now do, or must do differently, when building agents. This applies to "What's New", changelog notes, PR descriptions and `llms*.txt`. Order items by how much they change the user's code or what they can build. Put internal work last and keep it short, for example dependency upgrades, refactors and CI. For a dependency upgrade, name the user-visible effect (for example "tool calls are no longer lost"), not just the version.

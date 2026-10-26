@@ -284,17 +284,6 @@ async fn zero_iterations_do_not_call_the_model() {
 }
 
 #[tokio::test]
-async fn default_agent_sets_no_model_parameters() {
-    let llm = MockLlm::start(vec![text_reply("hi")]).await;
-
-    let agent = llm.agent();
-    assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
-    let _: AgentResult<String> = agent.run("question").await.unwrap();
-
-    assert!(request_json(&llm, 0).get("temperature").is_none());
-}
-
-#[tokio::test]
 async fn chat_options_are_sent_with_every_request() {
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
     let options = ChatOptions::default()

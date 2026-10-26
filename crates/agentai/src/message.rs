@@ -449,15 +449,6 @@ mod tests {
     }
 
     #[test]
-    fn media_from_bytes_is_base64_encoded() {
-        let media = Media::from_bytes("image/png", b"hi").with_name("hi.png");
-        assert_eq!(media.source, MediaSource::Base64("aGk=".into()));
-        assert_eq!(media.content_type, "image/png");
-        assert_eq!(media.name.as_deref(), Some("hi.png"));
-        assert!(media.is_image());
-    }
-
-    #[test]
     fn image_url_guesses_the_type_from_the_extension() {
         let types: Vec<String> = [
             "https://example.com/a.png",

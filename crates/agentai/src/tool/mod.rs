@@ -286,24 +286,3 @@ impl ToolBox for ToolBoxSet {
         Err(ToolError::NotFound(tool_name))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn tools_without_arguments_get_an_empty_object_schema() {
-        let tool = Tool::new("now").into_genai();
-        assert_eq!(
-            tool.schema,
-            Some(json!({"type": "object", "properties": {}}))
-        );
-
-        let schema = json!({"type": "object", "properties": {"city": {"type": "string"}}});
-        let tool = Tool::new("weather")
-            .with_schema(schema.clone())
-            .into_genai();
-        assert_eq!(tool.schema, Some(schema));
-    }
-}
