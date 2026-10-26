@@ -77,9 +77,7 @@ async fn main() -> Result<()> {
     // variables, for example `ANTHROPIC_API_KEY` or `OMLX_ENDPOINT`.
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new(SYSTEM)?
-        .with_model(&model)
-        .with_toolbox(CurrentDateAndTimeToolBox {});
+    let agent = Agent::new(&model, SYSTEM)?.with_toolbox(CurrentDateAndTimeToolBox {});
 
     // 1. The ready-made Printer, configured to also show the tool results, writing to stderr
     let printer = Printer::new(std::io::stderr()).with_tool_results(true);

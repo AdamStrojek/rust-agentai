@@ -121,7 +121,7 @@ use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
+    let agent = Agent::new("gpt-4o", "You are a useful assistant")?;
 
     // The conversation history is yours
     let mut history: Vec<Message> = Vec::new();

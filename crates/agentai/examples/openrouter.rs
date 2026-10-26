@@ -1,11 +1,10 @@
 //! OpenRouter Example
 //!
-//! This example uses OpenRouter through `Agent::new_with_provider(Provider::OpenRouter, ..)`.
-//! No base URL is needed: agentai knows OpenRouter's endpoint, and every model name
-//! (for example `nvidia/nemotron-3.5-super-vl:free`) is sent to OpenRouter as is.
+//! This example uses OpenRouter through the `open_router::` namespace of the model name.
+//! The API key is read from the `OPEN_ROUTER_API_KEY` environment variable.
 
 use agentai::tool::buildin::CurrentDateAndTimeToolBox;
-use agentai::{Agent, AgentResult, Provider};
+use agentai::{Agent, AgentResult};
 use anyhow::Result;
 use log::{LevelFilter, info};
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -26,11 +25,8 @@ async fn main() -> Result<()> {
 
     info!("Question: {}", question);
 
-    let api_key = std::env::var("OPENROUTER_API_KEY")?;
-
-    // `None` keeps the default OpenRouter endpoint
-    let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, SYSTEM)?
-        .with_model("nvidia/nemotron-3.5-super-vl:free")
+    // The `open_router::` prefix sends the model to OpenRouter
+    let agent = Agent::new("open_router::nvidia/nemotron-3.5-super-vl:free", SYSTEM)?
         .with_toolbox(CurrentDateAndTimeToolBox {});
 
     let result: AgentResult<String> = agent.run(question).await?;

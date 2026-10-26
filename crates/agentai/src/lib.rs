@@ -54,7 +54,7 @@
 //!
 //! #### 0.2.0 - Agent providers, remote MCP and configuration
 //!
-//! - **Creating agents**: [`Agent::new_with_provider`](crate::Agent::new_with_provider) binds an agent to any
+//! - **Creating agents**: `Agent::new_with_provider` binds an agent to any
 //!   genai provider with an explicit API key, for example the native OpenRouter adapter, which needs no base URL:
 //!   `Agent::new_with_provider(AdapterKind::OpenRouter, None, &api_key, system)?`. `Agent::new` and
 //!   `Agent::new_with_url` now return `Result`, and the agent reports typed errors
@@ -112,7 +112,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
+//!     let agent = Agent::new("gpt-4o", "You are a useful assistant")?;
 //!
 //!     // The conversation history is yours
 //!     let mut history: Vec<Message> = Vec::new();
@@ -236,6 +236,11 @@ pub mod structured_output;
 pub use agent::*;
 pub use message::{Media, MediaSource, Message, Part, ProviderData, Role, ToolCall, ToolResponse};
 pub use prompt::{IntoPrompt, Prompt};
+
+/// The [`genai`](https://crates.io/crates/genai) crate in the version `agentai` uses. Build a
+/// client with it for [`Agent::from_client`] when [`Agent::new`] is not enough, for example for a
+/// custom endpoint.
+pub use genai;
 
 /// Compile-fail checks for the `#[tool(...)]` options. Only built for doc tests.
 ///
