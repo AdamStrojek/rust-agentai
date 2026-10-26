@@ -25,10 +25,10 @@ cargo test
 - Single test: `cargo test -p agentai <test_name>` (e.g. unit tests in `crates/agentai/src/agent/tests.rs`).
 - Offline tests only: `cargo test -p agentai --lib` (agent loop against a mock LLM in `agent/tests.rs`, message conversion in `message.rs`, plus `tool/buildin.rs` and `tool/mcp.rs`; the MCP tests need `uvx`, and `test_get_location` calls the live Nominatim API).
 - Doc tests only: `cargo test -p agentai --doc`. Every example is included as a runnable doc test (via `src/examples/*.rs`), so plain `cargo test` executes all examples against a live LLM and fails without the env vars below.
-- Example: `cargo run --example <name>` (`simple`, `streaming`, `event_listener`, `struct_output`, `tools_custom`, `tools_web`, `tools_mcp`, `vision`, `openrouter`; the last one needs `OPENROUTER_API_KEY`). `scripts/run-examples.sh` runs them all and writes logs to `logs/`.
+- Example: `cargo run --example <name>` (`simple`, `streaming`, `event_listener`, `struct_output`, `tools_custom`, `tools_web`, `tools_mcp`, `vision`, `openrouter`; the last one needs `OPENROUTER_API_KEY` and is only compiled by `cargo test`). `scripts/run-examples.sh` runs them all and writes logs to `logs/`.
 - Docs: `cargo doc -p agentai --open` (the `examples` and `structured_output` modules exist only under `#[cfg(doc)]`).
 
-Examples and tests that hit an LLM need `AGENTAI_BASE_URL`, `AGENTAI_API_KEY`, and optionally `AGENTAI_MODEL` (CI uses OpenRouter: `https://openrouter.ai/api/v1/`, the free model `nvidia/nemotron-3.5-super-vl:free`, key in the `OPENROUTER_API_KEY` secret). `tools_web` needs `BRAVE_API_KEY`; `tools_mcp` launches `uvx mcp-server-time`, so `uv` must be installed; `vision` needs a model that accepts images, taken from `AGENTAI_VISION_MODEL` (falls back to `AGENTAI_MODEL`; CI sets `openrouter/free`, because the free endpoint of the default model rejects images).
+Examples and tests that hit an LLM read only `AGENTAI_MODEL` (default `claude-haiku-5-5`), a genai model name: the agent is built with `Agent::new`, so the provider comes from the name and its key and endpoint from genai's environment variables (`ANTHROPIC_API_KEY`; locally `omlx::Qwen3.8-27B-4bit` with `OMLX_ENDPOINT` and `OMLX_API_KEY`). CI uses `claude-haiku-5-5` with the `ANTHROPIC_API_KEY` secret. `tools_web` needs `BRAVE_API_KEY`; `tools_mcp` launches `uvx mcp-server-time`, so `uv` must be installed; `vision` needs a model that accepts images.
 
 ## Architecture
 

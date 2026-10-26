@@ -112,11 +112,10 @@ use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let base_url = std::env::var("AGENTAI_BASE_URL")?;
-    let api_key = std::env::var("AGENTAI_API_KEY")?;
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
+    // The provider comes from the model name; the key from its environment variable (ANTHROPIC_API_KEY)
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?.with_model(&model);
+    let agent = Agent::new("You are a useful assistant")?.with_model(&model);
 
     let mut history: Vec<Message> = Vec::new();
     let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;

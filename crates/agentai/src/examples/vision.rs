@@ -6,9 +6,7 @@
 //! as base64 with [`Prompt::with_image_bytes`](crate::Prompt::with_image_bytes).
 //!
 //! The model has to support images. A model without vision support usually answers with an
-//! error. Set `AGENTAI_VISION_MODEL` to use a different model than `AGENTAI_MODEL` for this
-//! example, for example `openrouter/free` on OpenRouter, which picks a free model that accepts
-//! images.
+//! error.
 //!
 //! To run this example from the terminal, enter:
 //! ```bash

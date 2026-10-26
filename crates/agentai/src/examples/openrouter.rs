@@ -16,8 +16,11 @@
 //! OPENROUTER_API_KEY=<your key> cargo run --example openrouter
 //! ```
 //!
+//! The example needs an OpenRouter key, so it is not run with the other examples by
+//! `cargo test`, only compiled.
+//!
 //! ## Source Code
 //!
-//! ```rust
+//! ```rust,no_run
 #![doc = include_str!("../../examples/openrouter.rs")]
 //! ```
