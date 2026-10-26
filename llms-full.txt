@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.3.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.4.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -31,43 +31,59 @@ For a minimal build: `agentai = { version = "0.3", default-features = false, fea
 
 ## Creating an agent
 
-`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Every constructor takes the system prompt as its last argument. Then set the model with `.with_model(..)` (required, either on the agent or on each run) and, if the agent uses tools, the toolbox with `.with_toolbox(..)`. The constructors return `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building the LLM client can fail.
+`Agent` lives in `agentai::agent` and is re-exported as `agentai::Agent`. Create it with the model and the system prompt; if the agent uses tools, add the toolbox with `.with_toolbox(..)`.
 
 ```rust
-use agentai::{Agent, Provider};
+use agentai::Agent;
 
-// 1. Provider picked from the model name (gpt-* OpenAI, claude-* Anthropic,
-//    gemini-* Gemini, ...). The API key is read from the provider's usual
-//    environment variable (for example OPENAI_API_KEY, ANTHROPIC_API_KEY).
-let agent = Agent::new("You are a useful assistant")?.with_model("gpt-4o");
+// Provider picked from the model name (gpt-* OpenAI, claude-* Anthropic,
+// gemini-* Gemini, ...). The API key is read from the provider's usual
+// environment variable (for example OPENAI_API_KEY, ANTHROPIC_API_KEY).
+let agent = Agent::new("gpt-4o", "You are a useful assistant")?;
 
-// 2. Any OpenAI-compatible endpoint (OpenAI, GitHub Models, OpenRouter,
-//    LiteLLM, Ollama, ...). Every model name is sent with the OpenAI Chat
-//    Completions API to this URL with this key. Names such as
-//    "openai/gpt-4.1-mini" or "vendor/model:free" are passed as they are.
-let agent = Agent::new_with_url(
-    "https://openrouter.ai/api/v1/",
-    &std::env::var("OPENROUTER_API_KEY")?,
-    "You are a useful assistant",
-)?;
-
-// 3. One provider with an explicit key. Model names go to that provider as
-//    they are. `None` keeps its default endpoint; pass Some(url) to override it.
-let agent = Agent::new_with_provider(
-    Provider::OpenRouter,
-    None,
-    &std::env::var("OPENROUTER_API_KEY")?,
-    "You are a useful assistant",
-)?;
+// A `provider::` prefix selects the provider explicitly. OpenRouter reads
+// its key from OPEN_ROUTER_API_KEY; the rest of the name is sent as is.
+let agent = Agent::new("open_router::nvidia/nemotron-3.5-super-vl:free", "You are a useful assistant")?;
 ```
 
-`new_with_url(url, key, system)` is the same as `new_with_provider(Provider::OpenAI, Some(url), key, system)`. `Provider` (`#[non_exhaustive]`) has `OpenAI`, `OpenAIResponses`, `Anthropic`, `Gemini`, `Vertex`, `OpenRouter`, `Groq`, `DeepSeek`, `Mistral`, `Xai`, `Cohere`, `Ollama`, `Fireworks`, `Together`, `Nebius`, `Moonshot`, `Zai` and `Aliyun`.
+`Agent::new` returns `Result<Agent, AgentError>` (`AgentError::ClientInit`), because building the LLM client can fail. The system prompt is strongly recommended, but it may be empty (`""`): then no system prompt is sent.
 
-With `Agent::new` you can also pick a provider per model with a `provider::` prefix, for example `open_router::nvidia/nemotron-3.5-super-vl:free`; the key is then read from the provider's environment variable (`OPEN_ROUTER_API_KEY` for OpenRouter). An agent created with `new_with_url` or `new_with_provider` is bound to one provider.
+### Custom endpoints: `from_client`
+
+For anything the model name cannot select, such as an OpenAI-compatible server (LiteLLM, vLLM, a local Ollama, ...), an explicit API key or HTTP settings, build a genai `Client` yourself and pass it to `Agent::from_client(client, model, system)` (infallible). `agentai` re-exports genai as `agentai::genai`, so use that path and you get the version `agentai` was built with; do not add `genai` to your own `Cargo.toml`.
+
+```rust
+use agentai::Agent;
+use agentai::genai::Client;
+use agentai::genai::adapter::AdapterKind;
+use agentai::genai::resolver::{AuthData, Endpoint};
+
+// Every model name goes to this URL with the OpenAI Chat Completions API and
+// this key. Names such as "openai/gpt-4.1-mini" are passed as they are.
+let client = Client::builder()
+    .with_adapter_kind(AdapterKind::OpenAI)
+    .append_provider_config(
+        AdapterKind::OpenAI,
+        (
+            Endpoint::from_static("http://localhost:4000/v1/"),
+            AuthData::from_single(std::env::var("LITELLM_API_KEY")?),
+        ),
+    )
+    .build()?;
+let agent = Agent::from_client(client, "openai/gpt-4.1-mini", "You are a useful assistant");
+```
+
+### An agent without a model: `Agent::default()`
+
+`Agent::default()` has no model and no system prompt (provider from the model name, as with `new`). Set them with `.with_model(..)` and `.with_system(..)`, or give each run its model with `AgentRequest::with_model`; a run without any model fails with `AgentError::MissingModel`. It panics if the LLM client cannot be built; use `Agent::new` to get that as an error.
+
+```rust
+let agent = Agent::default().with_model("gpt-4o").with_system("You are a useful assistant");
+```
 
 `Agent` is configuration only: client, system prompt, model, toolbox, iteration limit and `ChatOptions`. It implements `Clone` (cheap: the client and the toolbox are shared) and is `Send + Sync`, so one agent can serve many conversations and tasks at once. It does not remember earlier runs.
 
-Other builder methods: `with_toolbox_arc(Arc<dyn ToolBox>)` for a toolbox you already share, and the getters `model()`, `system()`, `toolbox()`, `max_iterations()`, `chat_options()`.
+Other builder methods: `with_model(..)` and `with_system(..)` to change the model or the system prompt, `with_toolbox_arc(Arc<dyn ToolBox>)` for a toolbox you already share, and the getters `model()`, `system()`, `toolbox()`, `max_iterations()`, `chat_options()`.
 
 ## Asking a question
 
@@ -101,7 +117,7 @@ pub struct AgentResult<D> {
 
 - `Usage` has `input_tokens`, `cached_input_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` and `total_tokens` (`u64`, `0` when the provider does not report a count).
 - `StopReason` is `Completed`, `MaxTokens`, `ToolCall`, `ContentFilter`, `StopSequence` or `Other(String)`.
-- The model name is passed to the provider as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `new_with_url`, the endpoint's own name such as `"openai/gpt-4.1-mini"`.
+- The model name is passed to the provider as is, for example `"gpt-4o"`, `"claude-sonnet-4-5"`, `"gemini-2.0-flash"` or, with `from_client` and a custom endpoint, the endpoint's own name such as `"openai/gpt-4.1-mini"`.
 - The answer type selects the output mode, so always annotate it: `let result: AgentResult<String> = ...` or `agent.run::<String>(...)`.
 - `D` must be `DeserializeOwned + JsonSchema + Send + 'static`.
 
@@ -115,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
     // The provider comes from the model name; the key from its environment variable (ANTHROPIC_API_KEY)
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new("You are a useful assistant")?.with_model(&model);
+    let agent = Agent::new(&model, "You are a useful assistant")?;
 
     let mut history: Vec<Message> = Vec::new();
     let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
@@ -208,8 +224,8 @@ while let Some(event) = stream.next().await {
 
 A run returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built with `thiserror`):
 
-- `ClientInit(LlmError)`: the LLM client could not be built (`new`, `new_with_url`, `new_with_provider`).
-- `MissingModel`: no model was set on the agent or the run.
+- `ClientInit(LlmError)`: the LLM client could not be built (`Agent::new`).
+- `MissingModel`: the agent was created without a model (`Agent::default()`) and none was set on it or on the run.
 - `Llm(LlmError)`: the request to the model failed (network, HTTP status, provider error). `LlmError` has `status() -> Option<u16>`, `is_transient()` and a `Display` message.
 - `Schema(String)`: the JSON schema of `D` could not be generated or is not an object.
 - `InvalidAnswer { raw, source }`: the final answer could not be parsed into `D`; `raw` is the text of the model.
@@ -230,13 +246,12 @@ match agent.run::<String>(question).with_history(&history).await {
 
 ## Configuration
 
-Every constructor returns an agent that makes at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and sends no model options of its own. Change both with the builder methods:
+A new agent that makes at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and sends no model options of its own. Change both with the builder methods:
 
 ```rust
 use agentai::{Agent, ChatOptions, ReasoningEffort, ToolChoice};
 
-let agent = Agent::new("You are a useful assistant")?
-    .with_model("gpt-4o")
+let agent = Agent::new("gpt-4o", "You are a useful assistant")?
     .with_max_iterations(10)
     .with_chat_options(
         ChatOptions::default()
@@ -461,8 +476,7 @@ The server's tool list is read once, when the toolbox is created.
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.3.0
+## Limits in 0.4.0
 
 - Tool results are text only; a tool cannot return an image to the model.
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.
-- There is no way to plug in a custom LLM client; use `new_with_url` or `new_with_provider`.

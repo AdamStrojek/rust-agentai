@@ -1,6 +1,5 @@
 //! Model settings and run statistics, independent of the LLM client used inside `agentai`.
 
-use genai::adapter::AdapterKind;
 use serde::{Deserialize, Serialize};
 
 /// Model options sent with every request: temperature, max tokens, tool choice, reasoning
@@ -224,74 +223,6 @@ impl StopReason {
             G::ContentFilter(_) => Self::ContentFilter,
             G::StopSequence(_) => Self::StopSequence,
             G::Other(raw) => Self::Other(raw),
-        }
-    }
-}
-
-/// LLM provider for [`Agent::new_with_provider`](crate::Agent::new_with_provider).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Provider {
-    /// OpenAI Chat Completions API, and any OpenAI-compatible API with a custom base URL.
-    OpenAI,
-    /// OpenAI Responses API.
-    OpenAIResponses,
-    /// Anthropic.
-    Anthropic,
-    /// Google Gemini.
-    Gemini,
-    /// Google Vertex AI.
-    Vertex,
-    /// OpenRouter.
-    OpenRouter,
-    /// Groq.
-    Groq,
-    /// DeepSeek.
-    DeepSeek,
-    /// Mistral.
-    Mistral,
-    /// xAI.
-    Xai,
-    /// Cohere.
-    Cohere,
-    /// Ollama.
-    Ollama,
-    /// Fireworks.
-    Fireworks,
-    /// Together AI.
-    Together,
-    /// Nebius.
-    Nebius,
-    /// Moonshot.
-    Moonshot,
-    /// Z.ai.
-    Zai,
-    /// Alibaba Cloud (DashScope).
-    Aliyun,
-}
-
-impl Provider {
-    pub(crate) fn into_genai(self) -> AdapterKind {
-        let provider = self;
-        match provider {
-            Provider::OpenAI => AdapterKind::OpenAI,
-            Provider::OpenAIResponses => AdapterKind::OpenAIResp,
-            Provider::Anthropic => AdapterKind::Anthropic,
-            Provider::Gemini => AdapterKind::Gemini,
-            Provider::Vertex => AdapterKind::Vertex,
-            Provider::OpenRouter => AdapterKind::OpenRouter,
-            Provider::Groq => AdapterKind::Groq,
-            Provider::DeepSeek => AdapterKind::DeepSeek,
-            Provider::Mistral => AdapterKind::Mistral,
-            Provider::Xai => AdapterKind::Xai,
-            Provider::Cohere => AdapterKind::Cohere,
-            Provider::Ollama => AdapterKind::Ollama,
-            Provider::Fireworks => AdapterKind::Fireworks,
-            Provider::Together => AdapterKind::Together,
-            Provider::Nebius => AdapterKind::Nebius,
-            Provider::Moonshot => AdapterKind::Moonshot,
-            Provider::Zai => AdapterKind::Zai,
-            Provider::Aliyun => AdapterKind::Aliyun,
         }
     }
 }

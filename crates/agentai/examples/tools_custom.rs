@@ -35,7 +35,7 @@ async fn main() -> Result<(), Error> {
     // variables, for example `ANTHROPIC_API_KEY` or `OMLX_ENDPOINT`.
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new(SYSTEM)?.with_model(&model).with_toolbox(toolbox);
+    let agent = Agent::new(&model, SYSTEM)?.with_toolbox(toolbox);
 
     let result: AgentResult<String> = agent.run(question).await?;
 

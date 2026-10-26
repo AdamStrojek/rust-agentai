@@ -7,8 +7,75 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.3.1 → 0.4.0 (2026-10-26)
+
+### `Agent::new` takes the model
+
+The model is passed to `Agent::new` together with the system prompt, so an agent always has one.
+
+```rust
+// 0.3.1
+let agent = Agent::new(SYSTEM)?.with_model(&model);
+```
+
+```rust
+// 0.4.0
+let agent = Agent::new(&model, SYSTEM)?;
+```
+
+The system prompt may be empty (`""`); then none is sent. To build an agent without a model (and
+set it later or on each run), use `Agent::default()`:
+
+```rust
+// 0.4.0
+let agent = Agent::default().with_model(&model).with_system(SYSTEM);
+```
+
+### `Agent::new_with_provider` and `Provider` are removed
+
+For a provider genai knows, put its namespace in front of the model name and set the provider's
+API key environment variable, for example `OPEN_ROUTER_API_KEY` for OpenRouter.
+
+```rust
+// 0.3.1
+let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, SYSTEM)?.with_model(&model);
+```
+
+```rust
+// 0.4.0, with OPEN_ROUTER_API_KEY set
+let agent = Agent::new(&format!("open_router::{model}"), SYSTEM)?;
+```
+
+For anything else (a custom endpoint, an explicit key), build the client yourself as shown below.
+
+### `Agent::new_with_url` is removed
+
+Build a genai client for the endpoint with `agentai::genai` and pass it to `Agent::from_client`.
+
+```rust
+// 0.3.1
+let agent = Agent::new_with_url(&base_url, &api_key, SYSTEM)?.with_model(&model);
+```
+
+```rust
+// 0.4.0
+use agentai::genai::Client;
+use agentai::genai::adapter::AdapterKind;
+use agentai::genai::resolver::{AuthData, Endpoint};
+
+let client = Client::builder()
+    .with_adapter_kind(AdapterKind::OpenAI)
+    .append_provider_config(
+        AdapterKind::OpenAI,
+        (Endpoint::from_owned(base_url), AuthData::from_single(api_key)),
+    )
+    .build()?;
+let agent = Agent::from_client(client, &model, SYSTEM);
+```
 
 ## 0.2.0 → 0.3.0 (2026-10-22)
 

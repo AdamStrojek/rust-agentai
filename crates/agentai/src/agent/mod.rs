@@ -11,7 +11,6 @@
 use crate::prompt::IntoPrompt;
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
-use genai::resolver::{AuthData, Endpoint};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -20,7 +19,7 @@ mod model;
 mod request;
 mod stream;
 
-pub use model::{ChatOptions, Provider, ReasoningEffort, StopReason, ToolChoice, Usage};
+pub use model::{ChatOptions, ReasoningEffort, StopReason, ToolChoice, Usage};
 pub use request::{AgentRequest, AgentResult, Complete, RunOptions, Streaming};
 pub use stream::{AgentEvent, AgentStream};
 
@@ -60,8 +59,8 @@ pub enum AgentError {
         /// Truncated text returned by the model.
         raw: String,
     },
-    /// No model was set, neither with [`Agent::with_model`] nor for the run
-    /// ([`AgentRequest::with_model`]).
+    /// The agent was created without a model ([`Agent::default`]), and neither
+    /// [`Agent::with_model`] nor the run ([`AgentRequest::with_model`]) set one.
     #[error("no model set: use Agent::with_model or AgentRequest::with_model")]
     MissingModel,
     /// An [event listener](crate::listener) failed, for example writing the stream with
@@ -158,8 +157,7 @@ pub const DEFAULT_MAX_ITERATIONS: usize = 5;
 /// use agentai::{Agent, ChatOptions, ReasoningEffort};
 ///
 /// # fn main() -> Result<(), agentai::AgentError> {
-/// let agent = Agent::new("You are a useful assistant")?
-///     .with_model("gpt-4o")
+/// let agent = Agent::new("gpt-4o", "You are a useful assistant")?
 ///     .with_max_iterations(10)
 ///     .with_chat_options(
 ///         ChatOptions::default()
@@ -192,102 +190,86 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Creates a new `Agent` that picks the provider from the model name.
+    /// Creates a new `Agent` for `model`, picking the provider from the model name.
     ///
     /// `gpt-*` models go to OpenAI, `claude-*` to Anthropic, `gemini-*` to Gemini, and so on; a
     /// `provider::model` prefix such as `open_router::vendor/model` selects a provider
     /// explicitly. The API key is read from the provider's usual environment variable, for
-    /// example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPEN_ROUTER_API_KEY`.
-    ///
-    /// # Arguments
-    ///
-    /// * `system` - The system prompt sent with every request.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the LLM client cannot be created.
-    pub fn new(system: &str) -> Result<Self, AgentError> {
-        let client =
-            Client::new().map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
-        Ok(Self::from_client(client, system))
-    }
-
-    /// Creates a new `Agent` that talks to an OpenAI-compatible endpoint
-    /// (OpenAI, OpenRouter, LiteLLM, Ollama, ...).
-    ///
-    /// Every model name is sent to `base_url` with the OpenAI Chat Completions API,
-    /// authenticated with `api_key`. Model names are passed as they are, so names like
-    /// `openai/gpt-4.1-mini` or `vendor/model:free` work.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_url` - Base URL of the API, for example `https://openrouter.ai/api/v1/`.
-    /// * `api_key` - API key sent with every request.
-    /// * `system` - The system prompt sent with every request.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the LLM client cannot be created.
-    pub fn new_with_url(base_url: &str, api_key: &str, system: &str) -> Result<Self, AgentError> {
-        Self::new_with_provider(Provider::OpenAI, Some(base_url), api_key, system)
-    }
-
-    /// Creates a new `Agent` bound to one provider, with an explicit API key and, optionally, a
-    /// custom endpoint.
-    ///
-    /// Every model name is sent to `provider` as it is. For example, with
-    /// [`Provider::OpenRouter`] the model `nvidia/nemotron-3.5-super-vl:free` goes to OpenRouter.
+    /// example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPEN_ROUTER_API_KEY`. For an endpoint the
+    /// model name cannot select, such as your own OpenAI-compatible server, use
+    /// [`from_client`](Agent::from_client).
     ///
     /// ```no_run
-    /// use agentai::{Agent, Provider};
+    /// use agentai::Agent;
     ///
     /// # fn main() -> Result<(), agentai::AgentError> {
-    /// let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-    /// // OpenRouter with its default endpoint
-    /// let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, "You are helpful")?;
+    /// let agent = Agent::new("claude-haiku-5-5", "You are a useful assistant")?;
+    /// // OpenRouter, with the key from `OPEN_ROUTER_API_KEY`
+    /// let agent = Agent::new("open_router::nvidia/nemotron-3.5-super-vl:free", "You are a useful assistant")?;
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// # Arguments
     ///
-    /// * `provider` - provider to use, for example [`Provider::OpenRouter`],
-    ///   [`Provider::Anthropic`] or [`Provider::OpenAI`].
-    /// * `base_url` - Endpoint override. `None` keeps the provider's default endpoint, for
-    ///   example `https://openrouter.ai/api/v1/` for OpenRouter.
-    /// * `api_key` - API key sent with every request.
-    /// * `system` - The system prompt sent with every request.
+    /// * `model` - The model used by every run, unless the run sets its own with
+    ///   [`AgentRequest::with_model`].
+    /// * `system` - The system prompt sent with every request. Strongly recommended, but it may be
+    ///   empty, and then no system prompt is sent.
     ///
     /// # Errors
     ///
     /// Returns an error when the LLM client cannot be created.
-    pub fn new_with_provider(
-        provider: Provider,
-        base_url: Option<&str>,
-        api_key: &str,
-        system: &str,
-    ) -> Result<Self, AgentError> {
-        let adapter = provider.into_genai();
-        let auth = AuthData::from_single(api_key);
-        let builder = Client::builder().with_adapter_kind(adapter);
-        let builder = match base_url {
-            Some(base_url) => builder.append_provider_config(
-                adapter,
-                (Endpoint::from_owned(base_url.to_string()), auth),
-            ),
-            None => builder.append_provider_config(adapter, auth),
-        };
-        let client = builder
-            .build()
-            .map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
-        Ok(Self::from_client(client, system))
+    pub fn new(model: &str, system: &str) -> Result<Self, AgentError> {
+        let client =
+            Client::new().map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
+        Ok(Self::from_parts(client, Some(model.to_string()), system))
     }
 
-    fn from_client(client: Client, system: &str) -> Self {
+    /// Creates a new `Agent` for `model` that sends its requests through your own
+    /// [`genai`] client, for full control over providers, endpoints, API keys and HTTP settings.
+    ///
+    /// Use it when [`new`](Agent::new) is not enough, for example for an OpenAI-compatible
+    /// server (LiteLLM, vLLM, a local Ollama, ...). Build the client with [`crate::genai`], the
+    /// version `agentai` uses:
+    ///
+    /// ```no_run
+    /// use agentai::Agent;
+    /// use agentai::genai::Client;
+    /// use agentai::genai::adapter::AdapterKind;
+    /// use agentai::genai::resolver::{AuthData, Endpoint};
+    ///
+    /// let client = Client::builder()
+    ///     // Every model name goes to this endpoint with the OpenAI Chat Completions API
+    ///     .with_adapter_kind(AdapterKind::OpenAI)
+    ///     .append_provider_config(
+    ///         AdapterKind::OpenAI,
+    ///         (
+    ///             Endpoint::from_static("http://localhost:4000/v1/"),
+    ///             AuthData::from_single("my-key"),
+    ///         ),
+    ///     )
+    ///     .build()
+    ///     .expect("LLM client");
+    /// let agent = Agent::from_client(client, "openai/gpt-4.1-mini", "You are a useful assistant");
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - The genai client every request is sent with.
+    /// * `model` - The model used by every run, unless the run sets its own with
+    ///   [`AgentRequest::with_model`].
+    /// * `system` - The system prompt sent with every request. Strongly recommended, but it may be
+    ///   empty, and then no system prompt is sent.
+    pub fn from_client(client: Client, model: &str, system: &str) -> Self {
+        Self::from_parts(client, Some(model.to_string()), system)
+    }
+
+    fn from_parts(client: Client, model: Option<String>, system: &str) -> Self {
         Self {
             client,
             system: system.trim().to_string(),
-            model: None,
+            model,
             toolbox: None,
             max_iterations: DEFAULT_MAX_ITERATIONS,
             chat_options: ChatOptions::default(),
@@ -295,9 +277,16 @@ impl Agent {
     }
 
     /// Sets the model used by every run, unless the run sets its own with
-    /// [`AgentRequest::with_model`]. Without a model, a run returns [`AgentError::MissingModel`].
+    /// [`AgentRequest::with_model`]. An agent created with [`Agent::default`] has no model, and
+    /// a run without one returns [`AgentError::MissingModel`].
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    /// Sets the system prompt sent with every request. An empty system prompt is not sent.
+    pub fn with_system(mut self, system: impl Into<String>) -> Self {
+        self.system = system.into().trim().to_string();
         self
     }
 
@@ -336,12 +325,13 @@ impl Agent {
         self
     }
 
-    /// Returns the system prompt sent with every request.
+    /// Returns the system prompt sent with every request. It is empty when none is sent.
     pub fn system(&self) -> &str {
         &self.system
     }
 
-    /// Returns the model set with [`with_model`](Agent::with_model).
+    /// Returns the model used by every run. Only an agent created with [`Agent::default`] may have
+    /// none.
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
     }
@@ -391,7 +381,8 @@ impl Agent {
     /// # Errors
     ///
     /// Awaiting the run returns an [`AgentError`]:
-    /// - [`MissingModel`](AgentError::MissingModel) when no model is set;
+    /// - [`MissingModel`](AgentError::MissingModel) when neither the agent nor the run has a
+    ///   model;
     /// - [`Llm`](AgentError::Llm) when the request to the model fails (see
     ///   [`AgentError::is_transient`]);
     /// - [`Schema`](AgentError::Schema) when the schema of `D` cannot be generated;
@@ -442,5 +433,30 @@ impl Agent {
     /// ```
     pub fn run_stream<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Streaming> {
         AgentRequest::new(self, prompt.into_prompt())
+    }
+}
+
+impl Default for Agent {
+    /// Creates an `Agent` without a model and without a system prompt. The provider is picked
+    /// from the model name, as in [`Agent::new`].
+    ///
+    /// Set the model with [`with_model`](Agent::with_model) or on each run
+    /// ([`AgentRequest::with_model`]); otherwise a run returns [`AgentError::MissingModel`]. A
+    /// system prompt is strongly recommended: set it with [`with_system`](Agent::with_system).
+    ///
+    /// ```no_run
+    /// use agentai::Agent;
+    ///
+    /// let agent = Agent::default()
+    ///     .with_model("gpt-4o")
+    ///     .with_system("You are a useful assistant");
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics when the LLM client cannot be created. [`Agent::new`] returns that error instead.
+    fn default() -> Self {
+        let client = Client::new().expect("failed to create the LLM client");
+        Self::from_parts(client, None, "")
     }
 }

@@ -77,14 +77,29 @@ impl MockLlm {
     }
 
     fn agent(&self) -> Agent {
-        Agent::new_with_url(&self.base_url, "test-key", "system")
-            .unwrap()
-            .with_model("m")
+        Agent::from_client(openai_client(&self.base_url), "m", "system")
     }
 
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
     }
+}
+
+/// Client that sends every model name to `base_url` with the OpenAI Chat Completions API.
+fn openai_client(base_url: &str) -> Client {
+    use genai::adapter::AdapterKind;
+    use genai::resolver::{AuthData, Endpoint};
+    Client::builder()
+        .with_adapter_kind(AdapterKind::OpenAI)
+        .append_provider_config(
+            AdapterKind::OpenAI,
+            (
+                Endpoint::from_owned(base_url.to_string()),
+                AuthData::from_single("test-key"),
+            ),
+        )
+        .build()
+        .unwrap()
 }
 
 fn text_reply(text: &str) -> (u16, String) {
@@ -554,20 +569,12 @@ async fn run_options_replace_the_agent_settings() {
 
 #[tokio::test]
 async fn a_run_without_a_model_fails_before_calling_the_model() {
-    let llm = MockLlm::start(vec![]).await;
-    let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
+    let agent = Agent::default();
 
     let err = agent.run::<String>("question").await.unwrap_err();
     assert!(matches!(err, AgentError::MissingModel));
     let err = agent.run_stream::<String>("question").await.err().unwrap();
     assert!(matches!(err, AgentError::MissingModel));
-    assert!(llm.requests().is_empty());
-
-    // A model set for the run is enough
-    let llm = MockLlm::start(vec![text_reply("hi")]).await;
-    let agent = Agent::new_with_url(&llm.base_url, "test-key", "system").unwrap();
-    let result: AgentResult<String> = agent.run("question").with_model("m").await.unwrap();
-    assert_eq!(result.answer, "hi");
 }
 
 #[tokio::test]
@@ -721,7 +728,7 @@ async fn fatal_tool_error_ends_the_stream() {
 fn runs_and_streams_can_be_moved_to_other_tasks() {
     fn assert_send_static<T: Send + 'static>(_: &T) {}
     fn assert_send_static_type<T: Send + 'static>() {}
-    let agent = Agent::new_with_url("http://localhost/", "key", "system").unwrap();
+    let agent = Agent::from_client(openai_client("http://localhost/"), "m", "system");
     let history = vec![Message::user("hi")];
     let future =
         std::future::IntoFuture::into_future(agent.run::<String>("q").with_history(&history));

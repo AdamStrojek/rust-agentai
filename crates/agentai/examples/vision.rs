@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     // variables, for example `ANTHROPIC_API_KEY` or `OMLX_ENDPOINT`.
     let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new(SYSTEM)?.with_model(&model);
+    let agent = Agent::new(&model, SYSTEM)?;
 
     // An image from its bytes: it is sent base64 encoded inside the request
     let prompt =
