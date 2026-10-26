@@ -96,7 +96,11 @@ impl Tool {
         let tool = self;
         let mut out = genai::chat::Tool::new(tool.name);
         out.description = tool.description;
-        out.schema = tool.schema;
+        // Anthropic requires a schema, so a tool without arguments gets an empty object schema
+        out.schema = Some(
+            tool.schema
+                .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
+        );
         out.strict = tool.strict;
         out
     }

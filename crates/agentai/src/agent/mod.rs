@@ -8,6 +8,7 @@
 //!
 //! To read more about tool look into [crate::tool]
 
+use crate::prompt::IntoPrompt;
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
 use genai::resolver::{AuthData, Endpoint};
@@ -144,9 +145,6 @@ impl LlmError {
 
 /// Default number of model calls in one run.
 pub const DEFAULT_MAX_ITERATIONS: usize = 5;
-
-/// Default temperature sent with every request, unless [`Agent::with_chat_options`] replaces it.
-pub const DEFAULT_TEMPERATURE: f64 = 0.2;
 
 /// The `Agent` struct represents an agent that interacts with a chat model.
 ///
@@ -292,7 +290,7 @@ impl Agent {
             model: None,
             toolbox: None,
             max_iterations: DEFAULT_MAX_ITERATIONS,
-            chat_options: ChatOptions::default().with_temperature(DEFAULT_TEMPERATURE),
+            chat_options: ChatOptions::default(),
         }
     }
 
@@ -331,8 +329,6 @@ impl Agent {
     /// Sets the [`ChatOptions`] sent with every request, for example temperature, max tokens,
     /// [tool choice](ToolChoice) or [reasoning effort](ReasoningEffort).
     ///
-    /// The options replace the defaults, including the default temperature
-    /// ([`DEFAULT_TEMPERATURE`]); set `with_temperature` yourself if you want to keep one.
     /// For structured output (`D` other than `String`), the run always sets the response
     /// format itself.
     pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {
@@ -367,6 +363,9 @@ impl Agent {
 
     /// Prepares a run: sends `prompt` to the model, runs the tools the model asks for and
     /// returns the final answer as `D`.
+    ///
+    /// The prompt is text (`&str`, `String`) or a [`Prompt`](crate::Prompt) with images or
+    /// other media for vision models; see [`IntoPrompt`].
     ///
     /// Configure the returned [`AgentRequest`] with its `with_*` methods, then `.await` it to
     /// get a [`AgentResult`]. [`run_stream`](Agent::run_stream) takes the same configuration and
@@ -409,8 +408,8 @@ impl Agent {
     /// answers in plain text, with any other type the model is asked for JSON matching its schema.
     ///
     /// For more information go to [crate::structured_output]
-    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Complete> {
-        AgentRequest::new(self, prompt.into())
+    pub fn run<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Complete> {
+        AgentRequest::new(self, prompt.into_prompt())
     }
 
     /// Prepares a streamed run. It takes the same configuration as [`run`](Agent::run), but
@@ -441,7 +440,7 @@ impl Agent {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn run_stream<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Streaming> {
-        AgentRequest::new(self, prompt.into())
+    pub fn run_stream<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Streaming> {
+        AgentRequest::new(self, prompt.into_prompt())
     }
 }

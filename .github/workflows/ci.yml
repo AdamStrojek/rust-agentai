@@ -50,14 +50,6 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        llm:
-          - name: nemotron-3.5-super-vl
-            base_url: https://openrouter.ai/api/v1/
-            model: nvidia/nemotron-3.5-super-vl:free
-            key_secret: OPENROUTER_API_KEY
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -79,11 +71,9 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Run tests
         env:
-          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
-          AGENTAI_MODEL: ${{ matrix.llm.model }}
-          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          AGENTAI_MODEL: claude-haiku-5-5
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           RUST_BACKTRACE: 1
         run: cargo test
 
@@ -92,19 +82,6 @@ jobs:
       false
       # Disable temprary, examples are runned with doc tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        llm:
-          - name: nemotron-3.5-super-vl
-            base_url: https://openrouter.ai/api/v1/
-            model: nvidia/nemotron-3.5-super-vl:free
-            key_secret: OPENROUTER_API_KEY
-          # - name: gemini-2.5-flash
-          #   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
-          #   model: gemini-2.5-flash
-          #   key_secret: GOOGLE_API_KEY
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -130,9 +107,8 @@ jobs:
 
       - name: Run examples and collect logs
         env:
-          AGENTAI_BASE_URL: ${{ matrix.llm.base_url }}
-          AGENTAI_MODEL: ${{ matrix.llm.model }}
-          AGENTAI_API_KEY: ${{ secrets[matrix.llm.key_secret] }}
+          AGENTAI_MODEL: claude-haiku-5-5
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           RUST_BACKTRACE: 1
         run: ./scripts/run-examples.sh
@@ -141,5 +117,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: example-logs-${{ matrix.llm.name }}
+          name: example-logs
           path: logs/*.log

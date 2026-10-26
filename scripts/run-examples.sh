@@ -6,14 +6,14 @@
 #   and exits with a non-zero status code if any example fails.
 #
 # Environment Variables:
-#   - AGENTAI_BASE_URL: The base URL for the AI model's API.
-#   - AGENTAI_API_KEY: The API key for authentication.
-#   - AGENTAI_MODEL: The identifier for the model to be used.
+#   - AGENTAI_MODEL: The model to use, as a genai model name. The provider comes from the
+#     name (for example `claude-haiku-5-5` or `omlx::Qwen3.8-27B-4bit`), its API key and
+#     endpoint from the provider's environment variables (for example `ANTHROPIC_API_KEY`,
+#     `OMLX_ENDPOINT`).
 #
 # Usage:
-#   export AGENTAI_BASE_URL="your_base_url"
-#   export AGENTAI_API_KEY="your_api_key"
-#   export AGENTAI_MODEL="your_model"
+#   export AGENTAI_MODEL="claude-haiku-5-5"
+#   export ANTHROPIC_API_KEY="your_api_key"
 #   ./scripts/run-examples.sh
 
 # Ensure that the exit code of a pipeline is the exit code of the last command to exit with a non-zero status.
@@ -24,8 +24,8 @@ LOG_DIR="logs"
 FINAL_EXIT_CODE=0
 
 # --- Pre-flight Checks ---
-if [[ -z "$AGENTAI_BASE_URL" || -z "$AGENTAI_API_KEY" || -z "$AGENTAI_MODEL" ]]; then
-  echo "Error: Please set the required environment variables: AGENTAI_BASE_URL, AGENTAI_API_KEY, AGENTAI_MODEL" >&2
+if [[ -z "$AGENTAI_MODEL" ]]; then
+  echo "Error: Please set the required environment variable: AGENTAI_MODEL" >&2
   exit 1
 fi
 

@@ -27,12 +27,10 @@ async fn main() -> Result<()> {
     info!("Question: {}", question);
 
     let api_key = std::env::var("OPENROUTER_API_KEY")?;
-    let model =
-        std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
 
     // `None` keeps the default OpenRouter endpoint
     let agent = Agent::new_with_provider(Provider::OpenRouter, None, &api_key, SYSTEM)?
-        .with_model(&model)
+        .with_model("nvidia/nemotron-3.5-super-vl:free")
         .with_toolbox(CurrentDateAndTimeToolBox {});
 
     let result: AgentResult<String> = agent.run(question).await?;

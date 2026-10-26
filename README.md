@@ -28,6 +28,7 @@ This library is under heavy development. The interface may change at any time wi
 - **MCP Server Support, local and remote**: Use tools from any Model Context Protocol server, whether you start it locally over **stdio** or connect to a running or hosted server over **Streamable HTTP** (with optional bearer token). Built on the official MCP Rust SDK.
 - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
+- **Images for vision models**: Send text and images together in a `Prompt`, by URL or from bytes. Plain text prompts work as before.
 - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New
@@ -131,6 +132,17 @@ async fn main() -> anyhow::Result<()> {
     history.extend(result.new_messages);
     Ok(())
 }
+```
+
+Models that support images take a `Prompt` with text and images, by URL or from bytes:
+
+```rust
+use agentai::{Agent, AgentResult, Prompt};
+
+let prompt = Prompt::text("Which of these logos is brighter?")
+    .with_image_url("https://example.com/logo.png")
+    .with_image_bytes("image/png", &png);
+let result: AgentResult<String> = agent.run(prompt).await?;
 ```
 
 To show the answer while it is written, use `run_stream` with the same configuration and

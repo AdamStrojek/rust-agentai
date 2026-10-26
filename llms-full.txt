@@ -73,8 +73,8 @@ Other builder methods: `with_toolbox_arc(Arc<dyn ToolBox>)` for a toolbox you al
 
 ```rust
 impl Agent {
-    pub fn run<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Complete>;
-    pub fn run_stream<D>(&self, prompt: impl Into<String>) -> AgentRequest<'_, D, Streaming>;
+    pub fn run<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Complete>;
+    pub fn run_stream<D>(&self, prompt: impl IntoPrompt) -> AgentRequest<'_, D, Streaming>;
 }
 ```
 
@@ -112,11 +112,10 @@ use agentai::{Agent, Message, AgentResult};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let base_url = std::env::var("AGENTAI_BASE_URL")?;
-    let api_key = std::env::var("AGENTAI_API_KEY")?;
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or("nvidia/nemotron-3.5-super-vl:free".to_string());
+    // The provider comes from the model name; the key from its environment variable (ANTHROPIC_API_KEY)
+    let model = std::env::var("AGENTAI_MODEL").unwrap_or("claude-haiku-5-5".to_string());
 
-    let agent = Agent::new_with_url(&base_url, &api_key, "You are a useful assistant")?.with_model(&model);
+    let agent = Agent::new("You are a useful assistant")?.with_model(&model);
 
     let mut history: Vec<Message> = Vec::new();
     let result: AgentResult<String> = agent.run("Why is the sky blue?").with_history(&history).await?;
@@ -129,6 +128,25 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+### Images in the prompt
+
+The prompt is anything that implements `IntoPrompt`: text (`&str`, `String`, `&String` and every other `Into<String>` type), a single `Media`, or a `Prompt` that combines text and media in order. Use a `Prompt` to send images to a model that supports them (vision); `agentai` does not check it, a model without vision support usually answers with an error.
+
+```rust
+use agentai::{AgentResult, Media, Prompt};
+
+let prompt = Prompt::text("What is in this picture?")
+    .with_image_url("https://example.com/cat.png")          // the provider downloads it
+    .with_text("And how does it compare to this one?")
+    .with_image_bytes("image/png", &std::fs::read("dog.png")?) // sent base64 encoded
+    .with_media(Media::from_url("image/webp", "https://example.com/a?id=1"));
+let result: AgentResult<String> = agent.run(prompt).with_history(&history).await?;
+```
+
+- `Prompt::new()`, `Prompt::text(text)`, `.with_text(text)`, `.with_media(Media)`, `.with_image_url(url)`, `.with_image_bytes(content_type, bytes)`; read with `.parts()` (`Part::Text` and `Part::Media` only).
+- `Media::image_url(url)` guesses the MIME type from the extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, otherwise `image/jpeg`); `Media::from_url(content_type, url)` sets it yourself (Gemini needs the right type). Not every provider accepts URLs; use `Media::from_bytes(content_type, bytes)` (or `Media::from_base64` for data that is already encoded) then. `.with_name(name)` sets a file name, `.is_image()` checks the type.
+- The prompt becomes the first message of `result.new_messages`, images included, so follow-up questions in the same history can refer to them. Large images make every later request of the conversation bigger.
 
 ### History
 
@@ -212,7 +230,7 @@ match agent.run::<String>(question).with_history(&history).await {
 
 ## Configuration
 
-Every constructor returns an agent with the defaults: at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and temperature 0.2 (`DEFAULT_TEMPERATURE`). Change them with the builder methods:
+Every constructor returns an agent that makes at most 5 model calls per run (`DEFAULT_MAX_ITERATIONS`) and sends no model options of its own. Change both with the builder methods:
 
 ```rust
 use agentai::{Agent, ChatOptions, ReasoningEffort, ToolChoice};
@@ -230,7 +248,7 @@ let agent = Agent::new("You are a useful assistant")?
 ```
 
 - `with_max_iterations(n)`: maximum model calls in one run. Every reply with tool calls uses one, so raise it for tasks with many tool rounds. `0` makes a run fail at once with `MaxIterationsReached(0)`.
-- `with_chat_options(options)`: `ChatOptions` sent with every request. They replace the defaults, including temperature 0.2. For structured output, the run always sets the response format itself.
+- `with_chat_options(options)`: `ChatOptions` sent with every request. For structured output, the run always sets the response format itself.
 - `ChatOptions` (`#[non_exhaustive]`, `Default`) has `temperature`, `max_tokens`, `top_p`, `stop_sequences`, `tool_choice` (`ToolChoice::{Auto, None, Required, Tool(name)}`) and `reasoning_effort` (`ReasoningEffort::{Low, Medium, High, Budget(tokens)}`), each with a `with_*` setter.
 - `max_iterations()` and `chat_options()` return the current values.
 - Any of these can be replaced for a single run, see Asking a question.
@@ -445,6 +463,6 @@ The server's tool list is read once, when the toolbox is created.
 
 ## Limits in 0.3.0
 
-- The prompt is text only; images or other parts in the prompt are not supported yet (put them in the history yourself as `Part::Media` in a `Message`).
+- Tool results are text only; a tool cannot return an image to the model.
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.
 - There is no way to plug in a custom LLM client; use `new_with_url` or `new_with_provider`.

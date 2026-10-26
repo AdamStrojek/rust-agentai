@@ -284,20 +284,6 @@ async fn zero_iterations_do_not_call_the_model() {
 }
 
 #[tokio::test]
-async fn default_options_send_the_default_temperature() {
-    let llm = MockLlm::start(vec![text_reply("hi")]).await;
-
-    let agent = llm.agent();
-    assert_eq!(agent.max_iterations(), DEFAULT_MAX_ITERATIONS);
-    let _: AgentResult<String> = agent.run("question").await.unwrap();
-
-    assert_eq!(
-        request_json(&llm, 0)["temperature"],
-        json!(DEFAULT_TEMPERATURE)
-    );
-}
-
-#[tokio::test]
 async fn chat_options_are_sent_with_every_request() {
     let llm = MockLlm::start(vec![text_reply("hi")]).await;
     let options = ChatOptions::default()
@@ -1057,5 +1043,37 @@ async fn a_listener_error_stops_the_run() {
     match err {
         AgentError::Listener(source) => assert_eq!(source.to_string(), "window closed"),
         other => panic!("expected AgentError::Listener, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn images_in_the_prompt_are_sent_and_kept_in_the_messages() {
+    let llm = MockLlm::start(vec![
+        text_reply("a logo"),
+        streamed_text_reply(&["a ", "logo"]),
+    ])
+    .await;
+    let agent = llm.agent();
+    let prompt = crate::Prompt::text("What is this?")
+        .with_image_url("https://example.com/logo.png")
+        .with_image_bytes("image/png", b"hi");
+
+    let result: AgentResult<String> = agent.run(prompt.clone()).await.unwrap();
+    let stream = agent.run_stream::<String>(prompt.clone()).await.unwrap();
+    let streamed = stream.finish().await.unwrap();
+
+    let expected = json!([
+        {"type": "text", "text": "What is this?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/logo.png"}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+    ]);
+    for (index, new_messages) in [result.new_messages, streamed.new_messages]
+        .iter()
+        .enumerate()
+    {
+        let user = &request_json(&llm, index)["messages"][1];
+        assert_eq!(user["role"], json!("user"));
+        assert_eq!(user["content"], expected);
+        assert_eq!(new_messages[0].parts, prompt.parts());
     }
 }
