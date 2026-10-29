@@ -30,7 +30,6 @@ impl ImageSink for ImageDir {
                 }
             }
             MediaSource::Url(url) => return println!("{name} is at {url}"),
-            _ => return,
         };
         let path = self.0.join(&name);
         match std::fs::write(&path, bytes) {
