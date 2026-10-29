@@ -1,6 +1,7 @@
 //! The agent loop shared by every way of running an agent.
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
+use crate::convert::{FromGenai, IntoGenai};
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::prompt::Prompt;
 use crate::tool::{ToolBox, ToolOutput};
@@ -51,7 +52,7 @@ where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
     try_stream! {
-        let prompt = prompt.into_message();
+        let prompt = Message::from(prompt);
         let media = prompt.parts.iter().filter(|part| matches!(part, Part::Media(_))).count();
         debug!("Agent Question: {} ({media} media)", prompt.text().unwrap_or_default());
         let mut new_messages = vec![prompt];

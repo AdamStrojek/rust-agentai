@@ -244,9 +244,10 @@
 extern crate self as agentai;
 
 pub mod agent;
+mod convert;
 pub mod listener;
-pub mod message;
-pub mod prompt;
+#[doc(inline)]
+pub use agentai_core::{message, prompt};
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.

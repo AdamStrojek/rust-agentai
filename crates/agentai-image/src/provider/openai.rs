@@ -112,7 +112,6 @@ impl OpenAiImageProvider {
                 }
                 Ok(response.body)
             }
-            _ => Err(ImageError::Unsupported("this media source")),
         }
     }
 }

@@ -1,10 +1,10 @@
 //! # Prompts
 //!
 //! A [`Prompt`] is what you send to the model in a run: text, images or other media, in order.
-//! [`Agent::run`](crate::Agent::run) and [`Agent::run_stream`](crate::Agent::run_stream) take
-//! anything that implements [`IntoPrompt`], so plain text works as before:
+//! `Agent::run` and `Agent::run_stream` of `agentai` take anything that implements
+//! [`IntoPrompt`], so plain text works as before:
 //!
-//! ```no_run
+//! ```ignore
 //! use agentai::{Agent, AgentResult, Media, Prompt};
 //!
 //! # async fn example(agent: Agent, png: Vec<u8>) -> Result<(), agentai::AgentError> {
@@ -72,10 +72,12 @@ impl Prompt {
     pub fn parts(&self) -> &[Part] {
         &self.parts
     }
+}
 
-    /// Returns the user message sent to the model.
-    pub(crate) fn into_message(self) -> Message {
-        Message::new(Role::User, self.parts)
+/// The user message sent to the model.
+impl From<Prompt> for Message {
+    fn from(prompt: Prompt) -> Self {
+        Message::new(Role::User, prompt.parts)
     }
 }
 
