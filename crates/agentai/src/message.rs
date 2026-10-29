@@ -8,6 +8,7 @@
 //! Messages implement `Serialize` and `Deserialize` with a format defined by this crate, so a
 //! stored history keeps working when the LLM client used inside `agentai` changes.
 
+use crate::tool::ToolOutput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -60,15 +61,7 @@ impl Message {
 
     /// Returns the text parts joined together, or `None` when the message has no text.
     pub fn text(&self) -> Option<String> {
-        let texts: Vec<&str> = self
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                Part::Text(text) => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        (!texts.is_empty()).then(|| texts.concat())
+        joined_text(&self.parts)
     }
 
     /// Returns the tool calls in the message.
@@ -141,19 +134,56 @@ pub struct ToolResponse {
     pub call_id: String,
     /// Name of the tool.
     pub name: String,
-    /// Result sent to the model.
-    pub content: String,
+    /// Result sent to the model: [`Part::Text`] and [`Part::Media`] parts, in order.
+    ///
+    /// Providers that do not accept media in tool results get only the text.
+    #[serde(deserialize_with = "deserialize_tool_content")]
+    pub content: Vec<Part>,
 }
 
 impl ToolResponse {
     /// Creates the result of `call`.
-    pub fn new(call: &ToolCall, content: impl Into<String>) -> Self {
+    pub fn new(call: &ToolCall, content: impl Into<ToolOutput>) -> Self {
         Self {
             call_id: call.id.clone(),
             name: call.name.clone(),
-            content: content.into(),
+            content: content.into().parts,
         }
     }
+
+    /// Returns the text parts joined together, or `None` when the result has no text.
+    pub fn text(&self) -> Option<String> {
+        joined_text(&self.content)
+    }
+}
+
+/// Reads `content` as a list of parts, or as a plain string (the format before 0.5.0).
+fn deserialize_tool_content<'de, D>(deserializer: D) -> Result<Vec<Part>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Content {
+        Text(String),
+        Parts(Vec<Part>),
+    }
+    Ok(match Content::deserialize(deserializer)? {
+        Content::Text(text) => vec![Part::Text(text)],
+        Content::Parts(parts) => parts,
+    })
+}
+
+/// Joins the text parts, `None` when there are none.
+pub(crate) fn joined_text(parts: &[Part]) -> Option<String> {
+    let texts: Vec<&str> = parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    (!texts.is_empty()).then(|| texts.concat())
 }
 
 /// An image, audio or other file in a message.
@@ -290,7 +320,10 @@ impl ToolCall {
 impl ToolResponse {
     pub(crate) fn into_genai(self) -> genai::chat::ToolResponse {
         let response = self;
-        let mut out = genai::chat::ToolResponse::new(response.call_id, response.content);
+        let content: Vec<ContentPart> =
+            response.content.into_iter().map(Part::into_genai).collect();
+        let mut out =
+            genai::chat::ToolResponse::new(response.call_id, MessageContent::from_parts(content));
         out.fn_name = Some(response.name);
         out
     }
@@ -301,7 +334,12 @@ impl ToolResponse {
         Self {
             call_id: response.call_id,
             name: response.fn_name.unwrap_or_default(),
-            content: response.content,
+            content: response
+                .content
+                .into_parts()
+                .into_iter()
+                .map(Part::from_genai)
+                .collect(),
         }
     }
 }
@@ -420,6 +458,11 @@ mod tests {
                 Part::Text("hello".into()),
                 Part::ToolCall(call.clone()),
                 Part::ToolResponse(ToolResponse::new(&call, "result")),
+                Part::ToolResponse(ToolResponse::new(
+                    &call,
+                    ToolOutput::from_text("an image")
+                        .with_media(Media::new("image/png", MediaSource::Base64("aGk=".into()))),
+                )),
                 Part::Media(Media::new("image/png", MediaSource::Base64("aGk=".into()))),
                 Part::Media(Media::new(
                     "image/png",
@@ -446,6 +489,18 @@ mod tests {
         let message = every_part();
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), message);
+    }
+
+    #[test]
+    fn tool_responses_stored_before_0_5_still_load() {
+        let json = r#"{"role":"tool","parts":[{"type":"tool_response",
+            "value":{"call_id":"call_1","name":"echo","content":"result"}}]}"#;
+        let message: Message = serde_json::from_str(json).unwrap();
+        let call = ToolCall::new("call_1", "echo", json!({}));
+        assert_eq!(
+            message,
+            Message::tool_response(ToolResponse::new(&call, "result"))
+        );
     }
 
     #[test]

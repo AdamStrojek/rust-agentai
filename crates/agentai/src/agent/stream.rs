@@ -4,6 +4,7 @@ use super::core::finish;
 use super::{AgentError, AgentResult};
 use crate::listener::{AsyncEventListener, EventListener, Printer, RunEvent};
 use crate::message::ToolCall;
+use crate::tool::ToolOutput;
 use futures_util::{Stream, StreamExt};
 use std::io::Write;
 use std::pin::Pin;
@@ -31,7 +32,7 @@ pub enum AgentEvent<D> {
         /// Name of the tool.
         tool: String,
         /// Result sent to the model: the tool's output, or the error message.
-        content: String,
+        content: ToolOutput,
         /// `true` when the tool failed. A recoverable error is sent to the model, which can
         /// try again; a fatal error ends the stream with [`AgentError::Tool`] after this event.
         is_error: bool,
