@@ -19,6 +19,10 @@
 //! - [crate::tool::buildin]: Provides a set of useful built-in tools. (Requires the `tools-buildin` feature).
 //! - [crate::tool::mcp]: Provides a `ToolBox` for interacting with the MCP Client. (Requires the `mcp-client` feature).
 //! - [crate::tool::web]: Provides toolboxes for interacting with the web, such as searching and fetching content. (Requires the `tools-web` feature).
+//! - [`agentai-image`](https://docs.rs/agentai-image) (a separate crate): `ImageToolBox` with tools to generate and edit
+//!   images, for OpenAI and compatible APIs. Add it with `cargo add agentai-image`.
+//!
+//! A tool returns text, or a [`ToolOutput`] with text and images for the model.
 //!
 //! For examples demonstrating how to use tools and toolboxes, look into the `examples` folder.
 //! Examples related to tools typically start with the `tools_*` prefix, e.g., [crate::examples::tools_mcp].
@@ -34,6 +38,7 @@ pub mod mcp;
 #[cfg(feature = "tools-web")]
 pub mod web;
 
+use crate::message::{Media, Part, joined_text};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -106,7 +111,102 @@ impl Tool {
     }
 }
 
-pub type ToolResult = Result<String, ToolError>;
+/// Result of a tool. Tool methods in a [`#[toolbox]`](crate::tool::toolbox) usually return
+/// `ToolResult` (text) or `ToolResult<ToolOutput>` (text and images);
+/// [`ToolBox::call_tool`] returns `ToolResult<ToolOutput>`.
+pub type ToolResult<T = String> = Result<T, ToolError>;
+
+/// What a tool sends back to the model: text and media (for example a generated image), in
+/// order.
+///
+/// Text converts into it, so a tool that only returns text can keep returning a `String`.
+/// Providers that do not accept media in tool results get only the text parts.
+///
+/// ```rust
+/// # use agentai::Media;
+/// # use agentai::tool::ToolOutput;
+/// let png = [0x89, b'P', b'N', b'G'];
+/// let output = ToolOutput::from_text("Here is the chart")
+///     .with_media(Media::from_bytes("image/png", png));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ToolOutput {
+    /// [`Part::Text`] and [`Part::Media`] parts.
+    pub parts: Vec<Part>,
+}
+
+impl ToolOutput {
+    /// Creates an output with text.
+    pub fn from_text(text: impl Into<String>) -> Self {
+        Self::default().with_text(text)
+    }
+
+    /// Creates an output with one media part.
+    pub fn from_media(media: Media) -> Self {
+        Self::default().with_media(media)
+    }
+
+    /// Appends text.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.parts.push(Part::Text(text.into()));
+        self
+    }
+
+    /// Appends media.
+    pub fn with_media(mut self, media: Media) -> Self {
+        self.parts.push(Part::Media(media));
+        self
+    }
+
+    /// Returns the text parts joined together, or `None` when there is no text.
+    pub fn text(&self) -> Option<String> {
+        joined_text(&self.parts)
+    }
+
+    /// Returns the media parts.
+    pub fn media(&self) -> Vec<&Media> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                Part::Media(media) => Some(media),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// Text parts as they are, media as `[content type]`, for example `[image/png]`.
+impl std::fmt::Display for ToolOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for part in &self.parts {
+            match part {
+                Part::Text(text) => f.write_str(text)?,
+                Part::Media(media) => write!(f, "[{}]", media.content_type)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<String> for ToolOutput {
+    fn from(text: String) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl From<&str> for ToolOutput {
+    fn from(text: &str) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl From<Media> for ToolOutput {
+    fn from(media: Media) -> Self {
+        Self::from_media(media)
+    }
+}
 
 // Re-export tool and toolbox macros, they are used to generate auto implementation of
 #[cfg(feature = "macros")]
@@ -156,9 +256,9 @@ pub trait ToolBox: Send + Sync + 'static {
     /// * `arguments` - A JSON `Value` containing the arguments for the tool call.
     ///
     /// # Returns
-    /// A `Result` containing the tool's output as a `String` on success,
+    /// A `Result` containing the tool's [`ToolOutput`] on success,
     /// or a `ToolError` if the tool call fails or the tool is not found.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult;
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput>;
 }
 
 /// Errors that can occur when working with `ToolBox`es and tools.
@@ -268,7 +368,7 @@ impl ToolBox for ToolBoxSet {
     /// It finds the correct `ToolBox` that contains the tool and delegates the call.
     /// If multiple toolboxes contain a tool with the same name, the one that was
     /// added first will be used.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
         for toolbox in &self.toolboxes {
             match toolbox
                 .call_tool(tool_name.clone(), arguments.clone())

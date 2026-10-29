@@ -42,6 +42,7 @@
 
 use crate::agent::{StopReason, Usage};
 use crate::message::{Message, ToolCall};
+use crate::tool::ToolOutput;
 use async_trait::async_trait;
 use std::io::Write;
 
@@ -70,7 +71,7 @@ pub enum RunEvent<'a> {
         /// Name of the tool.
         tool: &'a str,
         /// Result sent to the model: the tool's output, or the error message.
-        content: &'a str,
+        content: &'a ToolOutput,
         /// `true` when the tool failed.
         is_error: bool,
     },

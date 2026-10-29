@@ -73,7 +73,9 @@ use syn::{
 /// #### 2.2. Requirements and Limitations
 ///
 /// - **Method Receiver**: Exposed tools must be methods that take `&self` as the first argument. Static methods are not supported.
-/// - **Return Type**: The return type must be `ToolResult` which is `Result<String, ToolError>`.
+/// - **Return Type**: The return type must be `ToolResult<T>` (`Result<T, ToolError>`) where `T`
+///   converts into `ToolOutput`: `ToolResult` (text, `T = String`) or `ToolResult<ToolOutput>`
+///   for results with images.
 /// - **Serializable Parameters**: All method parameters must be (de)serializable by `serde`.
 ///
 /// ### 3. Advanced Configuration
@@ -456,6 +458,8 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 if method.sig.asyncness.is_some() {
                     method_call.extend(quote! {.await});
                 }
+                // A method may return text or a `ToolOutput`
+                method_call.extend(quote! {.map(::core::convert::Into::into)});
 
                 match_arms.extend(quote! {
                     #tool_name => {
@@ -483,7 +487,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 ])
             }
 
-            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> ToolResult {
+            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> Result<::agentai::tool::ToolOutput, ToolError> {
                  match tool_name.as_str() {
                      #match_arms
                      _ => {

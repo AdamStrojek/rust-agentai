@@ -14,7 +14,7 @@
 //! text, the structured content is returned as JSON. Images, audio and embedded resources are
 //! not forwarded: each one is replaced by a short placeholder such as `[image omitted]`.
 
-use crate::tool::{Tool, ToolBox, ToolError};
+use crate::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
 use async_trait::async_trait;
 use log::trace;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
@@ -160,7 +160,7 @@ impl ToolBox for McpToolBox {
         Ok(self.tools.clone())
     }
 
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> Result<String, ToolError> {
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
         // Lets `ToolBoxSet` try the next toolbox for tools this server does not have
         if !self.tools.iter().any(|t| t.name.as_str() == tool_name) {
             return Err(ToolError::NotFound(tool_name));
@@ -200,7 +200,7 @@ impl ToolBox for McpToolBox {
             // The server reports a tool-level failure; pass its message to the model
             return Err(ToolError::Failed(text));
         }
-        Ok(text)
+        Ok(text.into())
     }
 }
 
@@ -264,7 +264,7 @@ mod tests {
             .await?;
 
         // Assert that the result is a non-empty string (the converted time)
-        assert!(!result.is_empty());
+        assert!(!result.text().unwrap_or_default().is_empty());
 
         Ok(())
     }

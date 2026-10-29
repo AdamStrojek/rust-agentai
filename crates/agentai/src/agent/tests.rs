@@ -1,7 +1,7 @@
 use super::*;
 use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
 use crate::message::Message;
-use crate::tool::{Tool, ToolResult};
+use crate::tool::{Tool, ToolOutput, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -147,7 +147,7 @@ impl ToolBox for FailingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult {
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
         Err((self.make_error)())
     }
 }
@@ -408,9 +408,62 @@ impl ToolBox for EchoToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult {
-        Ok("echoed".to_string())
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
+        Ok("echoed".into())
     }
+}
+
+/// Toolbox with one tool, `echo`, that returns text and an image.
+struct ImageToolBox;
+
+#[async_trait]
+impl ToolBox for ImageToolBox {
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        Ok(vec![Tool::new("echo")])
+    }
+
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
+        Ok(ToolOutput::from_text("image-1.png")
+            .with_media(crate::Media::from_base64("image/png", "aGk=")))
+    }
+}
+
+#[tokio::test]
+async fn tool_images_stay_in_the_history_and_text_reaches_text_only_providers() {
+    let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
+
+    let result: AgentResult<String> = llm
+        .agent()
+        .with_toolbox(ImageToolBox)
+        .run("question")
+        .await
+        .unwrap();
+
+    // The OpenAI chat API takes no images in tool results: only the text is sent
+    let messages = request_json(&llm, 1)["messages"].clone();
+    let tool_message = messages
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == json!("tool"))
+        .unwrap();
+    assert_eq!(tool_message["content"], json!("image-1.png"));
+    // The run's messages keep the image, for providers that accept it and for the caller
+    let response = result
+        .new_messages
+        .iter()
+        .flat_map(|m| &m.parts)
+        .find_map(|part| match part {
+            crate::Part::ToolResponse(response) => Some(response),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        response.content,
+        ToolOutput::from_text("image-1.png")
+            .with_media(crate::Media::from_base64("image/png", "aGk="))
+            .parts
+    );
 }
 
 fn sse(chunks: Vec<Value>) -> (u16, String) {
@@ -751,9 +804,9 @@ impl ToolBox for CountingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult {
+    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
         *self.0.lock().unwrap() += 1;
-        Ok("echoed".to_string())
+        Ok("echoed".into())
     }
 }
 

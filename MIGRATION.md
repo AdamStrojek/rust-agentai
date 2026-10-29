@@ -7,9 +7,55 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.4.0 → 0.5.0 (YYYY-MM-DD)](#040--050-yyyy-mm-dd)
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.4.0 → 0.5.0 (YYYY-MM-DD)
+
+### Tools return `ToolOutput`
+
+Tool results can carry images, so `ToolBox::call_tool` returns `ToolResult<ToolOutput>` instead of
+`Result<String, ToolError>`. Text converts into `ToolOutput`.
+
+Methods in a `#[toolbox]` that return `ToolResult` (text) need no change. A hand-written `ToolBox`:
+
+```rust
+// 0.4.0
+async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+    Ok("echoed".to_string())
+}
+```
+
+```rust
+// 0.5.0
+use agentai::tool::ToolOutput;
+
+async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
+    Ok("echoed".into())
+}
+```
+
+Code that calls `call_tool` itself reads the text with `.text()` (`Option<String>`).
+
+### Tool results in the history and in events
+
+`ToolResponse::content` is a `Vec<Part>` (text and media) instead of a `String`, and the `content` of
+`AgentEvent::ToolResult` and `RunEvent::ToolResult` is a `ToolOutput` (`&ToolOutput`). Both print
+with `{}` as before; read the text with `.text()`.
+
+```rust
+// 0.4.0
+AgentEvent::ToolResult { content, .. } => log(&content),
+```
+
+```rust
+// 0.5.0
+AgentEvent::ToolResult { content, .. } => log(&content.text().unwrap_or_default()),
+```
+
+Histories stored with 0.4.0 still load: a tool result saved as a string becomes one text part.
 
 ## 0.3.1 → 0.4.0 (2026-10-26)
 
