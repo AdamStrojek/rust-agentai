@@ -326,6 +326,9 @@ impl ProviderData {
 /// Text converts into it, so a tool that only returns text can keep returning a `String`.
 /// Providers that do not accept media in tool results get only the text parts.
 ///
+/// There is no structured (JSON) output: a tool that produces data converts it to text itself,
+/// for example with `serde_json::to_string`, in the format it wants the model to read.
+///
 /// ```rust
 /// # use agentai_core::message::{Media, ToolOutput};
 /// let png = [0x89, b'P', b'N', b'G'];
