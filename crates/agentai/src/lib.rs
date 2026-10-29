@@ -26,16 +26,21 @@
 //!
 //! #### 0.5.0 - Image generation, images in tool results
 //!
-//! - **Agents that draw**: the new [`agentai-image`](https://docs.rs/agentai-image) crate has
-//!   `ImageToolBox` with the `generate_image` and `edit_image` tools.
-//!   `ImageToolBox::new("openai::gpt-image-1")?` takes the provider from the model name and the key from
-//!   `OPENAI_API_KEY`; OpenAI-compatible APIs work with your own base URL. The image goes back to the model,
-//!   and an optional `ImageSink` saves every image (a directory, your UI, ...).
+//! - **Image generation and editing**: the new [`agentai-image`](https://docs.rs/agentai-image) crate has
+//!   `ImageGenerator` to make and edit images from your code: `ImageGenerator::new("openai::gpt-image-1")?`
+//!   takes the provider from the model name and the key from `OPENAI_API_KEY`; OpenAI-compatible servers work
+//!   with `OPENAI_BASE_URL` or a base URL set in code.
+//! - **Agents that draw**: `GenerateImageToolBox` gives the agent `generate_image` and `edit_image`. The model
+//!   gets the image itself, or only its metadata as JSON to save tokens. `ReadMediaToolBox` lets the model read
+//!   any stored file by its ID.
+//! - **Media storage**: `MediaRead` and `MediaSave` (in `agentai-core`) store images and other files under an
+//!   ID; implement them for your blob store or directory, or use `MemoryStorage`.
 //! - **Tools can return images**: a tool returns a [`ToolOutput`](crate::tool::ToolOutput) with text and
 //!   [`Media`](crate::Media) parts, for example a chart or a screenshot. Providers that accept images in tool
 //!   results (Anthropic, Gemini, OpenAI Responses, Bedrock, Ollama) get them, others get the text. `#[toolbox]`
 //!   methods return `ToolResult<ToolOutput>` for that; methods that return text stay as they are.
-//! - Internal: the new `agentai-core` crate holds the HTTP client abstraction used by `agentai-image`, so it
+//! - Internal: the new `agentai-core` crate holds the shared types (`Message`, `Prompt`, `Media`, still
+//!   available from `agentai` under the same paths) and the HTTP client abstraction used by `agentai-image`, so it
 //!   can later run on other HTTP stacks, such as WebAssembly.
 //!
 //! **Breaking changes**: `ToolBox::call_tool` returns `ToolResult<ToolOutput>`, and `ToolResponse::content` and

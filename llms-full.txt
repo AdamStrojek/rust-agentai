@@ -449,32 +449,44 @@ let fetch = WebFetchToolBox::new();                                    // tool: 
 
 ### Images (`agentai-image` crate)
 
-Image generation and editing is a separate crate: `cargo add agentai-image`.
+Image generation and editing is a separate crate: `cargo add agentai-image`. Without an agent:
 
 ```rust
-use agentai_image::{ImageResponse, ImageSink, ImageToolBox};
+use agentai_image::ImageGenerator;
 
-struct Saver;
-
-#[async_trait::async_trait]
-impl ImageSink for Saver {
-    async fn save(&self, image: &ImageResponse) {
-        // image.image is an agentai::Media named `image-N.png`; image.revised_prompt is optional
-    }
-}
-
-let images = ImageToolBox::new("openai::gpt-image-1")? // key from OPENAI_API_KEY, base URL from OPENAI_BASE_URL
+// Key from OPENAI_API_KEY, base URL from OPENAI_BASE_URL (the key may be left out for local servers)
+let generator = ImageGenerator::new("openai::gpt-image-1")?
     .with_size("1024x1024")
-    .with_quality("low")
-    .with_sink(Saver);
-let agent = agent.with_toolbox(images);
+    .with_quality("low");
+let response = generator.generate("A lighthouse at dawn").await?; // ImageResponse
+// response.image: agentai::Media (base64 or URL), response.revised_prompt, response.id (with a storage)
+let edited = generator.edit("Add a sailing boat", vec![response.image]).await?;
 ```
 
-- Tools: `generate_image(prompt)`, and `edit_image(prompt, images)` when you pass `.with_source(ImageSource)`: `ImageSource::load(&self, name) -> Result<Media, ToolError>` turns the names the model gives (`image-1.png` from an earlier result, or a name you told it) into images; return `ToolError::InvalidArguments` for unknown names.
-- The result of both is a `ToolOutput` with the image and a text with its name, so the model sees the image when its provider accepts images in tool results, and the image is in `result.new_messages`.
-- `ImageSink::save(&self, &ImageResponse)` only stores images; it returns nothing and cannot change the tool result.
-- Providers are in `agentai_image::provider`. `ImageToolBox::new(model)` picks one from a `provider::` prefix (`openai::...`) or a well-known name (`gpt-image-*`, `dall-e-*`). Set the key and base URL in code with `ImageToolBox::from_provider(OpenAiImageProvider::new(model, api_key, base_url))` (`agentai_image::provider::openai`), for example for an OpenAI-compatible server. Implement `provider::ImageProvider` (`generate`, optionally `supports_edit` and `edit`) for other APIs.
-- API errors: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request) go to the model as `ToolError::Failed`.
+For an agent (feature `toolbox`, on by default):
+
+```rust
+use agentai::tool::ToolBoxSet;
+use agentai_core::storage::MemoryStorage;
+use agentai_image::{GenerateImageToolBox, ImageGenerator, ImageToolOutput, ReadMediaToolBox};
+
+let storage = MemoryStorage::new(); // clones share the same storage
+let mut tools = ToolBoxSet::new();
+tools.add_tool(
+    GenerateImageToolBox::new(ImageGenerator::new("openai::gpt-image-1")?)
+        .with_storage(storage.clone())
+        .with_output(ImageToolOutput::Metadata), // or ImageToolOutput::Media (default)
+);
+tools.add_tool(ReadMediaToolBox::new(storage.clone()));
+let agent = agent.with_toolbox(tools);
+```
+
+- `GenerateImageToolBox` tools: `generate_image(prompt)`, and `edit_image(prompt, images)` (image IDs) when it has a storage and the provider can edit. With a storage every image is saved and the model gets its ID.
+- `ImageToolOutput::Media` returns the image and a text with its ID (providers without images in tool results get only the text); `ImageToolOutput::Metadata` returns only JSON, for example `{"id":"1-image.png","content_type":"image/png","bytes":1666956,"model":"gpt-image-1","prompt":"...","revised_prompt":"...","size":"1024x1024"}`.
+- `ReadMediaToolBox::new(impl MediaRead)`: tool `read_media(id)` returns the stored file to the model.
+- Storage (`agentai_core::storage`): `MediaSave::save(&self, &Media) -> Result<String, StorageError>` stores a file and returns the ID it chose; `MediaRead::read(&self, id) -> Result<Media, StorageError>`; a type with both is a `MediaStorage`. Return `StorageError::NotFound` for unknown IDs (the model gets `InvalidArguments` and can correct the ID). Both traits are implemented for `Arc<T>`, so one storage can be shared.
+- Providers are in `agentai_image::provider`. `ImageGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`) or a well-known name (`gpt-image-*`, `dall-e-*`). Set the key and base URL in code with `ImageGenerator::from_provider(OpenAiImageProvider::new(model, api_key, base_url))` (`agentai_image::provider::openai`). Implement `provider::ImageProvider` (`generate`, optionally `model`, `supports_edit` and `edit`) for other APIs.
+- API errors in the tools: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request or save) go to the model as `ToolError::Failed`.
 
 ### MCP servers (`mcp-client`)
 

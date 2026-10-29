@@ -1,168 +1,184 @@
-//! The image tools for agents.
+//! Agent tools (feature `toolbox`): [`GenerateImageToolBox`] and [`ReadMediaToolBox`].
 
-use crate::provider::{
-    self, ImageEditRequest, ImageError, ImageProvider, ImageRequest, ImageResponse,
-};
-use agentai::Media;
+use crate::generator::ImageGenerator;
+use crate::provider::{ImageEditRequest, ImageError, ImageRequest, ImageResponse};
 use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
+use agentai_core::message::{Media, MediaSource};
+use agentai_core::storage::{MediaRead, MediaStorage, StorageError};
 use async_trait::async_trait;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 const GENERATE_IMAGE: &str = "generate_image";
 const EDIT_IMAGE: &str = "edit_image";
+const READ_MEDIA: &str = "read_media";
 
-/// Saves the images the tools make: to a directory, a database, your UI, ...
-///
-/// It only stores them. The image goes back to the model as the tool result whatever the
-/// sink does, so handle (or log) its errors inside `save`.
-#[async_trait]
-pub trait ImageSink: Send + Sync + 'static {
-    /// Called with every image, after it got its name ([`Media::name`]).
-    async fn save(&self, image: &ImageResponse);
+/// What [`GenerateImageToolBox`] sends back to the model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ImageToolOutput {
+    /// The image itself and a short text with its ID. Providers that do not accept images in
+    /// tool results get only the text.
+    #[default]
+    Media,
+    /// Only a JSON text with what was made (ID, type, size in bytes, model, prompts, ...),
+    /// without the image. Saves tokens, and the model can still look at the image with
+    /// [`ReadMediaToolBox`].
+    Metadata,
 }
 
-/// Loads the images the model wants to edit.
-///
-/// The model refers to an image by name: one returned by `generate_image` or `edit_image`
-/// (for example `image-1.png`), or a name you told it, for example a file the user uploaded.
-#[async_trait]
-pub trait ImageSource: Send + Sync + 'static {
-    /// Returns the image called `reference`. Return [`ToolError::InvalidArguments`] for a
-    /// name you do not know, so the model can correct it.
-    async fn load(&self, reference: &str) -> Result<Media, ToolError>;
-}
-
-/// [`ToolBox`] that lets an agent generate and edit images.
+/// [`ToolBox`] that lets an agent generate and edit images with an [`ImageGenerator`].
 ///
 /// Tools:
 /// - `generate_image`: draws an image from a prompt.
-/// - `edit_image`: changes images the model names. Offered only with an [`ImageSource`]
-///   ([`with_source`](ImageToolBox::with_source)) and a provider that can edit.
+/// - `edit_image`: changes stored images the model names by ID. Offered only with a storage
+///   ([`with_storage`](GenerateImageToolBox::with_storage)) and a provider that can edit.
 ///
-/// The result of both is the image (the model sees it when its provider accepts images in
-/// tool results; others get only the text) and a text with the image's name, which the
-/// model can pass to `edit_image` later.
+/// With a storage every image is saved and the model gets its ID. What else the model gets
+/// is set with [`with_output`](GenerateImageToolBox::with_output).
 ///
 /// ```rust,no_run
-/// # use agentai_image::ImageToolBox;
+/// # use agentai_image::{GenerateImageToolBox, ImageGenerator};
+/// # use agentai_core::storage::MemoryStorage;
 /// # fn main() -> Result<(), agentai_image::ImageError> {
-/// let images = ImageToolBox::new("openai::gpt-image-1")?.with_size("1024x1024");
+/// let storage = MemoryStorage::new();
+/// let images = GenerateImageToolBox::new(ImageGenerator::new("openai::gpt-image-1")?)
+///     .with_storage(storage.clone());
 /// # Ok(())
 /// # }
 /// ```
-pub struct ImageToolBox {
-    provider: Box<dyn ImageProvider>,
-    sink: Option<Box<dyn ImageSink>>,
-    source: Option<Box<dyn ImageSource>>,
-    size: Option<String>,
-    quality: Option<String>,
-    count: AtomicUsize,
+pub struct GenerateImageToolBox {
+    generator: ImageGenerator,
+    storage: Option<Arc<dyn MediaStorage>>,
+    output: ImageToolOutput,
 }
 
-impl ImageToolBox {
-    /// Creates the toolbox for a model, see [`provider::from_model`]: the provider comes
-    /// from the name (`openai::gpt-image-1`) and its API key from the environment.
-    pub fn new(model: &str) -> Result<Self, ImageError> {
-        Ok(Self::with_boxed_provider(provider::from_model(model)?))
-    }
-
-    /// Creates the toolbox with a provider you built, for example with an API key set in
-    /// code.
-    pub fn from_provider(provider: impl ImageProvider) -> Self {
-        Self::with_boxed_provider(Box::new(provider))
-    }
-
-    fn with_boxed_provider(provider: Box<dyn ImageProvider>) -> Self {
+impl GenerateImageToolBox {
+    /// Creates the toolbox. A storage set on `generator` is used to save the images, but
+    /// `edit_image` needs one set with [`with_storage`](GenerateImageToolBox::with_storage).
+    pub fn new(generator: ImageGenerator) -> Self {
         Self {
-            provider,
-            sink: None,
-            source: None,
-            size: None,
-            quality: None,
-            count: AtomicUsize::new(0),
+            generator,
+            storage: None,
+            output: ImageToolOutput::default(),
         }
     }
 
-    /// Saves every image with `sink`.
-    pub fn with_sink(mut self, sink: impl ImageSink) -> Self {
-        self.sink = Some(Box::new(sink));
+    /// Saves every image in `storage` and loads the images to edit from it, which enables
+    /// `edit_image`.
+    pub fn with_storage(mut self, storage: impl MediaStorage) -> Self {
+        let storage: Arc<dyn MediaStorage> = Arc::new(storage);
+        self.generator = self.generator.with_storage(storage.clone());
+        self.storage = Some(storage);
         self
     }
 
-    /// Loads the images to edit with `source`, which enables `edit_image`.
-    pub fn with_source(mut self, source: impl ImageSource) -> Self {
-        self.source = Some(Box::new(source));
-        self
-    }
-
-    /// Size of every image, in the provider's format (for example `1024x1024`).
-    pub fn with_size(mut self, size: impl Into<String>) -> Self {
-        self.size = Some(size.into());
-        self
-    }
-
-    /// Quality of every image, in the provider's format (for example `high`).
-    pub fn with_quality(mut self, quality: impl Into<String>) -> Self {
-        self.quality = Some(quality.into());
+    /// Sets what the model gets back, see [`ImageToolOutput`].
+    pub fn with_output(mut self, output: ImageToolOutput) -> Self {
+        self.output = output;
         self
     }
 
     fn can_edit(&self) -> bool {
-        self.source.is_some() && self.provider.supports_edit()
+        self.storage.is_some() && self.generator.supports_edit()
     }
 
     async fn generate(&self, args: GenerateArgs) -> ToolResult<ToolOutput> {
-        let mut request = ImageRequest::new(args.prompt);
-        request.size = self.size.clone();
-        request.quality = self.quality.clone();
-        let response = self.provider.generate(request).await.map_err(tool_error)?;
-        Ok(self.finish(response).await)
+        let prompt = args.prompt.clone();
+        let response = self
+            .generator
+            .generate_with(ImageRequest::new(args.prompt))
+            .await
+            .map_err(tool_error)?;
+        self.output(response, prompt)
     }
 
     async fn edit(&self, args: EditArgs) -> ToolResult<ToolOutput> {
-        let Some(source) = self.source.as_ref().filter(|_| self.can_edit()) else {
+        let Some(storage) = self.storage.as_ref().filter(|_| self.can_edit()) else {
             return Err(ToolError::NotFound(EDIT_IMAGE.to_string()));
         };
         if args.images.is_empty() {
             return Err(ToolError::InvalidArguments(
-                "give at least one image name in `images`".to_string(),
+                "give at least one image ID in `images`".to_string(),
             ));
         }
         let mut images = Vec::with_capacity(args.images.len());
-        for reference in &args.images {
-            images.push(source.load(reference).await?);
+        for id in &args.images {
+            images.push(storage.read(id).await.map_err(read_error)?);
         }
-        let mut request = ImageEditRequest::new(args.prompt, images);
-        request.size = self.size.clone();
-        request.quality = self.quality.clone();
-        let response = self.provider.edit(request).await.map_err(tool_error)?;
-        Ok(self.finish(response).await)
+        let prompt = args.prompt.clone();
+        let response = self
+            .generator
+            .edit_with(ImageEditRequest::new(args.prompt, images))
+            .await
+            .map_err(tool_error)?;
+        self.output(response, prompt)
     }
 
-    /// Names the image, hands it to the sink and builds the tool result.
-    async fn finish(&self, mut response: ImageResponse) -> ToolOutput {
-        let number = self.count.fetch_add(1, Ordering::Relaxed) + 1;
-        let extension = response
-            .image
-            .content_type
-            .rsplit('/')
-            .next()
-            .unwrap_or("png")
-            .to_string();
-        let name = format!("image-{number}.{extension}");
-        response.image.name = Some(name.clone());
-        if let Some(sink) = &self.sink {
-            sink.save(&response).await;
+    fn output(&self, response: ImageResponse, prompt: String) -> ToolResult<ToolOutput> {
+        match self.output {
+            ImageToolOutput::Metadata => {
+                let metadata = ImageMetadata {
+                    id: response.id.as_deref(),
+                    content_type: &response.image.content_type,
+                    url: match &response.image.source {
+                        MediaSource::Url(url) => Some(url),
+                        MediaSource::Base64(_) => None,
+                    },
+                    bytes: match &response.image.source {
+                        MediaSource::Base64(data) => Some(base64_len(data)),
+                        MediaSource::Url(_) => None,
+                    },
+                    model: self.generator.model(),
+                    prompt: &prompt,
+                    revised_prompt: response.revised_prompt.as_deref(),
+                    size: self.generator.size(),
+                    quality: self.generator.quality(),
+                };
+                let json = serde_json::to_string(&metadata).map_err(ToolError::fatal)?;
+                Ok(ToolOutput::from_text(json))
+            }
+            _ => {
+                let mut text = match &response.id {
+                    Some(id) => format!("Created the image with ID {id}."),
+                    None => "Created the image.".to_string(),
+                };
+                if let Some(revised) = &response.revised_prompt {
+                    text.push_str(&format!(" Prompt used: {revised}"));
+                }
+                Ok(ToolOutput::from_text(text).with_media(response.image))
+            }
         }
-        let mut text = format!("Created the image {name}.");
-        if let Some(revised) = &response.revised_prompt {
-            text.push_str(&format!(" Prompt used: {revised}"));
-        }
-        ToolOutput::from_text(text).with_media(response.image)
     }
+}
+
+/// What [`ImageToolOutput::Metadata`] sends; `None` fields are left out.
+#[derive(Serialize)]
+struct ImageMetadata<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<&'a str>,
+    content_type: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
+    prompt: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revised_prompt: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<&'a str>,
+}
+
+/// Size of base64 data once decoded, without decoding it.
+fn base64_len(data: &str) -> usize {
+    let padding = data.bytes().rev().take_while(|&b| b == b'=').count();
+    data.len() / 4 * 3 - padding
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -175,8 +191,14 @@ struct GenerateArgs {
 struct EditArgs {
     /// What to change, or how to combine the images.
     prompt: String,
-    /// Names of the images to edit, for example `image-1.png`.
+    /// IDs of the images to edit, as returned by `generate_image` or `edit_image`.
     images: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReadArgs {
+    /// ID of the file.
+    id: String,
 }
 
 fn schema<T: JsonSchema>() -> Value {
@@ -198,7 +220,7 @@ fn parse<T: for<'de> Deserialize<'de>>(tool: &str, arguments: Value) -> Result<T
 }
 
 /// Rejected credentials cannot be fixed by the model; anything else (a refused prompt, a
-/// failed request) is reported to it.
+/// failed request or save) is reported to it.
 fn tool_error(err: ImageError) -> ToolError {
     if err.is_auth() || matches!(err, ImageError::MissingApiKey(_)) {
         ToolError::Configuration(err.to_string())
@@ -207,22 +229,30 @@ fn tool_error(err: ImageError) -> ToolError {
     }
 }
 
+/// An unknown ID is the model's mistake, so it can correct it.
+fn read_error(err: StorageError) -> ToolError {
+    match err {
+        StorageError::NotFound(id) => {
+            ToolError::InvalidArguments(format!("there is no file with ID '{id}'"))
+        }
+        err => ToolError::Failed(err.to_string()),
+    }
+}
+
 #[async_trait]
-impl ToolBox for ImageToolBox {
+impl ToolBox for GenerateImageToolBox {
     fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
         let mut tools = vec![
             Tool::new(GENERATE_IMAGE)
-                .with_description(
-                    "Generates an image from a text prompt and returns it with its name.",
-                )
+                .with_description("Generates an image from a text prompt.")
                 .with_schema(schema::<GenerateArgs>()),
         ];
         if self.can_edit() {
             tools.push(
                 Tool::new(EDIT_IMAGE)
                     .with_description(
-                        "Edits existing images, given by name, following a text prompt, and \
-                         returns the new image with its name.",
+                        "Edits existing images, given by ID, following a text prompt, and \
+                         creates a new image.",
                     )
                     .with_schema(schema::<EditArgs>()),
             );
@@ -239,35 +269,61 @@ impl ToolBox for ImageToolBox {
     }
 }
 
+/// [`ToolBox`] with the tool `read_media`, which gives the model a stored file (an image, a
+/// document, ...) by its ID, read from any [`MediaRead`].
+///
+/// Share one storage with [`GenerateImageToolBox`] to let the model look at images it made
+/// with [`ImageToolOutput::Metadata`]:
+///
+/// ```rust
+/// # use agentai_image::ReadMediaToolBox;
+/// # use agentai_core::storage::MemoryStorage;
+/// let storage = MemoryStorage::new();
+/// let files = ReadMediaToolBox::new(storage.clone());
+/// ```
+pub struct ReadMediaToolBox {
+    storage: Arc<dyn MediaRead>,
+}
+
+impl ReadMediaToolBox {
+    /// Creates the toolbox for files in `storage`.
+    pub fn new(storage: impl MediaRead) -> Self {
+        Self {
+            storage: Arc::new(storage),
+        }
+    }
+}
+
+#[async_trait]
+impl ToolBox for ReadMediaToolBox {
+    fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
+        Ok(vec![
+            Tool::new(READ_MEDIA)
+                .with_description(
+                    "Returns a stored file, for example an image, by its ID, so you can look at it.",
+                )
+                .with_schema(schema::<ReadArgs>()),
+        ])
+    }
+
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
+        if tool_name != READ_MEDIA {
+            return Err(ToolError::NotFound(tool_name));
+        }
+        let args: ReadArgs = parse(READ_MEDIA, arguments)?;
+        let media: Media = self.storage.read(&args.id).await.map_err(read_error)?;
+        let text = format!("File {} ({})", args.id, media.content_type);
+        Ok(ToolOutput::from_text(text).with_media(media))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::openai::tests::{MockHttp, json_response, provider};
-    use agentai::Part;
+    use agentai_core::message::Part;
+    use agentai_core::storage::{MediaSave, MemoryStorage};
     use serde_json::json;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone, Default)]
-    struct Saved(Arc<Mutex<Vec<ImageResponse>>>);
-
-    #[async_trait]
-    impl ImageSink for Saved {
-        async fn save(&self, image: &ImageResponse) {
-            self.0.lock().unwrap().push(image.clone());
-        }
-    }
-
-    struct OneImage;
-
-    #[async_trait]
-    impl ImageSource for OneImage {
-        async fn load(&self, reference: &str) -> Result<Media, ToolError> {
-            match reference {
-                "image-1.png" => Ok(Media::from_bytes("image/png", b"PNG")),
-                other => Err(ToolError::InvalidArguments(format!("no image {other}"))),
-            }
-        }
-    }
 
     fn image_reply() -> agentai_core::HttpResponse {
         json_response(
@@ -276,7 +332,7 @@ mod tests {
         )
     }
 
-    fn tool_names(toolbox: &ImageToolBox) -> Vec<String> {
+    fn tool_names(toolbox: &dyn ToolBox) -> Vec<String> {
         toolbox
             .tools_definitions()
             .unwrap()
@@ -285,58 +341,90 @@ mod tests {
             .collect()
     }
 
+    fn toolbox(http: &Arc<MockHttp>) -> GenerateImageToolBox {
+        GenerateImageToolBox::new(
+            ImageGenerator::from_provider(provider(http)).with_size("512x512"),
+        )
+    }
+
     #[tokio::test]
-    async fn generate_image_returns_the_named_image_and_saves_it() {
+    async fn generate_image_returns_the_image_with_its_storage_id() {
         let http = MockHttp::new(vec![image_reply()]);
-        let saved = Saved::default();
-        let toolbox = ImageToolBox::from_provider(provider(&http))
-            .with_sink(saved.clone())
-            .with_size("512x512");
+        let storage = MemoryStorage::new();
+        let toolbox = toolbox(&http).with_storage(storage.clone());
 
         let output = toolbox
             .call_tool(GENERATE_IMAGE.into(), json!({"prompt": "a cat"}))
             .await
             .unwrap();
 
-        let image = Media::from_base64("image/png", "aGk=").with_name("image-1.png");
+        let image = Media::from_base64("image/png", "aGk=").with_name("image.png");
         assert_eq!(
             output.parts,
             vec![
-                Part::Text("Created the image image-1.png. Prompt used: a red cat".into()),
+                Part::Text("Created the image with ID 1-image.png. Prompt used: a red cat".into()),
                 Part::Media(image.clone()),
             ]
         );
-        assert_eq!(
-            *saved.0.lock().unwrap(),
-            vec![ImageResponse::new(image).with_revised_prompt("a red cat")]
-        );
-        let body: Value = serde_json::from_slice(&http.request(0).body.unwrap()).unwrap();
-        assert_eq!(body["size"], json!("512x512"));
+        assert_eq!(storage.read("1-image.png").await.unwrap(), image);
     }
 
     #[tokio::test]
-    async fn edit_image_is_offered_only_with_a_source() {
+    async fn metadata_output_describes_the_image_without_it() {
         let http = MockHttp::new(vec![image_reply()]);
-        let without = ImageToolBox::from_provider(provider(&http));
+        let toolbox = toolbox(&http)
+            .with_storage(MemoryStorage::new())
+            .with_output(ImageToolOutput::Metadata);
+
+        let output = toolbox
+            .call_tool(GENERATE_IMAGE.into(), json!({"prompt": "a cat"}))
+            .await
+            .unwrap();
+
+        assert!(output.media().is_empty());
+        let metadata: Value = serde_json::from_str(&output.text().unwrap()).unwrap();
+        assert_eq!(
+            metadata,
+            json!({
+                "id": "1-image.png",
+                "content_type": "image/png",
+                "bytes": 2,
+                "model": "gpt-image-1",
+                "prompt": "a cat",
+                "revised_prompt": "a red cat",
+                "size": "512x512",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_image_needs_a_storage_and_loads_the_images_from_it() {
+        let http = MockHttp::new(vec![image_reply()]);
+        let without = toolbox(&http);
         assert_eq!(tool_names(&without), [GENERATE_IMAGE]);
         assert!(matches!(
             without.call_tool(EDIT_IMAGE.into(), json!({})).await,
             Err(ToolError::NotFound(_))
         ));
 
-        let toolbox = ImageToolBox::from_provider(provider(&http)).with_source(OneImage);
+        let storage = MemoryStorage::new();
+        let id = storage
+            .save(&Media::from_bytes("image/png", b"PNG"))
+            .await
+            .unwrap();
+        let toolbox = toolbox(&http).with_storage(storage);
         assert_eq!(tool_names(&toolbox), [GENERATE_IMAGE, EDIT_IMAGE]);
         let unknown = toolbox
             .call_tool(
                 EDIT_IMAGE.into(),
-                json!({"prompt": "add a hat", "images": ["image-9.png"]}),
+                json!({"prompt": "add a hat", "images": ["nope"]}),
             )
             .await;
         assert!(matches!(unknown, Err(ToolError::InvalidArguments(_))));
         let output = toolbox
             .call_tool(
                 EDIT_IMAGE.into(),
-                json!({"prompt": "add a hat", "images": ["image-1.png"]}),
+                json!({"prompt": "add a hat", "images": [id]}),
             )
             .await
             .unwrap();
@@ -353,10 +441,30 @@ mod tests {
             json_response(401, json!({"error": {"message": "bad key"}})),
             json_response(400, json!({"error": {"message": "refused"}})),
         ]);
-        let toolbox = ImageToolBox::from_provider(provider(&http));
+        let toolbox = toolbox(&http);
         let call = || toolbox.call_tool(GENERATE_IMAGE.into(), json!({"prompt": "x"}));
 
         assert!(matches!(call().await, Err(ToolError::Configuration(_))));
         assert!(matches!(call().await, Err(ToolError::Failed(m)) if m.contains("refused")));
+    }
+
+    #[tokio::test]
+    async fn read_media_returns_the_stored_file() {
+        let storage = MemoryStorage::new();
+        let pdf = Media::from_bytes("application/pdf", b"%PDF");
+        let id = storage.save(&pdf).await.unwrap();
+        let toolbox = ReadMediaToolBox::new(storage);
+
+        let output = toolbox
+            .call_tool(READ_MEDIA.into(), json!({ "id": id }))
+            .await
+            .unwrap();
+        assert_eq!(output.media(), vec![&pdf]);
+        assert!(matches!(
+            toolbox
+                .call_tool(READ_MEDIA.into(), json!({"id": "nope"}))
+                .await,
+            Err(ToolError::InvalidArguments(_))
+        ));
     }
 }

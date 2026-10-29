@@ -16,7 +16,7 @@ Key facts for code generation:
 - Errors are typed: a run returns `AgentError` (match on variants, `is_transient()` for retryable provider failures; `MaxTokens { raw }` for an answer cut off by the token limit). Tools return `ToolError`; recoverable ones (`NotFound`, `InvalidArguments`, `Failed`) go back to the model, fatal ones (`Configuration`, `Fatal`) stop the run as `AgentError::Tool`. `ToolError::is_recoverable()` tells them apart.
 - Tools are grouped in a `ToolBox`. Write your own with the `#[toolbox]` attribute on an `impl` block and `#[tool]` on its methods. Options: `#[tool(name = "...")]`, `#[tool(strict)]` for strict argument schemas. Combine toolboxes with `ToolBoxSet`.
 - A tool returns text (`ToolResult`, i.e. `Result<String, ToolError>`) or a `ToolOutput` with text and images (`ToolResult<ToolOutput>`; `ToolOutput::from_text(..).with_media(Media)`); `ToolBox::call_tool` always returns `ToolResult<ToolOutput>`. Providers that do not accept images in tool results get only the text.
-- Ready toolboxes: `CurrentDateAndTimeToolBox` and `LocationToolBox` (`tools-buildin`), `WebSearchToolBox` and `WebFetchToolBox` (`tools-web`), `McpToolBox` (`mcp-client`) for MCP servers over stdio (`McpToolBox::new`) or Streamable HTTP (`new_http`, `new_http_with_bearer`). All features are on by default. Image generation and editing is the separate crate `agentai-image`: `ImageToolBox::new("openai::gpt-image-1")?` (key from `OPENAI_API_KEY`, base URL from `OPENAI_BASE_URL`) with tools `generate_image` and `edit_image` (the latter only with `.with_source(ImageSource)`); `.with_sink(ImageSink)` saves every image.
+- Ready toolboxes: `CurrentDateAndTimeToolBox` and `LocationToolBox` (`tools-buildin`), `WebSearchToolBox` and `WebFetchToolBox` (`tools-web`), `McpToolBox` (`mcp-client`) for MCP servers over stdio (`McpToolBox::new`) or Streamable HTTP (`new_http`, `new_http_with_bearer`). All features are on by default. Image generation and editing is the separate crate `agentai-image`: `ImageGenerator::new("openai::gpt-image-1")?` (key from `OPENAI_API_KEY`, base URL from `OPENAI_BASE_URL`) with `generate(prompt)` and `edit(prompt, images)`; for agents `GenerateImageToolBox::new(generator).with_storage(storage)` (tools `generate_image`, `edit_image`; `.with_output(ImageToolOutput::Metadata)` returns JSON metadata instead of the image) and `ReadMediaToolBox::new(storage)` (`read_media(id)`). Storage traits `MediaRead`/`MediaSave` and `MemoryStorage` are in `agentai_core::storage`.
 
 ## Docs
 
@@ -29,7 +29,7 @@ Key facts for code generation:
 - [Tools and toolboxes](https://docs.rs/agentai/latest/agentai/tool/index.html): `ToolBox`, `ToolBoxSet`, `ToolError`, `ToolResult`
 - [`#[toolbox]` macro](https://docs.rs/agentai/latest/agentai/tool/attr.toolbox.html): how methods become tools
 
-- [agentai-image](https://docs.rs/agentai-image/latest/agentai_image/): image generation and editing tools, `ImageToolBox`, providers in `agentai_image::provider`
+- [agentai-image](https://docs.rs/agentai-image/latest/agentai_image/): `ImageGenerator`, `GenerateImageToolBox`, `ReadMediaToolBox`, providers in `agentai_image::provider`
 
 ## Examples
 
@@ -41,7 +41,8 @@ Key facts for code generation:
 - [tools_custom.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_custom.rs): custom tool written with `#[toolbox]`
 - [tools_web.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_web.rs): Brave web search plus page fetch combined in a `ToolBoxSet`
 - [tools_mcp.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/tools_mcp.rs): tools from an MCP server started over stdio (`McpToolBox::new_http` connects to a running server instead)
-- [image_generation.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-image/examples/image_generation.rs): an agent that draws an image and edits it, with a sink and source that keep images in a directory
+- [image_generator.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-image/examples/image_generator.rs): `ImageGenerator` without an agent: generate an image, edit it, save both
+- [image_tools.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-image/examples/image_tools.rs): an agent that draws and edits images, with a `MediaStorage` that keeps them in a directory
 - [openrouter.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/openrouter.rs): OpenRouter through the `open_router::` model prefix, with built-in tools
 
 ## Optional

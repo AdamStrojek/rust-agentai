@@ -138,7 +138,7 @@ pub enum HttpError {
     /// The request could not be sent or the response could not be read (connection,
     /// timeout, TLS, ...).
     #[error("HTTP request failed: {0}")]
-    Transport(Box<dyn std::error::Error + Send + Sync>),
+    Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
     /// A JSON body could not be written or read.
     #[error("invalid JSON body: {0}")]
     Json(serde_json::Error),
