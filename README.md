@@ -29,9 +29,30 @@ This library is under heavy development. The interface may change at any time wi
 - **Structured Output**: No need to parse raw text from model, just provide structure, and AI agent will provide response in defined format.
 - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
 - **Images for vision models**: Send text and images together in a `Prompt`, by URL or from bytes. Plain text prompts work as before.
+- **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with [`ToolOutput`](https://docs.rs/agentai/latest/agentai/tool/struct.ToolOutput.html).
 - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New
+
+#### 0.5.0 - Image generation, images in tool results
+
+- **Agents that draw**: the new [`agentai-image`](https://docs.rs/agentai-image) crate has
+  `ImageToolBox` with the `generate_image` and `edit_image` tools.
+  `ImageToolBox::new("openai::gpt-image-1")?` takes the provider from the model name and the key from
+  `OPENAI_API_KEY`; OpenAI-compatible APIs work with your own base URL. The image goes back to the model,
+  and an optional `ImageSink` saves every image (a directory, your UI, ...).
+- **Tools can return images**: a tool returns a [`ToolOutput`](https://docs.rs/agentai/latest/agentai/tool/struct.ToolOutput.html) with text and
+  `Media` parts, for example a chart or a screenshot. Providers that accept images in tool
+  results (Anthropic, Gemini, OpenAI Responses, Bedrock, Ollama) get them, others get the text. `#[toolbox]`
+  methods return `ToolResult<ToolOutput>` for that; methods that return text stay as they are.
+- Internal: the new `agentai-core` crate holds the HTTP client abstraction used by `agentai-image`, so it
+  can later run on other HTTP stacks, such as WebAssembly.
+
+**Breaking changes**: `ToolBox::call_tool` returns `ToolResult<ToolOutput>`, and `ToolResponse::content` and
+the `content` of tool result events are no longer a `String`. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#040--050-YYYY-MM-DD)
+before upgrading.
 
 #### 0.3.0 - Streaming, conversation history in your hands, run details
 
