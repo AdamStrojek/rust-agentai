@@ -19,6 +19,15 @@
 //! - [crate::tool::buildin]: Provides a set of useful built-in tools. (Requires the `tools-buildin` feature).
 //! - [crate::tool::mcp]: Provides a `ToolBox` for interacting with the MCP Client. (Requires the `mcp-client` feature).
 //! - [crate::tool::web]: Provides toolboxes for interacting with the web, such as searching and fetching content. (Requires the `tools-web` feature).
+//! - [`agentai-image`](https://docs.rs/agentai-image) (a separate crate, `cargo add agentai-image`): image tools for
+//!   OpenAI and compatible APIs.
+//!   - `GenerateImageToolBox`: `generate_image` and `edit_image`, returning the image or only its metadata as JSON.
+//!   - `ReadMediaToolBox`: `read_media` gives the model a stored file (from any `MediaRead`) by its ID.
+//!
+//! A tool returns text, or a [`ToolOutput`] with text and images for the model. Tools have no
+//! structured output: a tool that produces data (a record, a list, a measurement) converts it to
+//! text itself, for example as JSON with `serde_json::to_string`, in the format it wants the
+//! model to read.
 //!
 //! For examples demonstrating how to use tools and toolboxes, look into the `examples` folder.
 //! Examples related to tools typically start with the `tools_*` prefix, e.g., [crate::examples::tools_mcp].
@@ -34,6 +43,7 @@ pub mod mcp;
 #[cfg(feature = "tools-web")]
 pub mod web;
 
+pub use crate::message::ToolOutput;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -106,7 +116,10 @@ impl Tool {
     }
 }
 
-pub type ToolResult = Result<String, ToolError>;
+/// Result of a tool. Tool methods in a [`#[toolbox]`](crate::tool::toolbox) usually return
+/// `ToolResult` (text) or `ToolResult<ToolOutput>` (text and images);
+/// [`ToolBox::call_tool`] returns `ToolResult<ToolOutput>`.
+pub type ToolResult<T = String> = Result<T, ToolError>;
 
 // Re-export tool and toolbox macros, they are used to generate auto implementation of
 #[cfg(feature = "macros")]
@@ -156,9 +169,9 @@ pub trait ToolBox: Send + Sync + 'static {
     /// * `arguments` - A JSON `Value` containing the arguments for the tool call.
     ///
     /// # Returns
-    /// A `Result` containing the tool's output as a `String` on success,
+    /// A `Result` containing the tool's [`ToolOutput`] on success,
     /// or a `ToolError` if the tool call fails or the tool is not found.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult;
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput>;
 }
 
 /// Errors that can occur when working with `ToolBox`es and tools.
@@ -268,7 +281,7 @@ impl ToolBox for ToolBoxSet {
     /// It finds the correct `ToolBox` that contains the tool and delegates the call.
     /// If multiple toolboxes contain a tool with the same name, the one that was
     /// added first will be used.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
         for toolbox in &self.toolboxes {
             match toolbox
                 .call_tool(tool_name.clone(), arguments.clone())

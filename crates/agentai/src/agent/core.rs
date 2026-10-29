@@ -1,9 +1,10 @@
 //! The agent loop shared by every way of running an agent.
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
+use crate::convert::{FromGenai, IntoGenai};
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::prompt::Prompt;
-use crate::tool::ToolBox;
+use crate::tool::{ToolBox, ToolOutput};
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt, pin_mut};
 use genai::Client;
@@ -51,7 +52,7 @@ where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
     try_stream! {
-        let prompt = prompt.into_message();
+        let prompt = Message::from(prompt);
         let media = prompt.parts.iter().filter(|part| matches!(part, Part::Media(_))).count();
         debug!("Agent Question: {} ({media} media)", prompt.text().unwrap_or_default());
         let mut new_messages = vec![prompt];
@@ -292,7 +293,7 @@ fn step_from_stream_end(end: StreamEnd) -> Step {
 /// What a tool call produced.
 struct ToolOutcome {
     /// Sent to the model as the tool result.
-    content: String,
+    content: ToolOutput,
     is_error: bool,
     /// Set for a fatal error: the run stops once every tool call has a response.
     fatal: Option<AgentError>,
@@ -301,7 +302,7 @@ struct ToolOutcome {
 impl ToolOutcome {
     fn recoverable(content: String) -> Self {
         Self {
-            content,
+            content: content.into(),
             is_error: true,
             fatal: None,
         }
@@ -328,7 +329,11 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
         .await
     {
         Ok(result) => {
-            trace!("Tool result: {result}");
+            trace!(
+                "Tool result: {} ({} media)",
+                result.text().unwrap_or_default(),
+                result.media().len()
+            );
             ToolOutcome {
                 content: result,
                 is_error: false,
@@ -345,7 +350,7 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
             // Retrying cannot help, so the run stops
             debug!("Fatal error in tool '{}': {source}", tool_call.name);
             ToolOutcome {
-                content: format!("Tool failed: {source}"),
+                content: format!("Tool failed: {source}").into(),
                 is_error: true,
                 fatal: Some(AgentError::Tool {
                     tool: tool_call.name.clone(),

@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.4.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.5.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -172,7 +172,7 @@ You own the conversation history; the agent never stores it.
 - `result.new_messages` holds only the messages of this run, in order: your prompt, the assistant messages with tool calls, the tool results and the final answer. Append them to continue: `history.extend(result.new_messages)`. This matches `new_messages()` in pydantic-ai.
 - The system prompt is not in the history: the agent sends its own with every request. Do not put a system message in the history. The same history can therefore be used with a different agent.
 - A failed or cancelled run (an error, or a dropped stream) leaves your history unchanged and never leaves a tool call without a result. You can retry with the same history.
-- `Message { role: Role, parts: Vec<Part> }` is an `agentai` type with its own stable JSON format (`Serialize`/`Deserialize`, `Clone`, `PartialEq`), so you can persist, trim or summarize the history however you want and it keeps working across `agentai` upgrades. `Role` is `User`, `Assistant` or `Tool`. `Part` is `Text`, `ToolCall(ToolCall { id, name, arguments })`, `ToolResponse(ToolResponse { call_id, name, content })`, `Reasoning`, `ReasoningSignature`, `Media(Media)` or `ProviderData(ProviderData)`; keep signatures and provider data as they are, providers need them back to continue a conversation with reasoning. Build messages with `Message::user(text)`, `Message::assistant(text)` or `Message::new(role, parts)`; read them with `message.text()` and `message.tool_calls()`. Reset it with `history.clear()`. When trimming, keep an assistant message with tool calls together with its tool results.
+- `Message { role: Role, parts: Vec<Part> }` is an `agentai` type with its own stable JSON format (`Serialize`/`Deserialize`, `Clone`, `PartialEq`), so you can persist, trim or summarize the history however you want and it keeps working across `agentai` upgrades. `Role` is `User`, `Assistant` or `Tool`. `Part` is `Text`, `ToolCall(ToolCall { id, name, arguments })`, `ToolResponse(ToolResponse { call_id, name, content })` (`content: Vec<Part>` with text and media; `.text()` joins the text), `Reasoning`, `ReasoningSignature`, `Media(Media)` or `ProviderData(ProviderData)`; keep signatures and provider data as they are, providers need them back to continue a conversation with reasoning. Build messages with `Message::user(text)`, `Message::assistant(text)` or `Message::new(role, parts)`; read them with `message.text()` and `message.tool_calls()`. Reset it with `history.clear()`. When trimming, keep an assistant message with tool calls together with its tool results.
 
 ### Streaming
 
@@ -196,7 +196,7 @@ while let Some(event) = stream.next().await {
 - `run_stream` takes the same configuration as `run`. Awaiting it checks the configuration (missing model, schema of `D`) and returns `Result<AgentStream<D>, AgentError>`.
 - `AgentStream<D>` is a `Stream<Item = Result<AgentEvent<D>, AgentError>>` that is `Send + 'static`: it can be moved into `tokio::spawn` or returned from a web handler (for example axum server-sent events).
 - Every model call of the loop is streamed. Tools run between model calls exactly as in an awaited run.
-- Events: `TextDelta(String)`, `ReasoningDelta(String)`, `ToolCall(ToolCall)` (before the tool runs), `ToolResult { call_id, tool, content, is_error }`, and `Finished(AgentResult<D>)`, which is always the last event of a successful run. An error during the run is the last item of the stream.
+- Events: `TextDelta(String)`, `ReasoningDelta(String)`, `ToolCall(ToolCall)` (before the tool runs), `ToolResult { call_id, tool, content: ToolOutput, is_error }`, and `Finished(AgentResult<D>)`, which is always the last event of a successful run. An error during the run is the last item of the stream.
 - Text the model writes before it asks for tools is also streamed as `TextDelta`, so not every delta belongs to the final answer. Use `result.answer` for the final answer.
 - Structured output streams too: the deltas are pieces of the JSON, and the answer is parsed at the end.
 - `stream.finish().await` reads the remaining events and returns the `AgentResult`.
@@ -303,7 +303,9 @@ Tools let the model call your code. They are grouped in toolboxes. Everything li
 
 - `ToolBox`: a trait with `tools_definitions()` and `call_tool(name, arguments)`.
 - `Tool`: a tool definition (`name`, optional `description`, optional JSON `schema`, optional `strict`).
-- `ToolResult`: `Result<String, ToolError>`. A tool always returns text for the model.
+- `ToolResult<T = String>`: `Result<T, ToolError>`. `ToolBox::call_tool` returns `ToolResult<ToolOutput>`.
+- `ToolOutput`: what the model gets back, text and `Media` parts in order. `ToolOutput::from_text(text)`, `ToolOutput::from_media(media)`, `.with_text(..)`, `.with_media(..)`; read with `.text()`, `.media()`, `.parts`; `Display` prints text and `[image/png]` for media. `String`, `&str` and `Media` convert into it. Providers that accept images in tool results (Anthropic, Gemini, OpenAI Responses, Bedrock, Ollama) get the media, others only the text.
+- Tools have no structured output. A tool that returns data converts it to text itself, for example `Ok(serde_json::to_string(&weather).map_err(ToolError::fatal)?)`; the agent sends that text as it is.
 - `ToolError` (`#[non_exhaustive]`) separates errors the model can fix from errors that end the run. `is_recoverable()` tells them apart.
   - Recoverable, sent to the model as the tool result while the loop continues: `NotFound(String)` (the tool is not in this toolbox), `InvalidArguments(String)` (missing, malformed or invalid arguments), `Failed(String)` (the tool ran but failed in a way the model can react to, such as an HTTP 404).
   - Fatal, the run stops and returns `AgentError::Tool`: `Configuration(String)` (missing API key, server not running, definitions not ready), `Fatal(Box<dyn Error + Send + Sync>)` (anything else; build it with `ToolError::fatal(err)`).
@@ -358,10 +360,10 @@ Rules:
 - The tool name is the method name. Override it with `#[tool(name = "...")]`. Names must be unique in the toolbox.
 - `#[tool(strict)]` (or `strict = true/false`, combinable as `#[tool(name = "x", strict)]`) marks the definition as strict: providers that support it (OpenAI and compatible APIs) make the model's arguments match the schema exactly. agentai adapts the schema for strict mode: every parameter is listed as required and `additionalProperties` is `false`, so use `Option<T>` for parameters the model may leave out (it then sends `null`). Not every provider or OpenRouter model supports strict tools, so it is opt-in.
 - The method's doc comment is the tool description. Parameter doc comments become parameter descriptions. Write them for the model: say when to use the tool and what each argument means.
-- Each tool must take `&self` and return `ToolResult`. Both `fn` and `async fn` work.
+- Each tool must take `&self` and return `ToolResult` (text) or `ToolResult<ToolOutput>` (text and images, for example `Ok(ToolOutput::from_text("chart").with_media(Media::from_bytes("image/png", png)))`). Both `fn` and `async fn` work.
 - Every parameter must implement `serde::Deserialize` and `schemars::JsonSchema`. Attributes on parameters, such as `#[serde(...)]` or `#[schemars(...)]`, are kept.
 - Methods without `#[tool]` (constructors, helpers) stay ordinary methods. An `impl` block with no `#[tool]` method does not compile.
-- `Tool`, `ToolBox`, `ToolError` and `ToolResult` must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
+- `Tool`, `ToolBox` and `ToolError` (and `ToolResult` if you use it) must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
 - The type must be `Send + Sync + 'static`. The agent stores toolboxes in an `Arc`, so pass them by value (`with_toolbox(tb)`) or share one with `with_toolbox_arc(Arc::new(tb))`.
 
 Error handling in generated toolboxes: if the arguments do not deserialize, the generated code returns `ToolError::InvalidArguments`, so the model can fix them. Errors returned by your method pass through unchanged: return `ToolError::InvalidArguments` or `ToolError::Failed` with a helpful message (for example "unknown city") to let the model retry, or `ToolError::Configuration` / `ToolError::fatal(err)` to stop the run.
@@ -371,7 +373,7 @@ Error handling in generated toolboxes: if the arguments do not deserialize, the 
 Do this when tools are only known at run time or you need full control over errors. The trait uses `async_trait`.
 
 ```rust
-use agentai::tool::{Tool, ToolBox, ToolError, ToolResult};
+use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
 use serde_json::{json, Value};
 
 struct EchoToolBox;
@@ -388,10 +390,10 @@ impl ToolBox for EchoToolBox {
             }))])
     }
 
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
+    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
         match tool_name.as_str() {
             "echo" => match arguments["text"].as_str() {
-                Some(text) => Ok(text.to_string()),
+                Some(text) => Ok(text.into()),
                 None => Err(ToolError::InvalidArguments("`text` must be a string".into())),
             },
             _ => Err(ToolError::NotFound(tool_name)),
@@ -446,6 +448,47 @@ let fetch = WebFetchToolBox::new();                                    // tool: 
 
 `web_search` queries the Brave Search API and returns result titles, URLs and descriptions. `web_fetch` downloads a URL and returns the body as text.
 
+### Images (`agentai-image` crate)
+
+Image generation and editing is a separate crate: `cargo add agentai-image`. Without an agent:
+
+```rust
+use agentai_image::ImageGenerator;
+
+// Key from OPENAI_API_KEY, base URL from OPENAI_BASE_URL (the key may be left out for local servers)
+let generator = ImageGenerator::new("openai::gpt-image-1")?
+    .with_size("1024x1024")
+    .with_quality("low");
+let response = generator.generate("A lighthouse at dawn").await?; // ImageResponse
+// response.image: agentai::Media (base64 or URL), response.revised_prompt, response.id (with a storage)
+let edited = generator.edit("Add a sailing boat", vec![response.image]).await?;
+```
+
+For an agent (feature `toolbox`, on by default):
+
+```rust
+use agentai::tool::ToolBoxSet;
+use agentai_core::storage::MemoryStorage;
+use agentai_image::{GenerateImageToolBox, ImageGenerator, ImageToolOutput, ReadMediaToolBox};
+
+let storage = MemoryStorage::new(); // clones share the same storage
+let mut tools = ToolBoxSet::new();
+tools.add_tool(
+    GenerateImageToolBox::new(ImageGenerator::new("openai::gpt-image-1")?)
+        .with_storage(storage.clone())
+        .with_output(ImageToolOutput::Metadata), // or ImageToolOutput::Media (default)
+);
+tools.add_tool(ReadMediaToolBox::new(storage.clone()));
+let agent = agent.with_toolbox(tools);
+```
+
+- `GenerateImageToolBox` tools: `generate_image(prompt)`, and `edit_image(prompt, images)` (image IDs) when it has a storage and the provider can edit. With a storage every image is saved and the model gets its ID.
+- `ImageToolOutput::Media` returns the image and a text with its ID (providers without images in tool results get only the text); `ImageToolOutput::Metadata` returns only JSON, for example `{"id":"1-image.png","content_type":"image/png","bytes":1666956,"model":"gpt-image-1","prompt":"...","revised_prompt":"...","size":"1024x1024"}`.
+- `ReadMediaToolBox::new(impl MediaRead)`: tool `read_media(id)` returns the stored file to the model.
+- Storage (`agentai_core::storage`): `MediaSave::save(&self, &Media) -> Result<String, StorageError>` stores a file and returns the ID it chose; `MediaRead::read(&self, id) -> Result<Media, StorageError>`; a type with both is a `MediaStorage`. Return `StorageError::NotFound` for unknown IDs (the model gets `InvalidArguments` and can correct the ID). Both traits are implemented for `Arc<T>`, so one storage can be shared.
+- Providers are in `agentai_image::provider`. `ImageGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`) or a well-known name (`gpt-image-*`, `dall-e-*`). Set the key and base URL in code with `ImageGenerator::from_provider(OpenAiImageProvider::new(model, api_key, base_url))` (`agentai_image::provider::openai`). Implement `provider::ImageProvider` (`generate`, optionally `model`, `supports_edit` and `edit`) for other APIs.
+- API errors in the tools: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request or save) go to the model as `ToolError::Failed`.
+
 ### MCP servers (`mcp-client`)
 
 `McpToolBox` exposes all tools of an MCP server. It is built on the official MCP Rust SDK, `rmcp`. It either starts the server as a child process and talks to it over stdio, or connects to a running server over Streamable HTTP.
@@ -476,7 +519,7 @@ The server's tool list is read once, when the toolbox is created.
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.4.0
+## Limits in 0.5.0
 
 - Tool results are text only; a tool cannot return an image to the model.
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.

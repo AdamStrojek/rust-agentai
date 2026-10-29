@@ -1,9 +1,8 @@
 //! # Conversation messages
 //!
 //! The conversation history is a `Vec<Message>` that you own. Pass it to a run with
-//! [`AgentRequest::with_history`](crate::AgentRequest::with_history) and append
-//! [`AgentResult::new_messages`](crate::AgentResult::new_messages) to it to continue the
-//! conversation.
+//! `AgentRequest::with_history` in `agentai` and append `AgentResult::new_messages` to it to
+//! continue the conversation.
 //!
 //! Messages implement `Serialize` and `Deserialize` with a format defined by this crate, so a
 //! stored history keeps working when the LLM client used inside `agentai` changes.
@@ -26,7 +25,7 @@ pub enum Role {
 
 /// One message of the conversation history.
 ///
-/// The system prompt is not a message: the [`Agent`](crate::Agent) sends its own with every
+/// The system prompt is not a message: the `Agent` of `agentai` sends its own with every
 /// request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -60,15 +59,7 @@ impl Message {
 
     /// Returns the text parts joined together, or `None` when the message has no text.
     pub fn text(&self) -> Option<String> {
-        let texts: Vec<&str> = self
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                Part::Text(text) => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        (!texts.is_empty()).then(|| texts.concat())
+        joined_text(&self.parts)
     }
 
     /// Returns the tool calls in the message.
@@ -131,6 +122,18 @@ impl ToolCall {
             signatures: Vec::new(),
         }
     }
+
+    /// Reasoning signatures some providers attach to the call. Keep them as they are, the
+    /// provider needs them back.
+    pub fn signatures(&self) -> &[String] {
+        &self.signatures
+    }
+
+    /// Sets the reasoning signatures.
+    pub fn with_signatures(mut self, signatures: Vec<String>) -> Self {
+        self.signatures = signatures;
+        self
+    }
 }
 
 /// The result of a tool call, sent back to the model.
@@ -141,19 +144,56 @@ pub struct ToolResponse {
     pub call_id: String,
     /// Name of the tool.
     pub name: String,
-    /// Result sent to the model.
-    pub content: String,
+    /// Result sent to the model: [`Part::Text`] and [`Part::Media`] parts, in order.
+    ///
+    /// Providers that do not accept media in tool results get only the text.
+    #[serde(deserialize_with = "deserialize_tool_content")]
+    pub content: Vec<Part>,
 }
 
 impl ToolResponse {
     /// Creates the result of `call`.
-    pub fn new(call: &ToolCall, content: impl Into<String>) -> Self {
+    pub fn new(call: &ToolCall, content: impl Into<ToolOutput>) -> Self {
         Self {
             call_id: call.id.clone(),
             name: call.name.clone(),
-            content: content.into(),
+            content: content.into().parts,
         }
     }
+
+    /// Returns the text parts joined together, or `None` when the result has no text.
+    pub fn text(&self) -> Option<String> {
+        joined_text(&self.content)
+    }
+}
+
+/// Reads `content` as a list of parts, or as a plain string (the format before 0.5.0).
+fn deserialize_tool_content<'de, D>(deserializer: D) -> Result<Vec<Part>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Content {
+        Text(String),
+        Parts(Vec<Part>),
+    }
+    Ok(match Content::deserialize(deserializer)? {
+        Content::Text(text) => vec![Part::Text(text)],
+        Content::Parts(parts) => parts,
+    })
+}
+
+/// Joins the text parts, `None` when there are none.
+fn joined_text(parts: &[Part]) -> Option<String> {
+    let texts: Vec<&str> = parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    (!texts.is_empty()).then(|| texts.concat())
 }
 
 /// An image, audio or other file in a message.
@@ -236,7 +276,6 @@ fn image_type_from_url(url: &str) -> &'static str {
 /// Where the bytes of [`Media`] are.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[non_exhaustive]
 pub enum MediaSource {
     /// A URL. Few providers accept it.
     Url(String),
@@ -258,149 +297,120 @@ pub struct ProviderData {
     pub data: Value,
 }
 
-// Conversion to and from genai. Kept private: genai is an implementation detail.
-
-use genai::chat::{
-    Binary, BinarySource, ChatMessage, ChatRole, ContentPart, CustomPart, MessageContent,
-};
-
-impl ToolCall {
-    pub(crate) fn from_genai(call: genai::chat::ToolCall) -> Self {
+impl ProviderData {
+    /// Creates provider data without the provider and model.
+    pub fn new(data: Value) -> Self {
         Self {
-            id: call.call_id,
-            name: call.fn_name,
-            arguments: call.fn_arguments,
-            signatures: call.thought_signatures.unwrap_or_default(),
+            provider: None,
+            model: None,
+            data,
         }
     }
-}
 
-impl ToolCall {
-    pub(crate) fn into_genai(self) -> genai::chat::ToolCall {
-        let call = self;
-        genai::chat::ToolCall {
-            call_id: call.id,
-            fn_name: call.name,
-            fn_arguments: call.arguments,
-            thought_signatures: (!call.signatures.is_empty()).then_some(call.signatures),
-        }
+    /// Sets the provider.
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
+    }
+
+    /// Sets the model.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 }
 
-impl ToolResponse {
-    pub(crate) fn into_genai(self) -> genai::chat::ToolResponse {
-        let response = self;
-        let mut out = genai::chat::ToolResponse::new(response.call_id, response.content);
-        out.fn_name = Some(response.name);
-        out
+/// What a tool sends back to the model: text and media (for example a generated image), in
+/// order.
+///
+/// Text converts into it, so a tool that only returns text can keep returning a `String`.
+/// Providers that do not accept media in tool results get only the text parts.
+///
+/// There is no structured (JSON) output: a tool that produces data converts it to text itself,
+/// for example with `serde_json::to_string`, in the format it wants the model to read.
+///
+/// ```rust
+/// # use agentai_core::message::{Media, ToolOutput};
+/// let png = [0x89, b'P', b'N', b'G'];
+/// let output = ToolOutput::from_text("Here is the chart")
+///     .with_media(Media::from_bytes("image/png", png));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ToolOutput {
+    /// [`Part::Text`] and [`Part::Media`] parts.
+    pub parts: Vec<Part>,
+}
+
+impl ToolOutput {
+    /// Creates an output with text.
+    pub fn from_text(text: impl Into<String>) -> Self {
+        Self::default().with_text(text)
+    }
+
+    /// Creates an output with one media part.
+    pub fn from_media(media: Media) -> Self {
+        Self::default().with_media(media)
+    }
+
+    /// Appends text.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.parts.push(Part::Text(text.into()));
+        self
+    }
+
+    /// Appends media.
+    pub fn with_media(mut self, media: Media) -> Self {
+        self.parts.push(Part::Media(media));
+        self
+    }
+
+    /// Returns the text parts joined together, or `None` when there is no text.
+    pub fn text(&self) -> Option<String> {
+        joined_text(&self.parts)
+    }
+
+    /// Returns the media parts.
+    pub fn media(&self) -> Vec<&Media> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                Part::Media(media) => Some(media),
+                _ => None,
+            })
+            .collect()
     }
 }
 
-impl ToolResponse {
-    pub(crate) fn from_genai(response: genai::chat::ToolResponse) -> Self {
-        Self {
-            call_id: response.call_id,
-            name: response.fn_name.unwrap_or_default(),
-            content: response.content,
-        }
-    }
-}
-
-impl Part {
-    pub(crate) fn from_genai(part: ContentPart) -> Self {
-        match part {
-            ContentPart::Text(text) => Part::Text(text),
-            ContentPart::ToolCall(call) => Part::ToolCall(ToolCall::from_genai(call)),
-            ContentPart::ToolResponse(response) => {
-                Part::ToolResponse(ToolResponse::from_genai(response))
-            }
-            ContentPart::ReasoningContent(text) => Part::Reasoning(text),
-            ContentPart::ThoughtSignature(signature) => Part::ReasoningSignature(signature),
-            ContentPart::Binary(binary) => Part::Media(Media {
-                content_type: binary.content_type,
-                source: match binary.source {
-                    BinarySource::Url(url) => MediaSource::Url(url),
-                    BinarySource::Base64(data) => MediaSource::Base64(data.to_string()),
-                },
-                name: binary.name,
-            }),
-            ContentPart::Custom(custom) => Part::ProviderData(ProviderData {
-                provider: custom.model_iden.as_ref().and_then(|iden| {
-                    serde_json::to_value(iden.adapter_kind)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                }),
-                model: custom
-                    .model_iden
-                    .as_ref()
-                    .map(|iden| iden.model_name.to_string()),
-                data: custom.data,
-            }),
-        }
-    }
-}
-
-impl Part {
-    pub(crate) fn into_genai(self) -> ContentPart {
-        let part = self;
-        match part {
-            Part::Text(text) => ContentPart::Text(text),
-            Part::ToolCall(call) => ContentPart::ToolCall(call.into_genai()),
-            Part::ToolResponse(response) => ContentPart::ToolResponse(response.into_genai()),
-            Part::Reasoning(text) => ContentPart::ReasoningContent(text),
-            Part::ReasoningSignature(signature) => ContentPart::ThoughtSignature(signature),
-            Part::Media(media) => ContentPart::Binary(Binary {
-                content_type: media.content_type,
-                source: match media.source {
-                    MediaSource::Url(url) => BinarySource::Url(url),
-                    MediaSource::Base64(data) => BinarySource::Base64(data.into()),
-                },
-                name: media.name,
-            }),
-            Part::ProviderData(data) => {
-                let adapter_kind: Option<genai::adapter::AdapterKind> = data
-                    .provider
-                    .and_then(|provider| serde_json::from_value(Value::String(provider)).ok());
-                ContentPart::Custom(CustomPart {
-                    model_iden: adapter_kind
-                        .map(|kind| genai::ModelIden::new(kind, data.model.unwrap_or_default())),
-                    data: data.data,
-                })
+/// Text parts as they are, media as `[content type]`, for example `[image/png]`.
+impl std::fmt::Display for ToolOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for part in &self.parts {
+            match part {
+                Part::Text(text) => f.write_str(text)?,
+                Part::Media(media) => write!(f, "[{}]", media.content_type)?,
+                _ => {}
             }
         }
+        Ok(())
     }
 }
 
-impl Message {
-    pub(crate) fn from_genai(message: ChatMessage) -> Self {
-        let role = match message.role {
-            ChatRole::Assistant => Role::Assistant,
-            ChatRole::Tool => Role::Tool,
-            // agentai never stores system messages; treat any as user input
-            ChatRole::User | ChatRole::System => Role::User,
-        };
-        Self {
-            role,
-            parts: message
-                .content
-                .into_parts()
-                .into_iter()
-                .map(Part::from_genai)
-                .collect(),
-        }
+impl From<String> for ToolOutput {
+    fn from(text: String) -> Self {
+        Self::from_text(text)
     }
 }
 
-impl Message {
-    pub(crate) fn into_genai(self) -> ChatMessage {
-        let message = self;
-        let role = match message.role {
-            Role::User => ChatRole::User,
-            Role::Assistant => ChatRole::Assistant,
-            Role::Tool => ChatRole::Tool,
-        };
-        let parts: Vec<ContentPart> = message.parts.into_iter().map(Part::into_genai).collect();
-        ChatMessage::new(role, MessageContent::from_parts(parts))
+impl From<&str> for ToolOutput {
+    fn from(text: &str) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl From<Media> for ToolOutput {
+    fn from(media: Media) -> Self {
+        Self::from_media(media)
     }
 }
 
@@ -420,6 +430,11 @@ mod tests {
                 Part::Text("hello".into()),
                 Part::ToolCall(call.clone()),
                 Part::ToolResponse(ToolResponse::new(&call, "result")),
+                Part::ToolResponse(ToolResponse::new(
+                    &call,
+                    ToolOutput::from_text("an image")
+                        .with_media(Media::new("image/png", MediaSource::Base64("aGk=".into()))),
+                )),
                 Part::Media(Media::new("image/png", MediaSource::Base64("aGk=".into()))),
                 Part::Media(Media::new(
                     "image/png",
@@ -435,17 +450,22 @@ mod tests {
     }
 
     #[test]
-    fn messages_round_trip_through_genai() {
-        let message = every_part();
-        let back = Message::from_genai(message.clone().into_genai());
-        assert_eq!(back, message);
-    }
-
-    #[test]
     fn messages_round_trip_through_json() {
         let message = every_part();
         let json = serde_json::to_string(&message).unwrap();
         assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), message);
+    }
+
+    #[test]
+    fn tool_responses_stored_before_0_5_still_load() {
+        let json = r#"{"role":"tool","parts":[{"type":"tool_response",
+            "value":{"call_id":"call_1","name":"echo","content":"result"}}]}"#;
+        let message: Message = serde_json::from_str(json).unwrap();
+        let call = ToolCall::new("call_1", "echo", json!({}));
+        assert_eq!(
+            message,
+            Message::tool_response(ToolResponse::new(&call, "result"))
+        );
     }
 
     #[test]
