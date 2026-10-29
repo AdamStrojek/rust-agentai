@@ -1,19 +1,20 @@
 //! # Image providers
 //!
-//! [`ImageProvider`] is the interface between [`ImageToolBox`](crate::ImageToolBox) and an
+//! [`ImageProvider`] is the interface between [`ImageGenerator`](crate::ImageGenerator) and an
 //! image generation API. Each submodule implements it for one API:
 //!
 //! - [`openai`]: the OpenAI image API and APIs compatible with it.
 //!
 //! Usually you do not pick a provider yourself: [`from_model`] (used by
-//! [`ImageToolBox::new`](crate::ImageToolBox::new)) chooses it from the model name. Build one
+//! [`ImageGenerator::new`](crate::ImageGenerator::new)) chooses it from the model name. Build one
 //! yourself to set the API key or base URL in code, or implement [`ImageProvider`] for another
 //! API.
 
 pub mod openai;
 
-use agentai::Media;
 use agentai_core::HttpError;
+use agentai_core::message::Media;
+use agentai_core::storage::StorageError;
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -98,6 +99,9 @@ pub struct ImageResponse {
     pub image: Media,
     /// The prompt the provider actually used, if it rewrote yours.
     pub revised_prompt: Option<String>,
+    /// ID of the image in the storage of the [`ImageGenerator`](crate::ImageGenerator), if
+    /// it has one.
+    pub id: Option<String>,
 }
 
 impl ImageResponse {
@@ -106,6 +110,7 @@ impl ImageResponse {
         Self {
             image,
             revised_prompt: None,
+            id: None,
         }
     }
 
@@ -138,6 +143,9 @@ pub enum ImageError {
     /// The environment variable with the API key is not set.
     #[error("the API key is missing, set {0}")]
     MissingApiKey(&'static str),
+    /// The image was made but could not be saved in the storage.
+    #[error("cannot save the image: {0}")]
+    Storage(#[from] StorageError),
 }
 
 impl ImageError {
@@ -160,6 +168,11 @@ impl ImageError {
 /// [`edit`](ImageProvider::edit).
 #[async_trait]
 pub trait ImageProvider: Send + Sync + 'static {
+    /// Name of the model, if the provider has one.
+    fn model(&self) -> Option<&str> {
+        None
+    }
+
     /// Generates an image.
     async fn generate(&self, request: ImageRequest) -> Result<ImageResponse, ImageError>;
 

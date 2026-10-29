@@ -19,8 +19,10 @@
 //! - [crate::tool::buildin]: Provides a set of useful built-in tools. (Requires the `tools-buildin` feature).
 //! - [crate::tool::mcp]: Provides a `ToolBox` for interacting with the MCP Client. (Requires the `mcp-client` feature).
 //! - [crate::tool::web]: Provides toolboxes for interacting with the web, such as searching and fetching content. (Requires the `tools-web` feature).
-//! - [`agentai-image`](https://docs.rs/agentai-image) (a separate crate): `ImageToolBox` with tools to generate and edit
-//!   images, for OpenAI and compatible APIs. Add it with `cargo add agentai-image`.
+//! - [`agentai-image`](https://docs.rs/agentai-image) (a separate crate, `cargo add agentai-image`): image tools for
+//!   OpenAI and compatible APIs.
+//!   - `GenerateImageToolBox`: `generate_image` and `edit_image`, returning the image or only its metadata as JSON.
+//!   - `ReadMediaToolBox`: `read_media` gives the model a stored file (from any `MediaRead`) by its ID.
 //!
 //! A tool returns text, or a [`ToolOutput`] with text and images for the model.
 //!

@@ -5,7 +5,7 @@
 //! APIs that follow the same format.
 
 use super::{ImageEditRequest, ImageError, ImageProvider, ImageRequest, ImageResponse};
-use agentai::{Media, MediaSource};
+use agentai_core::message::{Media, MediaSource};
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
 use base64::Engine;
@@ -50,7 +50,7 @@ impl std::fmt::Debug for OpenAiImageProvider {
 
 impl OpenAiImageProvider {
     /// Creates a provider for `model` with the API key and base URL given in code, for example
-    /// [`DEFAULT_BASE_URL`].
+    /// [`DEFAULT_BASE_URL`]. An empty key sends no `Authorization` header.
     pub fn new(
         model: impl Into<String>,
         api_key: impl Into<String>,
@@ -65,7 +65,8 @@ impl OpenAiImageProvider {
     }
 
     /// Creates a provider for `model` with the API key from `OPENAI_API_KEY` and the base URL
-    /// from `OPENAI_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set.
+    /// from `OPENAI_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set. The key may be left
+    /// out when `OPENAI_BASE_URL` is set, for local servers without authentication.
     pub fn from_env(model: impl Into<String>) -> Result<Self, ImageError> {
         Self::from_lookup(model, |name| std::env::var(name).ok())
     }
@@ -74,8 +75,13 @@ impl OpenAiImageProvider {
         model: impl Into<String>,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, ImageError> {
-        let api_key = lookup(API_KEY_ENV).ok_or(ImageError::MissingApiKey(API_KEY_ENV))?;
-        let base_url = lookup(BASE_URL_ENV).unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        let base_url = lookup(BASE_URL_ENV);
+        let api_key = match (lookup(API_KEY_ENV), &base_url) {
+            (Some(key), _) => key,
+            (None, Some(_)) => String::new(),
+            (None, None) => return Err(ImageError::MissingApiKey(API_KEY_ENV)),
+        };
+        let base_url = base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         Ok(Self::new(model, api_key, base_url))
     }
 
@@ -91,7 +97,11 @@ impl OpenAiImageProvider {
     }
 
     async fn send(&self, request: HttpRequest) -> Result<ImageResponse, ImageError> {
-        let request = request.with_header("Authorization", format!("Bearer {}", self.api_key));
+        let request = if self.api_key.is_empty() {
+            request
+        } else {
+            request.with_header("Authorization", format!("Bearer {}", self.api_key))
+        };
         let response = self.client.send(request).await?;
         if !response.is_success() {
             return Err(api_error(&response));
@@ -128,6 +138,10 @@ struct GenerationBody<'a> {
 
 #[async_trait]
 impl ImageProvider for OpenAiImageProvider {
+    fn model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
     async fn generate(&self, request: ImageRequest) -> Result<ImageResponse, ImageError> {
         // No `response_format`: gpt-image models reject it and always answer with base64
         let body = GenerationBody {
@@ -194,8 +208,13 @@ fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> 
         .ok_or_else(|| ImageError::InvalidResponse("no image in the response".to_string()))?;
     let image = match (data.b64_json, data.url) {
         (Some(b64), _) => {
-            let format = body.output_format.as_deref().unwrap_or("png");
-            Media::from_base64(format!("image/{format}"), b64)
+            // Compatible servers may leave out `output_format`; the bytes tell the type then
+            let content_type = match body.output_format.as_deref() {
+                Some("jpg") => "image/jpeg".to_string(),
+                Some(format) => format!("image/{format}"),
+                None => sniff_image_type(&b64).to_string(),
+            };
+            Media::from_base64(content_type, b64)
         }
         (None, Some(url)) => Media::image_url(url),
         (None, None) => {
@@ -207,6 +226,34 @@ fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> 
     let mut response = ImageResponse::new(image);
     response.revised_prompt = data.revised_prompt;
     Ok(response)
+}
+
+/// Image type from the first bytes of base64 data, `image/png` when unknown.
+fn sniff_image_type(b64: &str) -> &'static str {
+    let prefix: String = b64.chars().take(16).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(prefix)
+        .unwrap_or_default();
+    match bytes.as_slice() {
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [b'G', b'I', b'F', b'8', ..] => "image/gif",
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => "image/webp",
+        _ => "image/png",
+    }
 }
 
 /// Reads `error.message` of an OpenAI error, or falls back to the body.
@@ -310,6 +357,24 @@ pub(crate) mod tests {
             ImageResponse::new(Media::from_base64("image/webp", "aGk="))
                 .with_revised_prompt("a red cat")
         );
+    }
+
+    #[tokio::test]
+    async fn without_output_format_the_type_comes_from_the_bytes_and_no_key_sends_no_header() {
+        use base64::Engine;
+        let jpeg = base64::engine::general_purpose::STANDARD.encode([0xFF, 0xD8, 0xFF, 0xE0, 0, 1]);
+        // As a local OpenAI-compatible server answers: `url: null`, no `output_format`
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"created": 1, "data": [{"b64_json": jpeg, "url": null}]}),
+        )]);
+        let provider =
+            OpenAiImageProvider::new("m", "", "http://local/v1").with_client(http.clone());
+
+        let response = provider.generate(ImageRequest::new("x")).await.unwrap();
+
+        assert_eq!(response.image.content_type, "image/jpeg");
+        assert_eq!(http.request(0).header("authorization"), None);
     }
 
     #[tokio::test]
@@ -417,6 +482,12 @@ pub(crate) mod tests {
         let provider =
             OpenAiImageProvider::from_lookup("m", vars("k", Some("http://local:8000/v1"))).unwrap();
         assert_eq!(provider.base_url, "http://local:8000/v1");
+        // Local servers often need no key
+        let provider = OpenAiImageProvider::from_lookup("m", |name| {
+            (name == BASE_URL_ENV).then(|| "http://local:8000/v1".to_string())
+        })
+        .unwrap();
+        assert_eq!(provider.api_key, "");
         assert!(matches!(
             OpenAiImageProvider::from_lookup("m", |_| None),
             Err(ImageError::MissingApiKey(API_KEY_ENV))

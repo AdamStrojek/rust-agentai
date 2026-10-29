@@ -1,24 +1,21 @@
 # agentai-image
 
-Image generation and editing tools for [AgentAI](https://crates.io/crates/agentai) agents.
+Image generation and editing for [AgentAI](https://crates.io/crates/agentai).
 
-`ImageToolBox` gives an agent the `generate_image` tool (and `edit_image`, when you tell it
-where to load images from). The image is returned to the model as the tool result, and an
-optional `ImageSink` saves every image, for example to a directory or your UI.
+- `ImageGenerator` generates and edits images from your code.
+- With the `toolbox` feature (on by default), `GenerateImageToolBox` gives an agent the
+  `generate_image` and `edit_image` tools. The model gets the image, or only its metadata as
+  JSON. `ReadMediaToolBox` lets the model read a stored file by its ID.
+- Images are saved in any `MediaStorage` from `agentai-core` (`MediaRead` + `MediaSave`).
 
-```rust,no_run
-use agentai::Agent;
-use agentai_image::ImageToolBox;
+```rust,ignore
+use agentai_image::ImageGenerator;
 
-# async fn run() -> anyhow::Result<()> {
 // The provider comes from the model name, the API key from `OPENAI_API_KEY`
-let images = ImageToolBox::new("openai::gpt-image-1")?;
-let agent = Agent::new("claude-haiku-5-5", "You are an illustrator.")?.with_toolbox(images);
-let result = agent.run::<String>("Draw a lighthouse at dawn").await?;
-# Ok(())
-# }
+let generator = ImageGenerator::new("openai::gpt-image-1")?.with_size("1024x1024");
+let response = generator.generate("A lighthouse at dawn").await?;
 ```
 
-Providers live in `agentai_image::provider`; `provider::openai` speaks the OpenAI image API
-and any API compatible with it (`OPENAI_BASE_URL`, or a base URL of your own). See the
-`image_generation` example for a sink and source that save images to a directory.
+Providers live in `agentai_image::provider`. `provider::openai` speaks the OpenAI image API and
+any API compatible with it (`OPENAI_BASE_URL`, or a base URL set in code). See the
+`image_generator` and `image_tools` examples.
