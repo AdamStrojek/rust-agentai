@@ -1,4 +1,4 @@
-//! An agent that draws an image and then edits it, with the images kept in `images/`.
+//! An agent that draws an image and then looks at it, with the images kept in `images/`.
 //!
 //! ```bash
 //! OPENAI_API_KEY=<your key> cargo run -p agentai-image --example image_tools
@@ -7,8 +7,9 @@
 //!     cargo run -p agentai-image --example image_tools
 //! ```
 //!
-//! The agent's model comes from `AGENTAI_MODEL` (default `claude-haiku-5-5`). The image tools
-//! answer with metadata only, and the model looks at an image with `read_media` when it needs to.
+//! The agent's model comes from `AGENTAI_MODEL` (default `claude-haiku-5-5`) and must accept
+//! images. `generate_image` answers with metadata only, so the model sees the picture only when it
+//! reads the file with `read_media`.
 
 use agentai::Agent;
 use agentai::tool::ToolBoxSet;
@@ -89,7 +90,8 @@ async fn main() -> anyhow::Result<()> {
 
     let result = agent
         .run::<String>(
-            "Draw a small lighthouse on a rock at dawn, then edit that image to add a sailing boat.",
+            "Draw a small lighthouse on a rock at dawn. Then open the image you made with \
+             read_media and describe what is in it: objects, colors and composition.",
         )
         .await?;
     println!("{}", result.answer);

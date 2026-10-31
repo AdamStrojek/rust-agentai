@@ -429,7 +429,7 @@ impl ToolBox for ImageToolBox {
 }
 
 #[tokio::test]
-async fn tool_images_stay_in_the_history_and_text_reaches_text_only_providers() {
+async fn tool_images_reach_openai_compatible_models_as_user_attachments() {
     let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
 
     let result: AgentResult<String> = llm
@@ -439,15 +439,27 @@ async fn tool_images_stay_in_the_history_and_text_reaches_text_only_providers() 
         .await
         .unwrap();
 
-    // The OpenAI chat API takes no images in tool results: only the text is sent
-    let messages = request_json(&llm, 1)["messages"].clone();
-    let tool_message = messages
+    // The OpenAI chat API takes no images in tool results: the text goes in the tool message
+    // and the image in a user message right after it
+    let messages = request_json(&llm, 1)["messages"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let tool_index = messages
+        .iter()
+        .position(|m| m["role"] == json!("tool"))
+        .unwrap();
+    assert_eq!(messages[tool_index]["content"], json!("image-1.png"));
+    let attachment = &messages[tool_index + 1];
+    assert_eq!(attachment["role"], json!("user"));
+    let image_urls: Vec<&Value> = attachment["content"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["role"] == json!("tool"))
-        .unwrap();
-    assert_eq!(tool_message["content"], json!("image-1.png"));
+        .filter(|part| part["type"] == json!("image_url"))
+        .map(|part| &part["image_url"]["url"])
+        .collect();
+    assert_eq!(image_urls, [&json!("data:image/png;base64,aGk=")]);
     // The run's messages keep the image, for providers that accept it and for the caller
     let response = result
         .new_messages

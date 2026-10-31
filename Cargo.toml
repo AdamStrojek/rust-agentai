@@ -4,4 +4,4 @@ members = ["crates/*"]
 
 # Tool results with images need a genai release that is not on crates.io yet
 [patch.crates-io]
-genai = { git = "https://github.com/AdamStrojek/rust-genai", rev = "415f8c5" }
+genai = { git = "https://github.com/AdamStrojek/rust-genai", rev = "85e2472" }

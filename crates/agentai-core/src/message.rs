@@ -146,7 +146,7 @@ pub struct ToolResponse {
     pub name: String,
     /// Result sent to the model: [`Part::Text`] and [`Part::Media`] parts, in order.
     ///
-    /// Providers that do not accept media in tool results get only the text.
+    /// Media reaches every vision model, see [`ToolOutput`].
     #[serde(deserialize_with = "deserialize_tool_content")]
     pub content: Vec<Part>,
 }
@@ -324,7 +324,9 @@ impl ProviderData {
 /// order.
 ///
 /// Text converts into it, so a tool that only returns text can keep returning a `String`.
-/// Providers that do not accept media in tool results get only the text parts.
+/// Anthropic, Gemini, OpenAI Responses, Bedrock and Ollama get the media in the tool result;
+/// OpenAI-compatible Chat Completions APIs (OpenAI, oMLX, Groq, OpenRouter, ...) get it in a user
+/// message right after the tool results, since their tool messages hold only text.
 ///
 /// There is no structured (JSON) output: a tool that produces data converts it to text itself,
 /// for example with `serde_json::to_string`, in the format it wants the model to read.

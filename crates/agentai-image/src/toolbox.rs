@@ -19,8 +19,7 @@ const READ_MEDIA: &str = "read_media";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ImageToolOutput {
-    /// The image itself and a short text with its ID. Providers that do not accept images in
-    /// tool results get only the text.
+    /// The image itself and a short text with its ID. The model must accept images.
     #[default]
     Media,
     /// Only a JSON text with what was made (ID, type, size in bytes, model, prompts, ...),
