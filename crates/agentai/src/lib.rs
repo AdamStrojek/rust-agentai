@@ -36,8 +36,9 @@
 //! - **Media storage**: `MediaRead` and `MediaSave` (in `agentai-core`) store images and other files under an
 //!   ID; implement them for your blob store or directory, or use `MemoryStorage`.
 //! - **Tools can return images**: a tool returns a [`ToolOutput`](crate::tool::ToolOutput) with text and
-//!   [`Media`](crate::Media) parts, for example a chart or a screenshot. Providers that accept images in tool
-//!   results (Anthropic, Gemini, OpenAI Responses, Bedrock, Ollama) get them, others get the text. `#[toolbox]`
+//!   [`Media`](crate::Media) parts, for example a chart or a screenshot. Anthropic, Gemini, OpenAI Responses,
+//!   Bedrock and Ollama get them in the tool result; OpenAI-compatible APIs (OpenAI, oMLX, Groq, OpenRouter, ...)
+//!   get them in a user message right after the tool results. `#[toolbox]`
 //!   methods return `ToolResult<ToolOutput>` for that; methods that return text stay as they are.
 //! - Internal: the new `agentai-core` crate holds the shared types (`Message`, `Prompt`, `Media`, still
 //!   available from `agentai` under the same paths) and the HTTP client abstraction used by `agentai-image`, so it
