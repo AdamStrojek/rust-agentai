@@ -472,7 +472,7 @@ For an agent (feature `toolbox`, on by default):
 
 ```rust
 use agentai::tool::ToolBoxSet;
-use agentai_core::storage::MemoryStorage;
+use agentai_image::storage::MemoryStorage;
 use agentai_image::{GenerateImageToolBox, ImageGenerator, ImageToolOutput, ReadMediaToolBox};
 
 let storage = MemoryStorage::new(); // clones share the same storage
@@ -489,7 +489,7 @@ let agent = agent.with_toolbox(tools);
 - `GenerateImageToolBox` tools: `generate_image(prompt)`, and `edit_image(prompt, images)` (image IDs) when it has a storage and the provider can edit. With a storage every image is saved and the model gets its ID.
 - `ImageToolOutput::Media` returns the image and a text with its ID (the model must accept images); `ImageToolOutput::Metadata` returns only JSON, for example `{"id":"1-image.png","content_type":"image/png","bytes":1666956,"model":"gpt-image-1","prompt":"...","revised_prompt":"...","size":"1024x1024"}`.
 - `ReadMediaToolBox::new(impl MediaRead)`: tool `read_media(id)` returns the stored file to the model.
-- Storage (`agentai_core::storage`): `MediaSave::save(&self, &Media) -> Result<String, StorageError>` stores a file and returns the ID it chose; `MediaRead::read(&self, id) -> Result<Media, StorageError>`; a type with both is a `MediaStorage`. Return `StorageError::NotFound` for unknown IDs (the model gets `InvalidArguments` and can correct the ID). Both traits are implemented for `Arc<T>`, so one storage can be shared.
+- Storage (`agentai_image::storage`, re-exported from `agentai_core::storage`): `MediaSave::save(&self, &Media) -> Result<String, StorageError>` stores a file and returns the ID it chose; `MediaRead::read(&self, id) -> Result<Media, StorageError>`; a type with both is a `MediaStorage`. Return `StorageError::NotFound` for unknown IDs (the model gets `InvalidArguments` and can correct the ID). Both traits are implemented for `Arc<T>`, so one storage can be shared.
 - Providers are in `agentai_image::provider`. `ImageGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`) or a well-known name (`gpt-image-*`, `dall-e-*`). Set the key and base URL in code with `ImageGenerator::from_provider(OpenAiImageProvider::new(model, api_key, base_url))` (`agentai_image::provider::openai`). Implement `provider::ImageProvider` (`generate`, optionally `model`, `supports_edit` and `edit`) for other APIs.
 - API errors in the tools: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request or save) go to the model as `ToolError::Failed`.
 

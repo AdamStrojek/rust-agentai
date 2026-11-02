@@ -8,7 +8,7 @@
 //!     cargo run -p agentai-image --example image_generator
 //! ```
 
-use agentai_core::message::MediaSource;
+use agentai::MediaSource;
 use agentai_image::{ImageGenerator, ImageResponse};
 use base64::Engine;
 
