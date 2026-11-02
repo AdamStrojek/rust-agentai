@@ -13,7 +13,9 @@ keywords = ["generative-ai", "agent", "image-generation", "openai"]
 
 [dependencies]
 agentai = { path = "../agentai", version = "0.4", default-features = false, optional = true }
-agentai-core = { path = "../agentai-core", version = "0.4" }
+agentai-core = { path = "../agentai-core", version = "0.4", default-features = false, features = [
+    "reqwest",
+] }
 async-trait = "0.1.92"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -28,7 +30,7 @@ anyhow = "1.0.104"
 tokio = { version = "1.54.0", features = ["full"] }
 
 [features]
-default = ["toolbox"]
+default = ["toolbox", "rustls-ring", "system-proxy"]
 #! Available features for `agentai-image` crate.
 #!
 #! Features list:
@@ -38,6 +40,16 @@ default = ["toolbox"]
 ## [`ReadMediaToolBox`](crate::ReadMediaToolBox). Without it the crate has only
 ## [`ImageGenerator`](crate::ImageGenerator) and does not depend on `agentai`.
 toolbox = ["dep:agentai", "dep:schemars"]
+## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
+## store.
+rustls-ring = ["agentai-core/rustls-ring", "agentai?/rustls-ring"]
+## TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+rustls-aws-lc = ["agentai-core/rustls-aws-lc", "agentai?/rustls-aws-lc"]
+## TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined
+## with a `rustls-*` feature: set `default-features = false`.
+native-tls = ["agentai-core/native-tls", "agentai?/native-tls"]
+## Reads the macOS and Windows system proxy settings.
+system-proxy = ["agentai-core/system-proxy", "agentai?/system-proxy"]
 
 [[example]]
 name = "image_tools"

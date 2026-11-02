@@ -7,6 +7,7 @@ Image generation and editing for [AgentAI](https://crates.io/crates/agentai).
   `generate_image` and `edit_image` tools. The model gets the image, or only its metadata as
   JSON. `ReadMediaToolBox` lets the model read a stored file by its ID.
 - Images are saved in any `MediaStorage` from `agentai-core` (`MediaRead` + `MediaSave`).
+- TLS features as in `agentai`: `rustls-ring` (default), `rustls-aws-lc`, `native-tls`, `system-proxy`.
 
 ```rust,ignore
 use agentai_image::ImageGenerator;

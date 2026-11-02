@@ -38,6 +38,7 @@ impl WebSearchToolBox {
     ///
     /// * `api_key` - A string slice that holds the API key for the Brave Search API.
     pub fn new(api_key: &str) -> Self {
+        crate::tls::install_crypto_provider();
         Self {
             client: Client::default(),
             api_key: api_key.to_string(),
@@ -132,6 +133,7 @@ impl Default for WebFetchToolBox {
 impl WebFetchToolBox {
     /// Creates a new instance of `WebFetchToolBox`.
     pub fn new() -> Self {
+        crate::tls::install_crypto_provider();
         Self {
             client: Client::default(),
         }

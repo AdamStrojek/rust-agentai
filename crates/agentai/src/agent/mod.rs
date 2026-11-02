@@ -221,6 +221,7 @@ impl Agent {
     ///
     /// Returns an error when the LLM client cannot be created.
     pub fn new(model: &str, system: &str) -> Result<Self, AgentError> {
+        crate::tls::install_crypto_provider();
         let client =
             Client::new().map_err(|err| AgentError::ClientInit(LlmError::from_genai(err)))?;
         Ok(Self::from_parts(client, Some(model.to_string()), system))
@@ -239,6 +240,8 @@ impl Agent {
     /// use agentai::genai::adapter::AdapterKind;
     /// use agentai::genai::resolver::{AuthData, Endpoint};
     ///
+    /// // With the default `rustls-ring` feature, do this before building any HTTP client
+    /// agentai::tls::install_crypto_provider();
     /// let client = Client::builder()
     ///     // Every model name goes to this endpoint with the OpenAI Chat Completions API
     ///     .with_adapter_kind(AdapterKind::OpenAI)
@@ -456,6 +459,7 @@ impl Default for Agent {
     ///
     /// Panics when the LLM client cannot be created. [`Agent::new`] returns that error instead.
     fn default() -> Self {
+        crate::tls::install_crypto_provider();
         let client = Client::new().expect("failed to create the LLM client");
         Self::from_parts(client, None, "")
     }

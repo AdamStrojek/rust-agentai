@@ -17,7 +17,7 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [dependencies]
 agentai-macros = { path = "../agentai-macros", version = "0.4", optional = true }
-genai = "0.7"
+genai = { version = "0.7", default-features = false }
 agentai-core = { path = "../agentai-core", version = "0.4", default-features = false }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -25,12 +25,16 @@ serde_json = "1.0.154"
 schemars = { version = "1.2", features = ["derive"] }
 async-trait = "0.1.92"
 log = "0.4.34"
-reqwest = { version = "0.13.5", features = ["json", "query"] }
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "json",
+    "query",
+    "charset",
+    "http2",
+] }
 rmcp = { version = "3.6", optional = true, default-features = false, features = [
     "client",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
-    "reqwest",
 ] }
 tokio = { version = "1.54.0", optional = true, features = ["process"] }
 document-features = { version = "0.2" }
@@ -52,7 +56,15 @@ tokio = { version = "1.54.0", features = ["full"] }
 simplelog = "0.12.2"
 
 [features]
-default = ["mcp-client", "macros", "tokio", "tools-buildin", "tools-web"]
+default = [
+    "rustls-ring",
+    "system-proxy",
+    "mcp-client",
+    "macros",
+    "tokio",
+    "tools-buildin",
+    "tools-web",
+]
 #! Available features for `agentai` crate.
 #! To enable any of these features, you need to enter this command:
 #!
@@ -62,6 +74,20 @@ default = ["mcp-client", "macros", "tokio", "tools-buildin", "tools-web"]
 #!
 #! Features list:
 #!
+
+## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
+## store. The library installs ring as the process-wide rustls provider when it builds a client;
+## call [`tls::install_crypto_provider`](crate::tls::install_crypto_provider) before you build
+## your own `genai::Client` or `reqwest::Client`.
+rustls-ring = ["agentai-core/rustls-ring", "reqwest/rustls-no-provider"]
+## TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+rustls-aws-lc = ["agentai-core/rustls-aws-lc", "reqwest/rustls", "genai/rustls-tls"]
+## TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined
+## with a `rustls-*` feature: set `default-features = false`.
+native-tls = ["agentai-core/native-tls", "reqwest/native-tls", "genai/native-tls"]
+## Reads the macOS and Windows system proxy settings. Proxy environment variables
+## (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) work without it.
+system-proxy = ["agentai-core/system-proxy", "reqwest/system-proxy", "genai/system-proxy"]
 
 ## Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
 mcp-client = ["dep:rmcp", "dep:tokio"]

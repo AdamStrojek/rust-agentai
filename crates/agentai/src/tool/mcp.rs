@@ -82,6 +82,7 @@ impl McpToolBox {
     /// cannot be read.
     pub async fn new_http(url: &str) -> Result<Self, ToolError> {
         trace!("McpToolBox::new_http for url: {url}");
+        crate::tls::install_crypto_provider();
         let transport = StreamableHttpClientTransport::from_uri(url.to_string());
         let client = ().serve(transport).await.map_err(connect_error)?;
         trace!("McpToolBox::new_http client initialized");
@@ -103,6 +104,7 @@ impl McpToolBox {
     /// cannot be read.
     pub async fn new_http_with_bearer(url: &str, token: &str) -> Result<Self, ToolError> {
         trace!("McpToolBox::new_http_with_bearer for url: {url}");
+        crate::tls::install_crypto_provider();
         let config =
             StreamableHttpClientTransportConfig::with_uri(url.to_string()).auth_header(token);
         let transport = StreamableHttpClientTransport::from_config(config);
