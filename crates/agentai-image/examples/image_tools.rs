@@ -13,8 +13,8 @@
 
 use agentai::Agent;
 use agentai::tool::ToolBoxSet;
-use agentai_core::message::{Media, MediaSource};
-use agentai_core::storage::{MediaRead, MediaSave, StorageError};
+use agentai::{Media, MediaSource};
+use agentai_image::storage::{MediaRead, MediaSave, StorageError};
 use agentai_image::{GenerateImageToolBox, ImageGenerator, ImageToolOutput, ReadMediaToolBox};
 use async_trait::async_trait;
 use base64::Engine;

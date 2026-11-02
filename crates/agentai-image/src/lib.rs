@@ -18,7 +18,8 @@
 //! ```
 //!
 //! With [`with_storage`](ImageGenerator::with_storage) every image is saved in a
-//! [`MediaSave`](agentai_core::storage::MediaSave) and gets an ID.
+//! [`MediaSave`](storage::MediaSave) and gets an ID. The [`storage`] module (from
+//! `agentai-core`) has the storage traits and [`MemoryStorage`](storage::MemoryStorage).
 //!
 //! ## Tools for agents
 //!
@@ -31,7 +32,7 @@
 //! # async fn run() -> anyhow::Result<()> {
 //! use agentai::Agent;
 //! use agentai::tool::ToolBoxSet;
-//! use agentai_core::storage::MemoryStorage;
+//! use agentai_image::storage::MemoryStorage;
 //! use agentai_image::{GenerateImageToolBox, ImageGenerator, ReadMediaToolBox};
 //!
 //! let storage = MemoryStorage::new();
@@ -71,6 +72,8 @@ pub mod provider;
 #[cfg(feature = "toolbox")]
 mod toolbox;
 
+#[doc(inline)]
+pub use agentai_core::storage;
 pub use generator::ImageGenerator;
 pub use provider::{ImageError, ImageResponse};
 #[cfg(feature = "toolbox")]
