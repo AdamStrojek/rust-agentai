@@ -155,6 +155,7 @@ impl LocationToolBox {
     ) -> ToolResult {
         let url = format!("https://nominatim.openstreetmap.org/search?q={location}&format=jsonv2");
 
+        crate::tls::install_crypto_provider();
         let client = reqwest::Client::new();
         let response = client
             .get(&url)

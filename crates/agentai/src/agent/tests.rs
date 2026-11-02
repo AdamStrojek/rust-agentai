@@ -89,6 +89,7 @@ impl MockLlm {
 fn openai_client(base_url: &str) -> Client {
     use genai::adapter::AdapterKind;
     use genai::resolver::{AuthData, Endpoint};
+    crate::tls::install_crypto_provider();
     Client::builder()
         .with_adapter_kind(AdapterKind::OpenAI)
         .append_provider_config(

@@ -46,6 +46,10 @@ jobs:
             ${{ runner.os }}-cargo-clippy-
       - name: Run Clippy
         run: cargo clippy -- -D warnings
+      - name: Check other TLS backends
+        run: |
+          cargo check -p agentai --no-default-features --features rustls-aws-lc,macros
+          cargo check -p agentai --no-default-features --features native-tls,mcp-client,tools-web
 
   test:
     name: Test

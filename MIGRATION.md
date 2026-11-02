@@ -57,6 +57,30 @@ AgentEvent::ToolResult { content, .. } => log(&content.text().unwrap_or_default(
 
 Histories stored with 0.4.0 still load: a tool result saved as a string becomes one text part.
 
+### Choose a TLS backend
+
+TLS is now chosen with features of `agentai` (and `agentai-image`): `rustls-ring` (default),
+`rustls-aws-lc` (the backend of 0.4.0) or `native-tls`, plus `system-proxy` (default). If you set
+`default-features = false`, add a backend, otherwise HTTPS requests fail:
+
+```toml
+# 0.4.0
+agentai = { version = "0.4", default-features = false, features = ["macros"] }
+# 0.5.0
+agentai = { version = "0.5", default-features = false, features = ["macros", "rustls-ring", "system-proxy"] }
+```
+
+With `rustls-ring`, building a `reqwest` client panics until a rustls crypto provider is installed.
+`agentai` installs ring before it builds its own clients; if you build a `genai::Client` for
+`Agent::from_client` or your own `reqwest::Client` before that, install it first:
+
+```rust
+// 0.5.0
+agentai::tls::install_crypto_provider();
+let client = agentai::genai::Client::builder()/* ... */.build()?;
+let agent = Agent::from_client(client, "gpt-4.1-mini", "You are a useful assistant");
+```
+
 ## 0.3.1 → 0.4.0 (2026-10-26)
 
 ### `Agent::new` takes the model

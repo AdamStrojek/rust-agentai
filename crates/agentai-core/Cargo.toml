@@ -17,14 +17,23 @@ thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 base64 = "0.23"
 serde_json = "1.0.154"
-reqwest = { version = "0.13.5", optional = true }
+reqwest = { version = "0.13.5", optional = true, default-features = false, features = [
+    "charset",
+    "http2",
+] }
+rustls = { version = "0.23", optional = true, default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
 document-features = { version = "0.2" }
 
 [dev-dependencies]
 tokio = { version = "1.54.0", features = ["full"] }
 
 [features]
-default = ["reqwest"]
+default = ["reqwest", "rustls-ring", "system-proxy"]
 #! Available features for `agentai-core` crate.
 #!
 #! Features list:
@@ -32,3 +41,16 @@ default = ["reqwest"]
 
 ## Enables [`ReqwestClient`](crate::ReqwestClient), the [`HttpClient`](crate::HttpClient) on top of `reqwest`
 reqwest = ["dep:reqwest"]
+
+## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
+## store. Install the provider with [`tls::install_crypto_provider`](crate::tls::install_crypto_provider)
+## before you build your own `reqwest` client.
+rustls-ring = ["dep:rustls", "reqwest?/rustls-no-provider"]
+## TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+rustls-aws-lc = ["reqwest?/rustls"]
+## TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined
+## with a `rustls-*` feature: set `default-features = false`.
+native-tls = ["reqwest?/native-tls"]
+## Reads the macOS and Windows system proxy settings. Proxy environment variables
+## (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) work without it.
+system-proxy = ["reqwest?/system-proxy"]

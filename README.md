@@ -50,12 +50,16 @@ This library is under heavy development. The interface may change at any time wi
   Bedrock and Ollama get them in the tool result; OpenAI-compatible APIs (OpenAI, oMLX, Groq, OpenRouter, ...)
   get them in a user message right after the tool results. `#[toolbox]`
   methods return `ToolResult<ToolOutput>` for that; methods that return text stay as they are.
+- **TLS backend switches**: pick `rustls-ring` (the new default), `rustls-aws-lc` or `native-tls`, and
+  `system-proxy` (on by default). The default build no longer compiles the `aws-lc-sys` C library. If you
+  build your own `genai::Client` or `reqwest::Client`, call `tls::install_crypto_provider` first.
 - Internal: the new `agentai-core` crate holds the shared types (`Message`, `Prompt`, `Media`, still
   available from `agentai` under the same paths) and the HTTP client abstraction used by `agentai-image`, so it
   can later run on other HTTP stacks, such as WebAssembly.
 
 **Breaking changes**: `ToolBox::call_tool` returns `ToolResult<ToolOutput>`, and `ToolResponse::content` and
-the `content` of tool result events are no longer a `String`. Read the
+the `content` of tool result events are no longer a `String`. With `default-features = false` you must enable a
+TLS feature, or HTTPS requests fail. Read the
 [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
 [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#040--050-YYYY-MM-DD)
 before upgrading.

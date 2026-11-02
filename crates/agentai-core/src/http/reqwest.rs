@@ -4,20 +4,32 @@ use super::{HttpClient, HttpError, HttpRequest, HttpResponse, Method};
 use async_trait::async_trait;
 
 /// [`HttpClient`] on top of `reqwest`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ReqwestClient {
     client: reqwest::Client,
 }
 
 impl ReqwestClient {
     /// Creates a client with the default `reqwest` settings.
+    ///
+    /// It first installs the crypto provider chosen by the TLS features, see
+    /// [`install_crypto_provider`](crate::tls::install_crypto_provider).
     pub fn new() -> Self {
-        Self::default()
+        crate::tls::install_crypto_provider();
+        Self {
+            client: reqwest::Client::new(),
+        }
     }
 
     /// Uses a configured `reqwest` client (timeouts, proxy, ...).
     pub fn from_client(client: reqwest::Client) -> Self {
         Self { client }
+    }
+}
+
+impl Default for ReqwestClient {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
