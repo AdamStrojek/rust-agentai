@@ -14,10 +14,12 @@ in your code.
 
 ## 0.4.0 → 0.5.0 (YYYY-MM-DD)
 
-### Tools return `ToolOutput`
+### `call_tool` takes the `ToolCall` and returns `ToolOutput`
 
 Tool results can carry images, so `ToolBox::call_tool` returns `ToolResult<ToolOutput>` instead of
-`Result<String, ToolError>`. Text converts into `ToolOutput`.
+`Result<String, ToolError>`. Text converts into `ToolOutput`. It also takes the whole call the model
+made, a `&ToolCall` with `name`, `arguments` and `id` (the id the `ToolResponse` and the agent
+events carry), instead of the name and the arguments.
 
 Methods in a `#[toolbox]` that return `ToolResult` (text) need no change. A hand-written `ToolBox`:
 
@@ -30,14 +32,17 @@ async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult {
 
 ```rust
 // 0.5.0
+use agentai::ToolCall;
 use agentai::tool::ToolOutput;
 
-async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
+async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    // call.name, call.arguments (a serde_json::Value), call.id
     Ok("echoed".into())
 }
 ```
 
-Code that calls `call_tool` itself reads the text with `.text()` (`Option<String>`).
+Code that calls `call_tool` itself builds the call with `ToolCall::new(id, name, arguments)` and
+reads the text with `.text()` (`Option<String>`).
 
 ### Tool results in the history and in events
 

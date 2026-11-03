@@ -14,6 +14,7 @@
 //! text, the structured content is returned as JSON. Images, audio and embedded resources are
 //! not forwarded: each one is replaced by a short placeholder such as `[image omitted]`.
 
+use crate::message::ToolCall;
 use crate::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
 use async_trait::async_trait;
 use log::trace;
@@ -162,13 +163,14 @@ impl ToolBox for McpToolBox {
         Ok(self.tools.clone())
     }
 
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+        let tool_name = &call.name;
         // Lets `ToolBoxSet` try the next toolbox for tools this server does not have
-        if !self.tools.iter().any(|t| t.name.as_str() == tool_name) {
-            return Err(ToolError::NotFound(tool_name));
+        if !self.tools.iter().any(|t| &t.name == tool_name) {
+            return Err(ToolError::NotFound(tool_name.clone()));
         }
 
-        let arguments = match arguments {
+        let arguments = match call.arguments.clone() {
             Value::Object(map) => Some(map),
             Value::Null => None,
             other => {
@@ -262,7 +264,7 @@ mod tests {
             "time": "12:00"
         });
         let result = mcp_tools
-            .call_tool("convert_time".to_string(), arguments)
+            .call_tool(&ToolCall::new("call_1", "convert_time", arguments))
             .await?;
 
         // Assert that the result is a non-empty string (the converted time)
@@ -278,7 +280,7 @@ mod tests {
         // Call a non-existent tool
         let arguments = json!({});
         let result = mcp_tools
-            .call_tool("non_existent_tool".to_string(), arguments)
+            .call_tool(&ToolCall::new("call_1", "non_existent_tool", arguments))
             .await;
 
         // Unknown tools return NotFound, so ToolBoxSet can try the next toolbox
@@ -294,7 +296,7 @@ mod tests {
         // An unknown timezone makes the server report a tool error
         let arguments = json!({ "timezone": "Not/AZone" });
         let result = mcp_tools
-            .call_tool("get_current_time".to_string(), arguments)
+            .call_tool(&ToolCall::new("call_1", "get_current_time", arguments))
             .await;
 
         match result {
@@ -330,7 +332,11 @@ mod tests {
         let mcp_tools = create_test_toolbox().await?;
 
         let result = mcp_tools
-            .call_tool("get_current_time".to_string(), json!("Europe/Warsaw"))
+            .call_tool(&ToolCall::new(
+                "call_1",
+                "get_current_time",
+                json!("Europe/Warsaw"),
+            ))
             .await;
 
         assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
