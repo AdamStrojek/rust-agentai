@@ -39,7 +39,7 @@ default = ["toolbox", "rustls-ring", "system-proxy"]
 ## Enables the agent tools: [`GenerateImageToolBox`](crate::GenerateImageToolBox) and
 ## [`ReadMediaToolBox`](crate::ReadMediaToolBox). Without it the crate has only
 ## [`ImageGenerator`](crate::ImageGenerator) and does not depend on `agentai`.
-toolbox = ["dep:agentai", "dep:schemars"]
+toolbox = ["dep:agentai", "agentai/macros", "dep:schemars"]
 ## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
 ## store.
 rustls-ring = ["agentai-core/rustls-ring", "agentai?/rustls-ring"]
