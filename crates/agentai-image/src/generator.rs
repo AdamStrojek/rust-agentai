@@ -113,8 +113,9 @@ impl ImageGenerator {
     ) -> Result<ImageResponse, ImageError> {
         request.size = request.size.or_else(|| self.size.clone());
         request.quality = request.quality.or_else(|| self.quality.clone());
+        let name = request.name.take();
         let response = self.provider.generate(request).await?;
-        self.store(response).await
+        self.store(response, name).await
     }
 
     /// Edits images following a prompt.
@@ -133,21 +134,32 @@ impl ImageGenerator {
     ) -> Result<ImageResponse, ImageError> {
         request.size = request.size.or_else(|| self.size.clone());
         request.quality = request.quality.or_else(|| self.quality.clone());
+        let name = request.name.take();
         let response = self.provider.edit(request).await?;
-        self.store(response).await
+        self.store(response, name).await
     }
 
-    /// Names the image `image.<ext>` when the provider did not, and saves it.
-    async fn store(&self, mut response: ImageResponse) -> Result<ImageResponse, ImageError> {
-        if response.image.name.is_none() {
-            let extension = response
-                .image
-                .content_type
-                .rsplit('/')
-                .next()
-                .unwrap_or("png");
-            response.image.name = Some(format!("image.{extension}"));
-        }
+    /// Names the image (the requested name, else the provider's, else `image`), adds the
+    /// extension of its type to a name without one, and saves it.
+    async fn store(
+        &self,
+        mut response: ImageResponse,
+        name: Option<String>,
+    ) -> Result<ImageResponse, ImageError> {
+        let extension = response
+            .image
+            .content_type
+            .rsplit('/')
+            .next()
+            .unwrap_or("png");
+        let name = name
+            .or(response.image.name.take())
+            .unwrap_or_else(|| "image".to_string());
+        response.image.name = Some(if name.contains('.') {
+            name
+        } else {
+            format!("{name}.{extension}")
+        });
         if let Some(storage) = &self.storage {
             response.id = Some(storage.save(&response.image).await?);
         }
@@ -188,5 +200,28 @@ mod tests {
         let id = response.id.clone().unwrap();
         assert_eq!(storage.read(&id).await.unwrap(), response.image);
         assert_eq!(response.image.name.as_deref(), Some("image.png"));
+    }
+
+    #[tokio::test]
+    async fn the_requested_name_reaches_the_storage_with_the_image_extension() {
+        let reply = || json_response(200, json!({"data": [{"b64_json": "aGk="}]}));
+        let http = MockHttp::new(vec![reply(), reply()]);
+        let storage = MemoryStorage::new();
+        let generator =
+            ImageGenerator::from_provider(provider(&http)).with_storage(storage.clone());
+
+        let plain = generator
+            .generate_with(ImageRequest::new("a cat").with_name("cat"))
+            .await
+            .unwrap();
+        let with_extension = generator
+            .generate_with(ImageRequest::new("a dog").with_name("dog.webp"))
+            .await
+            .unwrap();
+
+        assert_eq!(plain.id.as_deref(), Some("1-cat.png"));
+        assert_eq!(with_extension.id.as_deref(), Some("2-dog.webp"));
+        let body: Value = serde_json::from_slice(&http.request(0).body.unwrap()).unwrap();
+        assert!(body.get("name").is_none());
     }
 }

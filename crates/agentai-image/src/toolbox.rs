@@ -35,6 +35,10 @@ pub enum ImageToolOutput {
 /// - `edit_image`: changes stored images the model names by ID. Offered only with a storage
 ///   ([`with_storage`](GenerateImageToolBox::with_storage)) and a provider that can edit.
 ///
+/// Both take an optional `name` from the model (for example `lighthouse`), set as
+/// [`Media::name`] and so passed to [`MediaSave`](agentai_core::storage::MediaSave); the storage
+/// chooses the ID and may use it.
+///
 /// With a storage every image is saved and the model gets its ID. What else the model gets
 /// is set with [`with_output`](GenerateImageToolBox::with_output).
 ///
@@ -86,9 +90,11 @@ impl GenerateImageToolBox {
 
     async fn generate(&self, args: GenerateArgs) -> ToolResult<ToolOutput> {
         let prompt = args.prompt.clone();
+        let mut request = ImageRequest::new(args.prompt);
+        request.name = args.name;
         let response = self
             .generator
-            .generate_with(ImageRequest::new(args.prompt))
+            .generate_with(request)
             .await
             .map_err(tool_error)?;
         self.output(response, prompt)
@@ -108,9 +114,11 @@ impl GenerateImageToolBox {
             images.push(storage.read(id).await.map_err(read_error)?);
         }
         let prompt = args.prompt.clone();
+        let mut request = ImageEditRequest::new(args.prompt, images);
+        request.name = args.name;
         let response = self
             .generator
-            .edit_with(ImageEditRequest::new(args.prompt, images))
+            .edit_with(request)
             .await
             .map_err(tool_error)?;
         self.output(response, prompt)
@@ -184,6 +192,10 @@ fn base64_len(data: &str) -> usize {
 struct GenerateArgs {
     /// Detailed description of the image: subject, style, composition, colors, text in it.
     prompt: String,
+    /// Short file name for the new image, for example `lighthouse`, so you can refer to it
+    /// later. The storage may add to it to make the ID unique.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -192,6 +204,10 @@ struct EditArgs {
     prompt: String,
     /// IDs of the images to edit, as returned by `generate_image` or `edit_image`.
     images: Vec<String>,
+    /// Short file name for the new image, for example `lighthouse`, so you can refer to it
+    /// later. The storage may add to it to make the ID unique.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -366,6 +382,32 @@ mod tests {
             ]
         );
         assert_eq!(storage.read("1-image.png").await.unwrap(), image);
+    }
+
+    #[tokio::test]
+    async fn the_name_given_by_the_model_reaches_the_storage() {
+        let http = MockHttp::new(vec![image_reply(), image_reply()]);
+        let storage = MemoryStorage::new();
+        let toolbox = toolbox(&http).with_storage(storage.clone());
+
+        toolbox
+            .call_tool(
+                GENERATE_IMAGE.into(),
+                json!({"prompt": "a cat", "name": "cat"}),
+            )
+            .await
+            .unwrap();
+        toolbox
+            .call_tool(
+                EDIT_IMAGE.into(),
+                json!({"prompt": "add a hat", "images": ["1-cat.png"], "name": "cat-with-hat"}),
+            )
+            .await
+            .unwrap();
+
+        let mut ids = storage.ids();
+        ids.sort();
+        assert_eq!(ids, ["1-cat.png", "2-cat-with-hat.png"]);
     }
 
     #[tokio::test]
