@@ -28,6 +28,9 @@ pub struct ImageRequest {
     pub size: Option<String>,
     /// Quality, in the format of the provider (for example `high`). Not sent when `None`.
     pub quality: Option<String>,
+    /// File name of the image, set as [`Media::name`] and so passed to the storage. Not sent
+    /// to the provider. Without an extension, the one of the image type is added.
+    pub name: Option<String>,
 }
 
 impl ImageRequest {
@@ -37,6 +40,7 @@ impl ImageRequest {
             prompt: prompt.into(),
             size: None,
             quality: None,
+            name: None,
         }
     }
 
@@ -49,6 +53,12 @@ impl ImageRequest {
     /// Sets the quality.
     pub fn with_quality(mut self, quality: impl Into<String>) -> Self {
         self.quality = Some(quality.into());
+        self
+    }
+
+    /// Sets the file name of the image, see [`ImageRequest::name`].
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 }
@@ -65,6 +75,8 @@ pub struct ImageEditRequest {
     pub size: Option<String>,
     /// Quality, see [`ImageRequest::quality`].
     pub quality: Option<String>,
+    /// File name of the new image, see [`ImageRequest::name`].
+    pub name: Option<String>,
 }
 
 impl ImageEditRequest {
@@ -75,6 +87,7 @@ impl ImageEditRequest {
             images,
             size: None,
             quality: None,
+            name: None,
         }
     }
 
@@ -87,6 +100,12 @@ impl ImageEditRequest {
     /// Sets the quality.
     pub fn with_quality(mut self, quality: impl Into<String>) -> Self {
         self.quality = Some(quality.into());
+        self
+    }
+
+    /// Sets the file name of the image, see [`ImageRequest::name`].
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 }

@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 
     let result = agent
         .run::<String>(
-            "Draw a small lighthouse on a rock at dawn. Then open the image you made with \
+            "Draw a small lighthouse on a rock at dawn and name it lighthouse. Then open the image you made with \
              read_media and describe what is in it: objects, colors and composition.",
         )
         .await?;
