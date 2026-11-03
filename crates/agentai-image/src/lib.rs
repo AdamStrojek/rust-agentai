@@ -23,7 +23,7 @@
 //!
 //! ## Tools for agents
 //!
-//! - [`GenerateImageToolBox`]: `generate_image`, and `edit_image` with a storage. The model
+//! - [`GenerateImageToolBox`]: `generate_image` and `edit_image` (the latter needs a storage). The model
 //!   gets the image, or only its metadata as JSON ([`ImageToolOutput`]).
 //! - [`ReadMediaToolBox`]: `read_media` gives the model a stored file by ID.
 //!
