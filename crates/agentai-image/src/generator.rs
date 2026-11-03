@@ -1,7 +1,7 @@
 //! [`ImageGenerator`]: generate and edit images from your code.
 
 use crate::provider::{
-    self, ImageEditRequest, ImageError, ImageProvider, ImageRequest, ImageResponse,
+    self, ImageEditRequest, ImageError, ImageModel, ImageProvider, ImageRequest, ImageResponse,
 };
 use agentai_core::message::Media;
 use agentai_core::storage::MediaSave;
@@ -99,6 +99,11 @@ impl ImageGenerator {
     /// Returns `true` when the provider can edit images.
     pub fn supports_edit(&self) -> bool {
         self.provider.supports_edit()
+    }
+
+    /// Lists the image models of the provider, see [`provider::list_models`].
+    pub async fn list_models(&self) -> Result<Vec<ImageModel>, ImageError> {
+        self.provider.list_models().await
     }
 
     /// Generates an image from a prompt.

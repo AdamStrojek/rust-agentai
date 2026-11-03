@@ -39,7 +39,8 @@ This library is under heavy development. The interface may change at any time wi
 - **Image generation and editing**: the new [`agentai-image`](https://docs.rs/agentai-image) crate has
   `ImageGenerator` to make and edit images from your code: `ImageGenerator::new("openai::gpt-image-1")?`
   takes the provider from the model name and the key from `OPENAI_API_KEY`; OpenAI-compatible servers work
-  with `OPENAI_BASE_URL` or a base URL set in code.
+  with `OPENAI_BASE_URL` or a base URL set in code, and OpenRouter models with `openrouter::<model>`.
+  `provider::list_models` lists the image models a server offers.
 - **Agents that draw**: `GenerateImageToolBox` gives the agent `generate_image` and `edit_image`. The model
   gets the image itself, or only its metadata as JSON to save tokens. `ReadMediaToolBox` lets the model read
   any stored file by its ID.
