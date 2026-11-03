@@ -1,10 +1,10 @@
 //! # OpenAI image API
 //!
 //! [`OpenAiImageProvider`] generates images with `POST /images/generations` and edits them
-//! with `POST /images/edits`. It works with OpenAI (`gpt-image-*`, `dall-e-*`) and with other
-//! APIs that follow the same format.
+//! with `POST /images/edits`, and lists models with `GET /models`. It works with OpenAI
+//! (`gpt-image-*`, `dall-e-*`) and with other APIs that follow the same format.
 
-use super::{ImageEditRequest, ImageError, ImageProvider, ImageRequest, ImageResponse};
+use super::{ImageEditRequest, ImageError, ImageModel, ImageProvider, ImageRequest, ImageResponse};
 use agentai_core::message::{Media, MediaSource};
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
@@ -97,16 +97,7 @@ impl OpenAiImageProvider {
     }
 
     async fn send(&self, request: HttpRequest) -> Result<ImageResponse, ImageError> {
-        let request = if self.api_key.is_empty() {
-            request
-        } else {
-            request.with_header("Authorization", format!("Bearer {}", self.api_key))
-        };
-        let response = self.client.send(request).await?;
-        if !response.is_success() {
-            return Err(api_error(&response));
-        }
-        parse_response(&response)
+        parse_response(&send_request(&*self.client, &self.api_key, request).await?)
     }
 
     /// Bytes of an image to upload: decoded base64, or downloaded from its URL.
@@ -181,6 +172,25 @@ impl ImageProvider for OpenAiImageProvider {
             HttpRequest::post(format!("{}/images/edits", self.base_url)).with_multipart(form);
         self.send(http).await
     }
+
+    /// Lists the models of `GET /models`. On the OpenAI API only image models (`gpt-image-*`,
+    /// `dall-e-*`) are kept; compatible servers keep every model they list.
+    async fn list_models(&self) -> Result<Vec<ImageModel>, ImageError> {
+        let request = HttpRequest::get(format!("{}/models", self.base_url));
+        let response = send_request(&*self.client, &self.api_key, request).await?;
+        let list: ModelList = response
+            .json()
+            .map_err(|e| ImageError::InvalidResponse(e.to_string()))?;
+        let official = self.base_url == DEFAULT_BASE_URL;
+        Ok(list
+            .data
+            .into_iter()
+            .filter(|entry| {
+                !official || entry.id.starts_with("gpt-image") || entry.id.starts_with("dall-e")
+            })
+            .map(|entry| ImageModel::new(format!("openai::{}", entry.id), entry.id))
+            .collect())
+    }
 }
 
 #[derive(Deserialize)]
@@ -195,9 +205,41 @@ struct ImageData {
     b64_json: Option<String>,
     url: Option<String>,
     revised_prompt: Option<String>,
+    /// Sent by OpenRouter.
+    media_type: Option<String>,
 }
 
-fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> {
+#[derive(Deserialize)]
+struct ModelList {
+    #[serde(default)]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// Sends a request with `Authorization: Bearer <key>` (none for an empty key) and turns an
+/// error status into [`ImageError::Api`].
+pub(super) async fn send_request(
+    client: &dyn HttpClient,
+    api_key: &str,
+    request: HttpRequest,
+) -> Result<HttpResponse, ImageError> {
+    let request = if api_key.is_empty() {
+        request
+    } else {
+        request.with_header("Authorization", format!("Bearer {api_key}"))
+    };
+    let response = client.send(request).await?;
+    if !response.is_success() {
+        return Err(api_error(&response));
+    }
+    Ok(response)
+}
+
+pub(super) fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> {
     let body: ResponseBody = response
         .json()
         .map_err(|e| ImageError::InvalidResponse(e.to_string()))?;
@@ -209,10 +251,11 @@ fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> 
     let image = match (data.b64_json, data.url) {
         (Some(b64), _) => {
             // Compatible servers may leave out `output_format`; the bytes tell the type then
-            let content_type = match body.output_format.as_deref() {
-                Some("jpg") => "image/jpeg".to_string(),
-                Some(format) => format!("image/{format}"),
-                None => sniff_image_type(&b64).to_string(),
+            let content_type = match (data.media_type, body.output_format.as_deref()) {
+                (Some(media_type), _) => media_type,
+                (None, Some("jpg")) => "image/jpeg".to_string(),
+                (None, Some(format)) => format!("image/{format}"),
+                (None, None) => sniff_image_type(&b64).to_string(),
             };
             Media::from_base64(content_type, b64)
         }
@@ -465,6 +508,34 @@ pub(crate) mod tests {
                 "--\r\n",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn listing_keeps_only_image_models_on_the_openai_api() {
+        let models = || {
+            json_response(
+                200,
+                json!({"data": [{"id": "gpt-4o"}, {"id": "gpt-image-1"}, {"id": "dall-e-3"}]}),
+            )
+        };
+        let http = MockHttp::new(vec![models(), models()]);
+        let official = OpenAiImageProvider::new("", "key", DEFAULT_BASE_URL)
+            .with_client(http.clone())
+            .list_models()
+            .await
+            .unwrap();
+        let compatible = provider(&http).list_models().await.unwrap();
+
+        let ids = |models: &[ImageModel]| -> Vec<String> {
+            models.iter().map(|m| m.model.clone()).collect()
+        };
+        assert_eq!(ids(&official), ["openai::gpt-image-1", "openai::dall-e-3"]);
+        assert_eq!(
+            ids(&compatible),
+            ["openai::gpt-4o", "openai::gpt-image-1", "openai::dall-e-3"]
+        );
+        assert_eq!(http.request(1).url, "https://api.test/v1/models");
+        assert_eq!(http.request(1).header("Authorization"), Some("Bearer key"));
     }
 
     #[test]

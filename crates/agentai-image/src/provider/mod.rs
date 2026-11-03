@@ -4,6 +4,10 @@
 //! image generation API. Each submodule implements it for one API:
 //!
 //! - [`openai`]: the OpenAI image API and APIs compatible with it.
+//! - [`openrouter`]: the OpenRouter image API, with models of many vendors.
+//!
+//! [`list_models`] lists the image models a provider offers, with names ready for
+//! [`ImageGenerator::new`](crate::ImageGenerator::new).
 //!
 //! Usually you do not pick a provider yourself: [`from_model`] (used by
 //! [`ImageGenerator::new`](crate::ImageGenerator::new)) chooses it from the model name. Build one
@@ -11,6 +15,7 @@
 //! API.
 
 pub mod openai;
+pub mod openrouter;
 
 use agentai_core::HttpError;
 use agentai_core::message::Media;
@@ -140,6 +145,36 @@ impl ImageResponse {
     }
 }
 
+/// An image model offered by a provider, see [`list_models`].
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ImageModel {
+    /// Name for [`ImageGenerator::new`](crate::ImageGenerator::new) and [`from_model`], with
+    /// the provider prefix, for example `openrouter::bytedance-seed/seedream-4.5`.
+    pub model: String,
+    /// Name of the model in the API.
+    pub id: String,
+    /// Display name.
+    pub name: Option<String>,
+    /// Description.
+    pub description: Option<String>,
+    /// Whether the model takes input images (needed to edit), when the API says so.
+    pub accepts_images: Option<bool>,
+}
+
+impl ImageModel {
+    /// Creates a model with its full name and its name in the API.
+    pub fn new(model: impl Into<String>, id: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            id: id.into(),
+            name: None,
+            description: None,
+            accepts_images: None,
+        }
+    }
+}
+
 /// Errors of image providers.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -205,20 +240,45 @@ pub trait ImageProvider: Send + Sync + 'static {
         let _ = request;
         Err(ImageError::Unsupported("image editing"))
     }
+
+    /// Lists the image models of the API. The default implementation returns
+    /// [`ImageError::Unsupported`].
+    async fn list_models(&self) -> Result<Vec<ImageModel>, ImageError> {
+        Err(ImageError::Unsupported("listing models"))
+    }
 }
 
 /// The APIs [`from_model`] knows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderKind {
     OpenAi,
+    OpenRouter,
+}
+
+impl ProviderKind {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "openai" => Some(Self::OpenAi),
+            "openrouter" => Some(Self::OpenRouter),
+            _ => None,
+        }
+    }
+
+    fn build(self, model: &str) -> Result<Box<dyn ImageProvider>, ImageError> {
+        Ok(match self {
+            Self::OpenAi => Box::new(openai::OpenAiImageProvider::from_env(model)?),
+            Self::OpenRouter => Box::new(openrouter::OpenRouterImageProvider::from_env(model)?),
+        })
+    }
 }
 
 /// Splits `provider::model` and finds the provider, like model names in `agentai`.
 fn resolve(model: &str) -> Result<(ProviderKind, &str), ImageError> {
     let unknown = || ImageError::UnknownProvider(model.to_string());
     match model.split_once("::") {
-        Some(("openai", name)) => Ok((ProviderKind::OpenAi, name)),
-        Some(_) => Err(unknown()),
+        Some((provider, name)) => ProviderKind::from_name(provider)
+            .map(|kind| (kind, name))
+            .ok_or_else(unknown),
         None if model.starts_with("gpt-image") || model.starts_with("dall-e") => {
             Ok((ProviderKind::OpenAi, model))
         }
@@ -228,14 +288,31 @@ fn resolve(model: &str) -> Result<(ProviderKind, &str), ImageError> {
 
 /// Creates the provider for a model name, with its settings from environment variables.
 ///
-/// The provider comes from a `provider::` prefix, for example `openai::gpt-image-1`, or, for
+/// The provider comes from a `provider::` prefix (`openai::`, `openrouter::`), for example
+/// `openai::gpt-image-1` or `openrouter::bytedance-seed/seedream-4.5`, or, for
 /// well-known names (`gpt-image-*`, `dall-e-*`), from the name alone. Use the prefix for other
 /// models behind an OpenAI-compatible API. See each provider's `from_env` for its variables,
 /// for example [`OpenAiImageProvider::from_env`](openai::OpenAiImageProvider::from_env).
 pub fn from_model(model: &str) -> Result<Box<dyn ImageProvider>, ImageError> {
-    match resolve(model)? {
-        (ProviderKind::OpenAi, name) => Ok(Box::new(openai::OpenAiImageProvider::from_env(name)?)),
-    }
+    let (kind, name) = resolve(model)?;
+    kind.build(name)
+}
+
+/// Lists the image models of a provider (`openai` or `openrouter`), with its settings from
+/// environment variables as in [`from_model`].
+///
+/// ```rust,no_run
+/// # async fn run() -> Result<(), agentai_image::ImageError> {
+/// for model in agentai_image::provider::list_models("openrouter").await? {
+///     println!("{} {:?}", model.model, model.name);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub async fn list_models(provider: &str) -> Result<Vec<ImageModel>, ImageError> {
+    let kind = ProviderKind::from_name(provider)
+        .ok_or_else(|| ImageError::UnknownProvider(provider.to_string()))?;
+    kind.build("")?.list_models().await
 }
 
 #[cfg(test)]
@@ -251,6 +328,10 @@ mod tests {
         assert_eq!(
             resolve("gpt-image-1").unwrap(),
             (ProviderKind::OpenAi, "gpt-image-1")
+        );
+        assert_eq!(
+            resolve("openrouter::black-forest-labs/flux.2").unwrap(),
+            (ProviderKind::OpenRouter, "black-forest-labs/flux.2")
         );
         assert_eq!(
             resolve("dall-e-3").unwrap(),

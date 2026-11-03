@@ -18,5 +18,7 @@ let response = generator.generate("A lighthouse at dawn").await?;
 ```
 
 Providers live in `agentai_image::provider`. `provider::openai` speaks the OpenAI image API and
-any API compatible with it (`OPENAI_BASE_URL`, or a base URL set in code). See the
-`image_generator` and `image_tools` examples.
+any API compatible with it (`OPENAI_BASE_URL`, or a base URL set in code); `provider::openrouter`
+speaks the OpenRouter image API (`openrouter::<model>`, key from `OPENROUTER_API_KEY`).
+`provider::list_models("openai" | "openrouter")` lists the image models a server offers. See the
+`image_generator`, `image_tools` and `list_models` examples.

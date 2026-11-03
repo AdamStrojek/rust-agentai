@@ -6,6 +6,9 @@
 //! # A local OpenAI-compatible server
 //! OPENAI_BASE_URL=http://localhost:3000/v1 AGENTAI_IMAGE_MODEL=openai::qwen_image_2.1 \
 //!     cargo run -p agentai-image --example image_generator
+//! # OpenRouter, a model from the `list_models` example
+//! OPENROUTER_API_KEY=<your key> AGENTAI_IMAGE_MODEL=openrouter::<model> \
+//!     cargo run -p agentai-image --example image_generator
 //! ```
 
 use agentai::MediaSource;

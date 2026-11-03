@@ -50,8 +50,21 @@
 //!
 //! ## Providers
 //!
-//! The image APIs live in [`provider`]. [`ImageGenerator::new`] picks one from the model name
-//! (`openai::gpt-image-1`) with its settings from environment variables. To set the API key
+//! The image APIs live in [`provider`]: [`openai`](provider::openai) (OpenAI and compatible
+//! servers) and [`openrouter`](provider::openrouter). [`ImageGenerator::new`] picks one from the
+//! model name (`openai::gpt-image-1`, `openrouter::bytedance-seed/seedream-4.5`) with its
+//! settings from environment variables. [`provider::list_models`] lists the image models of a
+//! provider, with names ready for `ImageGenerator::new`:
+//!
+//! ```rust,no_run
+//! # async fn run() -> Result<(), agentai_image::ImageError> {
+//! for model in agentai_image::provider::list_models("openrouter").await? {
+//!     println!("{}", model.model);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//! To set the API key
 //! or base URL in code, build the provider and pass it to [`ImageGenerator::from_provider`]:
 //!
 //! ```rust,no_run
@@ -75,6 +88,6 @@ mod toolbox;
 #[doc(inline)]
 pub use agentai_core::storage;
 pub use generator::ImageGenerator;
-pub use provider::{ImageError, ImageResponse};
+pub use provider::{ImageError, ImageModel, ImageResponse};
 #[cfg(feature = "toolbox")]
 pub use toolbox::{GenerateImageToolBox, ImageToolOutput, ReadMediaToolBox};
