@@ -163,9 +163,31 @@ use syn::{
 ///
 /// 2.  **`ToolBox` Implementation**: It generates the `impl ToolBox for YourStruct` block.
 ///     -   **`tools_definitions`**: This method returns a `Vec<Tool>`, providing the metadata for each exposed tool.
-///     -   **`call_tool`**: This method acts as a dispatcher. It matches the `tool_name`,
-///         deserializes the JSON `parameters` into the corresponding parameter struct,
-///         and invokes the actual method.
+///     -   **`call_tool`**: This method acts as a dispatcher. It matches the tool name of the
+///         `ToolCall`, deserializes its JSON `arguments` into the corresponding parameter
+///         struct, and invokes the actual method.
+///
+/// ## Reading the Call
+///
+/// A parameter of type `&ToolCall` gets the call the model made, for example its `id`, the
+/// same id that the `ToolResponse` and the agent events carry. It is not part of the tool's
+/// JSON schema.
+///
+/// ```rust,ignore
+/// #[toolbox]
+/// impl MyToolBox {
+///     /// Starts a job and returns its id.
+///     #[tool]
+///     async fn start_job(
+///         &self,
+///         call: &ToolCall,
+///         /// What to do
+///         task: String,
+///     ) -> ToolResult {
+///         Ok(format!("job {} started: {task}", call.id))
+///     }
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the original impl block
@@ -374,6 +396,12 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         // Clean attributes for tool definition
                         pat_type.attrs.clear();
 
+                        // A `&ToolCall` parameter gets the current call, not a model argument
+                        if is_tool_call_ref(&ty) {
+                            param_assignments.extend(quote! { call, });
+                            continue;
+                        }
+
                         let Pat::Ident(ref pat_ident) = *pat_type.pat else {
                             // Handle other patterns if necessary, or return an error
                             return Error::new_spanned(
@@ -444,7 +472,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 if !param_fields.is_empty() {
                     method_call.extend(quote! {
-                        let params: #params_struct_name = serde_json::from_value(parameters)
+                        let params: #params_struct_name = serde_json::from_value(call.arguments.clone())
                             .map_err(|e| {
                                 ToolError::InvalidArguments(format!(
                                     "invalid arguments for tool '{}': {}", #tool_name, e
@@ -487,11 +515,11 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 ])
             }
 
-            async fn call_tool(&self, tool_name: String, parameters: serde_json::Value) -> Result<::agentai::tool::ToolOutput, ToolError> {
-                 match tool_name.as_str() {
+            async fn call_tool(&self, call: &::agentai::ToolCall) -> Result<::agentai::tool::ToolOutput, ToolError> {
+                 match call.name.as_str() {
                      #match_arms
                      _ => {
-                         Err(ToolError::NotFound(tool_name))
+                         Err(ToolError::NotFound(call.name.clone()))
                      }
                  }
             }
@@ -508,4 +536,18 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     final_code.into()
+}
+
+/// Whether `ty` is `&ToolCall` (with any path, for example `&agentai::ToolCall`).
+fn is_tool_call_ref(ty: &syn::Type) -> bool {
+    let syn::Type::Reference(reference) = ty else {
+        return false;
+    };
+    let syn::Type::Path(path) = &*reference.elem else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "ToolCall")
 }

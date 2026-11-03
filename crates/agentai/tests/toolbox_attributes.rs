@@ -57,3 +57,35 @@ fn strict_option_sets_the_strict_flag() -> Result<(), ToolError> {
 
     Ok(())
 }
+
+struct CallToolBox;
+
+#[toolbox]
+impl CallToolBox {
+    /// Returns the call id and the text.
+    #[tool]
+    fn echo_id(
+        &self,
+        call: &agentai::ToolCall,
+        /// Text to echo
+        text: String,
+    ) -> ToolResult {
+        Ok(format!("{} {text}", call.id))
+    }
+}
+
+#[tokio::test]
+async fn a_tool_call_parameter_gets_the_call_and_stays_out_of_the_schema() -> Result<(), ToolError>
+{
+    let tools = CallToolBox.tools_definitions()?;
+    let schema = find(&tools, "echo_id").schema.clone().unwrap();
+    assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
+    assert!(schema["properties"]["text"].is_object());
+    assert_eq!(schema["required"], serde_json::json!(["text"]));
+
+    let call = agentai::ToolCall::new("call_7", "echo_id", serde_json::json!({"text": "hi"}));
+    let output = CallToolBox.call_tool(&call).await?;
+    assert_eq!(output.text().as_deref(), Some("call_7 hi"));
+
+    Ok(())
+}

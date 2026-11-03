@@ -1,6 +1,6 @@
 use super::*;
 use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
-use crate::message::Message;
+use crate::message::{Message, ToolCall};
 use crate::tool::{Tool, ToolOutput, ToolResult};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -148,7 +148,7 @@ impl ToolBox for FailingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
         Err((self.make_error)())
     }
 }
@@ -409,7 +409,7 @@ impl ToolBox for EchoToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
         Ok("echoed".into())
     }
 }
@@ -423,7 +423,7 @@ impl ToolBox for ImageToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
         Ok(ToolOutput::from_text("image-1.png")
             .with_media(crate::Media::from_base64("image/png", "aGk=")))
     }
@@ -808,19 +808,61 @@ fn runs_and_streams_can_be_moved_to_other_tasks() {
     assert_send_sync_clone::<Agent>();
 }
 
-/// Toolbox that counts its calls.
-struct CountingToolBox(Arc<Mutex<usize>>);
+/// Toolbox that keeps the calls it gets.
+struct RecordingToolBox(Arc<Mutex<Vec<ToolCall>>>);
 
 #[async_trait]
-impl ToolBox for CountingToolBox {
+impl ToolBox for RecordingToolBox {
     fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError> {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _tool_name: String, _arguments: Value) -> ToolResult<ToolOutput> {
-        *self.0.lock().unwrap() += 1;
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+        self.0.lock().unwrap().push(call.clone());
         Ok("echoed".into())
     }
+}
+
+#[tokio::test]
+async fn the_toolbox_gets_the_call_with_the_id_from_the_model() {
+    let reply = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {"id": "call_a", "type": "function",
+                     "function": {"name": "echo", "arguments": "{\"text\":\"hi\"}"}},
+                    {"id": "call_b", "type": "function",
+                     "function": {"name": "echo", "arguments": "{\"text\":\"hi\"}"}},
+                ]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    let llm = MockLlm::start(vec![(200, reply.to_string()), text_reply("done")]).await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+
+    llm.agent()
+        .with_toolbox(RecordingToolBox(calls.clone()))
+        .run::<String>("question")
+        .await
+        .unwrap();
+
+    // Two calls with the same arguments differ only by their ids
+    let calls = calls.lock().unwrap();
+    let calls: Vec<(&str, &str, &Value)> = calls
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str(), &c.arguments))
+        .collect();
+    let args = json!({"text": "hi"});
+    assert_eq!(
+        calls,
+        [("call_a", "echo", &args), ("call_b", "echo", &args)]
+    );
 }
 
 fn truncated_tool_call_reply() -> (u16, String) {
@@ -847,11 +889,11 @@ fn truncated_tool_call_reply() -> (u16, String) {
 #[tokio::test]
 async fn truncated_tool_calls_are_not_run() {
     let llm = MockLlm::start(vec![truncated_tool_call_reply()]).await;
-    let calls = Arc::new(Mutex::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
 
     let err = llm
         .agent()
-        .with_toolbox(CountingToolBox(calls.clone()))
+        .with_toolbox(RecordingToolBox(calls.clone()))
         .run::<String>("question")
         .await
         .unwrap_err();
@@ -860,7 +902,7 @@ async fn truncated_tool_calls_are_not_run() {
         AgentError::MaxTokens { raw } => assert_eq!(raw, ""),
         other => panic!("expected AgentError::MaxTokens, got {other:?}"),
     }
-    assert_eq!(*calls.lock().unwrap(), 0);
+    assert!(calls.lock().unwrap().is_empty());
     assert_eq!(llm.requests().len(), 1);
 }
 

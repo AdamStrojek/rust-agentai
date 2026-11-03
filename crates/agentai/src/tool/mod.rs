@@ -46,8 +46,8 @@ pub mod mcp;
 #[cfg(feature = "tools-web")]
 pub mod web;
 
+use crate::message::ToolCall;
 pub use crate::message::ToolOutput;
-use serde_json::Value;
 use thiserror::Error;
 
 /// Represents a tool definition that can be exposed to an agent.
@@ -151,30 +151,29 @@ pub trait ToolBox: Send + Sync + 'static {
     /// This method is typically invoked internally by the [`Agent`](crate::agent::Agent) structure to discover the available tools and their parameters.
     fn tools_definitions(&self) -> Result<Vec<Tool>, ToolError>;
 
-    /// Calls a specific tool by its name with the given parameters.
+    /// Runs the tool call the model made.
     ///
-    /// This method is the entry point for executing a tool's functionality. It is typically invoked internally by the [`Agent`](crate::agent::Agent) structure
-    /// when the language model determines that a tool needs to be called.
-    /// The `arguments` are provided as a `serde_json::Value`. You can easily deserialize this `Value`
-    /// into a Rust struct (e.g., the same struct used to generate the JSON schema
-    /// in `tools_definitions`) using the [`serde`](https://crates.io/crates/serde) crate.
-    /// The arguments provided by the agent will conform to the JSON schema defined for the tool.
+    /// This method is the entry point for executing a tool's functionality. It is typically
+    /// invoked internally by the [`Agent`](crate::agent::Agent) structure when the language
+    /// model determines that a tool needs to be called.
     ///
-    /// For example, to deserialize the arguments:
+    /// The [`ToolCall`] holds the tool name, the arguments as a `serde_json::Value` (they follow
+    /// the JSON schema from `tools_definitions`, so you can deserialize them into the same
+    /// struct with [`serde`](https://crates.io/crates/serde)) and the call `id`. The id is the
+    /// one the [`ToolResponse`](crate::ToolResponse) and the agent events
+    /// ([`AgentEvent::ToolCall`](crate::agent::AgentEvent::ToolCall),
+    /// [`AgentEvent::ToolResult`](crate::agent::AgentEvent::ToolResult)) carry, so a tool can
+    /// use it to tell calls apart, for example two parallel calls with the same arguments.
+    ///
     /// ```ignore
-    /// # This is only informational example, it represents what in theory is being generated
-    /// let args: ToolArguments = serde_json::from_value(arguments)?;
+    /// // What the generated code does, in short
+    /// let args: ToolArguments = serde_json::from_value(call.arguments.clone())?;
     /// ```
-    /// Replace `ToolArguments` with the actual struct type corresponding to your tool's schema.
-    ///
-    /// # Arguments
-    /// * `tool_name` - The name of the tool to call.
-    /// * `arguments` - A JSON `Value` containing the arguments for the tool call.
     ///
     /// # Returns
-    /// A `Result` containing the tool's [`ToolOutput`] on success,
-    /// or a `ToolError` if the tool call fails or the tool is not found.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput>;
+    /// The tool's [`ToolOutput`] on success, or a `ToolError` if the tool call fails or the
+    /// tool is not found ([`ToolError::NotFound`]).
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput>;
 }
 
 /// Errors that can occur when working with `ToolBox`es and tools.
@@ -284,12 +283,9 @@ impl ToolBox for ToolBoxSet {
     /// It finds the correct `ToolBox` that contains the tool and delegates the call.
     /// If multiple toolboxes contain a tool with the same name, the one that was
     /// added first will be used.
-    async fn call_tool(&self, tool_name: String, arguments: Value) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
         for toolbox in &self.toolboxes {
-            match toolbox
-                .call_tool(tool_name.clone(), arguments.clone())
-                .await
-            {
+            match toolbox.call_tool(call).await {
                 Err(ToolError::NotFound(_)) => {
                     // No tool in this toolbox, we can check others
                     continue;
@@ -299,6 +295,6 @@ impl ToolBox for ToolBoxSet {
                 }
             };
         }
-        Err(ToolError::NotFound(tool_name))
+        Err(ToolError::NotFound(call.name.clone()))
     }
 }

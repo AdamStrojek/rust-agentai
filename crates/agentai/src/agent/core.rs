@@ -324,10 +324,7 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
             tool_call.name
         ));
     };
-    match toolbox
-        .call_tool(tool_call.name.clone(), tool_call.arguments.clone())
-        .await
-    {
+    match toolbox.call_tool(tool_call).await {
         Ok(result) => {
             trace!(
                 "Tool result: {} ({} media)",

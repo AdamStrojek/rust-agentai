@@ -264,6 +264,10 @@ mod tests {
     use agentai_core::storage::{MediaSave, MemoryStorage};
     use serde_json::{Value, json};
 
+    fn tool_call(name: &str, arguments: Value) -> agentai::ToolCall {
+        agentai::ToolCall::new("call_1", name, arguments)
+    }
+
     fn image_reply() -> agentai_core::HttpResponse {
         json_response(
             200,
@@ -284,10 +288,10 @@ mod tests {
         let toolbox = toolbox(&http).with_storage(storage.clone());
 
         let output = toolbox
-            .call_tool(
-                "generate_image".into(),
+            .call_tool(&tool_call(
+                "generate_image",
                 json!({"prompt": "a cat", "name": "image"}),
-            )
+            ))
             .await
             .unwrap();
 
@@ -309,17 +313,17 @@ mod tests {
         let toolbox = toolbox(&http).with_storage(storage.clone());
 
         toolbox
-            .call_tool(
-                "generate_image".into(),
+            .call_tool(&tool_call(
+                "generate_image",
                 json!({"prompt": "a cat", "name": "cat"}),
-            )
+            ))
             .await
             .unwrap();
         toolbox
-            .call_tool(
-                "edit_image".into(),
+            .call_tool(&tool_call(
+                "edit_image",
                 json!({"prompt": "add a hat", "images": ["1-cat.png"], "name": "cat-with-hat"}),
-            )
+            ))
             .await
             .unwrap();
 
@@ -336,10 +340,10 @@ mod tests {
             .with_output(ImageToolOutput::Metadata);
 
         let output = toolbox
-            .call_tool(
-                "generate_image".into(),
+            .call_tool(&tool_call(
+                "generate_image",
                 json!({"prompt": "a cat", "name": "image"}),
-            )
+            ))
             .await
             .unwrap();
 
@@ -365,10 +369,10 @@ mod tests {
         let without = toolbox(&http);
         assert!(matches!(
             without
-                .call_tool(
-                    "edit_image".into(),
-                    json!({"prompt": "add a hat", "images": ["1"], "name": "hat"}),
-                )
+                .call_tool(&tool_call(
+                    "edit_image",
+                    json!({"prompt": "add a hat", "images": ["1"], "name": "hat"})
+                ))
                 .await,
             Err(ToolError::Failed(_))
         ));
@@ -380,17 +384,17 @@ mod tests {
             .unwrap();
         let toolbox = toolbox(&http).with_storage(storage);
         let unknown = toolbox
-            .call_tool(
-                "edit_image".into(),
+            .call_tool(&tool_call(
+                "edit_image",
                 json!({"prompt": "add a hat", "images": ["nope"], "name": "hat"}),
-            )
+            ))
             .await;
         assert!(matches!(unknown, Err(ToolError::InvalidArguments(_))));
         let output = toolbox
-            .call_tool(
-                "edit_image".into(),
+            .call_tool(&tool_call(
+                "edit_image",
                 json!({"prompt": "add a hat", "images": [id], "name": "hat"}),
-            )
+            ))
             .await
             .unwrap();
 
@@ -407,8 +411,8 @@ mod tests {
             json_response(400, json!({"error": {"message": "refused"}})),
         ]);
         let toolbox = toolbox(&http);
-        let call =
-            || toolbox.call_tool("generate_image".into(), json!({"prompt": "x", "name": "x"}));
+        let request = tool_call("generate_image", json!({"prompt": "x", "name": "x"}));
+        let call = || toolbox.call_tool(&request);
 
         assert!(matches!(call().await, Err(ToolError::Configuration(_))));
         assert!(matches!(call().await, Err(ToolError::Failed(m)) if m.contains("refused")));
@@ -422,13 +426,13 @@ mod tests {
         let toolbox = ReadMediaToolBox::new(storage);
 
         let output = toolbox
-            .call_tool("read_media".into(), json!({ "id": id }))
+            .call_tool(&tool_call("read_media", json!({ "id": id })))
             .await
             .unwrap();
         assert_eq!(output.media(), vec![&pdf]);
         assert!(matches!(
             toolbox
-                .call_tool("read_media".into(), json!({"id": "nope"}))
+                .call_tool(&tool_call("read_media", json!({"id": "nope"})))
                 .await,
             Err(ToolError::InvalidArguments(_))
         ));
