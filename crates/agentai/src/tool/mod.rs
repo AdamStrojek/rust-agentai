@@ -25,9 +25,9 @@
 //!   - `ReadMediaToolBox`: `read_media` gives the model a stored file (from any `MediaRead`) by its ID.
 //!
 //! A tool returns text, or a [`ToolOutput`] with text and images for the model, for example an
-//! image read from disk (`Media::from_bytes`). The model sees the images in a user message right
-//! after the tool results (a later release puts them in the tool result itself for the providers
-//! that accept it). Tools have no
+//! image read from disk (`Media::from_bytes`). The model sees the images: in the tool result
+//! where the provider accepts them, otherwise (OpenAI-compatible Chat Completions APIs) in a user
+//! message right after the tool results. Tools have no
 //! structured output: a tool that produces data (a record, a list, a measurement) converts it to
 //! text itself, for example as JSON with `serde_json::to_string`, in the format it wants the
 //! model to read.

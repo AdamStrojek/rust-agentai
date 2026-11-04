@@ -324,10 +324,9 @@ impl ProviderData {
 /// order.
 ///
 /// Text converts into it, so a tool that only returns text can keep returning a `String`.
-/// The model gets the text in the tool result and the media in a user message right after the
-/// tool results, for every provider for now. A later release puts the media in the tool result
-/// itself for the providers that accept it (Anthropic, Gemini, OpenAI Responses, Bedrock and
-/// Ollama).
+/// Anthropic, Gemini, OpenAI Responses, Bedrock and Ollama get the media in the tool result;
+/// OpenAI-compatible Chat Completions APIs (OpenAI, oMLX, Groq, OpenRouter, ...) get it in a user
+/// message right after the tool results, since their tool messages hold only text.
 ///
 /// There is no structured (JSON) output: a tool that produces data converts it to text itself,
 /// for example with `serde_json::to_string`, in the format it wants the model to read.

@@ -42,11 +42,10 @@ impl IntoGenai for ToolCall {
 
 impl IntoGenai for ToolResponse {
     type Genai = genai::chat::ToolResponse;
-    /// Keeps only the text: genai 0.7 takes no media in tool results, [`messages_into_genai`]
-    /// sends them in a user message instead.
     fn into_genai(self) -> genai::chat::ToolResponse {
-        let content = self.text().unwrap_or_default();
-        let mut out = genai::chat::ToolResponse::new(self.call_id, content);
+        let content: Vec<ContentPart> = self.content.into_iter().map(Part::into_genai).collect();
+        let mut out =
+            genai::chat::ToolResponse::new(self.call_id, MessageContent::from_parts(content));
         out.fn_name = Some(self.name);
         out
     }
@@ -59,61 +58,21 @@ impl FromGenai<genai::chat::ToolResponse> for ToolResponse {
             response.fn_name.unwrap_or_default(),
             Value::Null,
         );
-        ToolResponse::new(&call, response.content)
+        let mut out = ToolResponse::new(&call, "");
+        out.content = response
+            .content
+            .into_parts()
+            .into_iter()
+            .map(Part::from_genai)
+            .collect();
+        out
     }
 }
 
-/// Converts the messages of a request.
-///
-/// genai 0.7 takes only text in tool results, so the media that tools return are sent the way
-/// the OpenAI Chat Completions API needs them (and the genai release after 0.7 does it for that
-/// API): one user message right after the tool messages of a step, with each call's media after
-/// a text part naming the call. Until then every provider gets tool media this way. Only the
-/// request changes: the messages themselves keep the media in their tool responses.
+/// Converts the messages of a request. genai puts the media of tool results where each provider
+/// accepts them.
 pub(crate) fn messages_into_genai(messages: impl IntoIterator<Item = Message>) -> Vec<ChatMessage> {
-    let mut out = Vec::new();
-    let mut attachments: Vec<ContentPart> = Vec::new();
-    for message in messages {
-        if message.role != Role::Tool {
-            flush_tool_attachments(&mut out, &mut attachments);
-        }
-        for part in &message.parts {
-            if let Part::ToolResponse(response) = part {
-                push_tool_attachments(response, &mut attachments);
-            }
-        }
-        out.push(message.into_genai());
-    }
-    flush_tool_attachments(&mut out, &mut attachments);
-    out
-}
-
-/// Adds the media of a tool response to `attachments`, after a text part naming the call.
-fn push_tool_attachments(response: &ToolResponse, attachments: &mut Vec<ContentPart>) {
-    let media: Vec<ContentPart> = response
-        .content
-        .iter()
-        .filter(|part| matches!(part, Part::Media(_)))
-        .cloned()
-        .map(Part::into_genai)
-        .collect();
-    if media.is_empty() {
-        return;
-    }
-    attachments.push(ContentPart::Text(format!(
-        "Attachments returned by tool call {} ({}):",
-        response.call_id, response.name
-    )));
-    attachments.extend(media);
-}
-
-/// Sends the held tool attachments, if any, as one user message.
-fn flush_tool_attachments(out: &mut Vec<ChatMessage>, attachments: &mut Vec<ContentPart>) {
-    if !attachments.is_empty() {
-        out.push(ChatMessage::user(MessageContent::from_parts(
-            std::mem::take(attachments),
-        )));
-    }
+    messages.into_iter().map(Message::into_genai).collect()
 }
 
 impl FromGenai<ContentPart> for Part {
@@ -239,6 +198,10 @@ mod tests {
                 Part::Text("hello".into()),
                 Part::ToolCall(call.clone()),
                 Part::ToolResponse(ToolResponse::new(&call, "result")),
+                Part::ToolResponse(ToolResponse::new(
+                    &call,
+                    ToolOutput::from_text("an image").with_media(image.clone()),
+                )),
                 Part::Media(image.with_name("a.png")),
                 Part::Media(Media::image_url("https://example.com/a.png")),
                 Part::ProviderData(
@@ -250,71 +213,5 @@ mod tests {
         );
         let back = Message::from_genai(message.clone().into_genai());
         assert_eq!(back, message);
-    }
-
-    #[test]
-    fn tool_media_of_a_step_follow_all_its_tool_messages() {
-        let first = ToolCall::new("call_1", "draw", json!({}));
-        let second = ToolCall::new("call_2", "read", json!({}));
-        let image = |data: &str| Media::new("image/png", MediaSource::Base64(data.into()));
-        let messages = vec![
-            Message::new(
-                Role::Assistant,
-                vec![
-                    Part::ToolCall(first.clone()),
-                    Part::ToolCall(second.clone()),
-                ],
-            ),
-            Message::tool_response(ToolResponse::new(
-                &first,
-                ToolOutput::from_text("a.png").with_media(image("YQ==")),
-            )),
-            Message::tool_response(ToolResponse::new(
-                &second,
-                ToolOutput::from_media(image("Yg==")),
-            )),
-            Message::user("next"),
-        ];
-
-        let out = messages_into_genai(messages);
-
-        let roles: Vec<ChatRole> = out.iter().map(|m| m.role.clone()).collect();
-        assert_eq!(
-            roles,
-            [
-                ChatRole::Assistant,
-                ChatRole::Tool,
-                ChatRole::Tool,
-                ChatRole::User,
-                ChatRole::User
-            ]
-        );
-        // The tool messages keep only their text
-        let tool_texts: Vec<String> = out[1..3]
-            .iter()
-            .flat_map(|m| m.content.clone().into_parts())
-            .filter_map(|part| match part {
-                ContentPart::ToolResponse(response) => Some(response.content),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(tool_texts, ["a.png", ""]);
-        // One user message holds the media of both calls, each after a text naming the call
-        let attachments: Vec<Part> = out[3]
-            .content
-            .clone()
-            .into_parts()
-            .into_iter()
-            .map(Part::from_genai)
-            .collect();
-        assert_eq!(
-            attachments,
-            [
-                Part::Text("Attachments returned by tool call call_1 (draw):".into()),
-                Part::Media(image("YQ==")),
-                Part::Text("Attachments returned by tool call call_2 (read):".into()),
-                Part::Media(image("Yg==")),
-            ]
-        );
     }
 }
