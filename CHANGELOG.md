@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.4.0...agentai-v0.5.0) - 2026-11-04
+
+### New features
+- *(tool)* parse arrays and objects sent as JSON strings in #[toolbox] tools (by @AdamStrojek)
+- *(image)* list image models and generate images with OpenRouter (by @AdamStrojek)
+- *(tls)* choose the TLS backend with cargo features, ring by default (by @AdamStrojek)
+- *(image)* generate and edit images with the agentai-image toolbox (by @AdamStrojek)
+- *(core)* add the HTTP client abstraction in agentai-core (by @AdamStrojek)
+- *(image)* let the model name the images it makes (by @AdamStrojek)
+- *(image)* re-export the media storage as agentai_image::storage (by @AdamStrojek)
+
+### Changed
+- *(tool)* send tool images in a user message for every provider (by @AdamStrojek)
+- *(tool)* pass the ToolCall with its id to ToolBox::call_tool (by @AdamStrojek)
+- *(image)* expose ImageGenerator and split the image toolboxes (by @AdamStrojek)
+- *(core)* move the message types to agentai-core and add MediaStorage (by @AdamStrojek)
+- *(tool)* [**breaking**] let tools return images with ToolOutput (by @AdamStrojek)
+- *(image)* build the image toolboxes with #[toolbox], name required (by @AdamStrojek)
+
+### Fixes
+- *(tool)* show tool images to OpenAI-compatible models (by @AdamStrojek)
+
+### Miscellaneous
+- *(tool)* say that tools convert their data to text themselves (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.4.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.3.2...agentai-v0.4.0) - 2026-10-26
 
 ### Changed
