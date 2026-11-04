@@ -47,9 +47,9 @@ This library is under heavy development. The interface may change at any time wi
 - **Media storage**: `MediaRead` and `MediaSave` (in `agentai-core`) store images and other files under an
   ID; implement them for your blob store or directory, or use `MemoryStorage`.
 - **Tools can return images**: a tool returns a `ToolOutput` with text and
-  `Media` parts, for example a chart or a screenshot. Anthropic, Gemini, OpenAI Responses,
-  Bedrock and Ollama get them in the tool result; OpenAI-compatible APIs (OpenAI, oMLX, Groq, OpenRouter, ...)
-  get them in a user message right after the tool results. `#[toolbox]`
+  `Media` parts, for example a chart or a screenshot. For now every provider gets the images
+  in a user message right after the tool results; a later release puts them in the tool result itself for
+  Anthropic, Gemini, OpenAI Responses, Bedrock and Ollama. `#[toolbox]`
   methods return `ToolResult<ToolOutput>` for that; methods that return text stay as they are.
 - **Tools see the call**: `ToolBox::call_tool` gets the `ToolCall` with its `id`, the
   same id as in the tool result and the agent events, so a tool can tell parallel calls apart or report
