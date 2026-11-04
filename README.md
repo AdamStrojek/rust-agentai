@@ -55,6 +55,9 @@ This library is under heavy development. The interface may change at any time wi
   same id as in the tool result and the agent events, so a tool can tell parallel calls apart or report
   progress for one call. A `#[toolbox]` method gets it through a `&ToolCall` parameter, which the model
   does not see.
+- **Fewer argument errors with local models**: when a model sends an array or object argument as a JSON
+  string (`"tags": "[\"a\"]"`), `#[toolbox]` tools now parse it instead of failing. Turn it off with
+  `parse_json_strings = false` on `#[toolbox]` or `#[tool]`.
 - **TLS backend switches**: pick `rustls-ring` (the new default), `rustls-aws-lc` or `native-tls`, and
   `system-proxy` (on by default). The default build no longer compiles the `aws-lc-sys` C library. If you
   build your own `genai::Client` or `reqwest::Client`, call `tls::install_crypto_provider` first.

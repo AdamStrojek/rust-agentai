@@ -371,6 +371,8 @@ Rules:
 - `Tool`, `ToolBox` and `ToolError` (and `ToolResult` if you use it) must be in scope, and your crate must depend on `async-trait`, `serde`, `serde_json` and `schemars`.
 - The type must be `Send + Sync + 'static`. The agent stores toolboxes in an `Arc`, so pass them by value (`with_toolbox(tb)`) or share one with `with_toolbox_arc(Arc::new(tb))`.
 
+Arrays and objects sent as JSON strings: models, local ones especially, often send `"tags": "[\"a\"]"` instead of `"tags": ["a"]`. When an argument's schema allows an array or an object but no string, and the string parses as JSON of an allowed type, the generated code uses the parsed value. Other strings stay as they are, so a wrong argument is still an error. It is on by default; turn it off with `#[toolbox(parse_json_strings = false)]` for the whole toolbox or `#[tool(parse_json_strings = false)]` for one tool (the tool's option wins). Hand-written toolboxes get the same with `agentai::tool::parse_json_string_arguments(&mut arguments, &schema)`.
+
 Error handling in generated toolboxes: if the arguments do not deserialize, the generated code returns `ToolError::InvalidArguments`, so the model can fix them. Errors returned by your method pass through unchanged: return `ToolError::InvalidArguments` or `ToolError::Failed` with a helpful message (for example "unknown city") to let the model retry, or `ToolError::Configuration` / `ToolError::fatal(err)` to stop the run.
 
 ### Implementing `ToolBox` by hand

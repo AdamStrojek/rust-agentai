@@ -91,6 +91,10 @@ use syn::{
 ///   use `Option<T>` for parameters the model may leave empty (`null`). Not every provider (or
 ///   every model behind a gateway such as OpenRouter) supports strict tools, so it is opt-in.
 ///
+/// - `parse_json_strings = false`: Turns off parsing of stringified JSON arguments for this tool
+///   (see below). `#[toolbox(parse_json_strings = false)]` turns it off for every tool of the
+///   toolbox; a tool's own option wins.
+///
 /// ### 4. Tool Arguments
 /// The tool's schema is generated based on the method's arguments, which is why they must be serializable.
 /// This is primarily syntactic sugar, as all arguments are copied into a new helper structure as serializable fields.
@@ -102,6 +106,13 @@ use syn::{
 /// `serde` or `schemars` attributes. For more information, refer to the following pages:
 /// - [serde](https://serde.rs/field-attrs.html)
 /// - [schemars](https://graham.cool/schemars/examples/3-schemars_attrs/)
+///
+/// Models, local ones especially, often send an array or object argument as a string with JSON
+/// inside, for example `"tags": "[\"a\", \"b\"]"`. When the schema of an argument allows an
+/// array or an object but no string, and the string parses as JSON of an allowed type, the
+/// generated code uses the parsed value (`agentai::tool::parse_json_string_arguments`). Other
+/// strings stay as they are, so a wrong argument is still an `InvalidArguments` error. This is on
+/// by default; turn it off with `parse_json_strings = false`.
 ///
 /// # Examples
 ///
@@ -189,7 +200,33 @@ use syn::{
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn toolbox(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Parse the #[toolbox] options: parse_json_strings = <bool>
+    let mut parse_json_strings = true;
+    let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+    let options = match syn::parse::Parser::parse(parser, attr) {
+        Ok(options) => options,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    for option in options {
+        match &option {
+            Meta::NameValue(name_value) if name_value.path.is_ident("parse_json_strings") => {
+                match bool_value(name_value, "parse_json_strings") {
+                    Ok(value) => parse_json_strings = value,
+                    Err(err) => return err.to_compile_error().into(),
+                }
+            }
+            _ => {
+                return Error::new_spanned(
+                    option.to_token_stream(),
+                    "Expected `parse_json_strings = <bool>` in toolbox attribute",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+    }
+
     // Parse the original impl block
     let mut item_impl = parse_macro_input!(item as ItemImpl);
 
@@ -238,6 +275,7 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // Parse the #[tool] attribute options: name = "...", strict, strict = <bool>
                 let mut name_arg_found = false;
                 let mut strict: Option<bool> = None;
+                let mut tool_parse_json_strings: Option<bool> = None;
                 let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
                 // A bare #[tool] has no arguments; #[tool(...)] must parse, so typos are reported
                 if let Meta::List(_) = &tool_attr.meta {
@@ -313,11 +351,27 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 };
                                 strict = Some(lit_bool.value);
                             }
+                            Meta::NameValue(name_value)
+                                if name_value.path.is_ident("parse_json_strings") =>
+                            {
+                                if tool_parse_json_strings.is_some() {
+                                    return Error::new_spanned(
+                                        name_value.to_token_stream(),
+                                        "Duplicate 'parse_json_strings' argument in tool attribute",
+                                    )
+                                    .to_compile_error()
+                                    .into();
+                                }
+                                match bool_value(&name_value, "parse_json_strings") {
+                                    Ok(value) => tool_parse_json_strings = Some(value),
+                                    Err(err) => return err.to_compile_error().into(),
+                                }
+                            }
                             _ => {
                                 // Error: unknown option
                                 return Error::new_spanned(
                                     arg_meta.to_token_stream(),
-                                    "Expected `name = \"...\"` or `strict` in tool attribute",
+                                    "Expected `name = \"...\"`, `strict` or `parse_json_strings = <bool>` in tool attribute",
                                 )
                                 .to_compile_error()
                                 .into();
@@ -436,20 +490,23 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     });
                 }
 
+                // JSON schema of the parameters struct
+                let schema_expr = quote! {
+                    {
+                        let generator = ::schemars::generate::SchemaSettings::draft2020_12().with(|s| {
+                            s.meta_schema = None;
+                        }).into_generator();
+                        let schema: serde_json::Value =
+                            generator.into_root_schema_for::<#params_struct_name>().into();
+                        schema
+                    }
+                };
+
                 // Add to tool definitions
                 let schema_token = if param_fields.is_empty() {
                     quote! { None }
                 } else {
-                    // Use the generated parameter struct name for schemars::schema_for!
-                    // quote! { Some(generate_tool_schema::<#params_struct_name>()) }
-                    quote! {
-                        Some({
-                            let generator = ::schemars::generate::SchemaSettings::draft2020_12().with(|s| {
-                                s.meta_schema = None;
-                            }).into_generator();
-                            generator.into_root_schema_for::<#params_struct_name>().into()
-                        })
-                    }
+                    quote! { Some(#schema_expr) }
                 };
 
                 let strict_token = match strict {
@@ -472,7 +529,22 @@ pub fn toolbox(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 if !param_fields.is_empty() {
                     method_call.extend(quote! {
-                        let params: #params_struct_name = serde_json::from_value(call.arguments.clone())
+                        #[allow(unused_mut)]
+                        let mut arguments = call.arguments.clone();
+                    });
+                    if tool_parse_json_strings.unwrap_or(parse_json_strings) {
+                        // Arrays and objects the model sent as JSON strings
+                        method_call.extend(quote! {
+                            static SCHEMA: ::std::sync::OnceLock<serde_json::Value> =
+                                ::std::sync::OnceLock::new();
+                            ::agentai::tool::parse_json_string_arguments(
+                                &mut arguments,
+                                SCHEMA.get_or_init(|| #schema_expr),
+                            );
+                        });
+                    }
+                    method_call.extend(quote! {
+                        let params: #params_struct_name = serde_json::from_value(arguments)
                             .map_err(|e| {
                                 ToolError::InvalidArguments(format!(
                                     "invalid arguments for tool '{}': {}", #tool_name, e
@@ -550,4 +622,18 @@ fn is_tool_call_ref(ty: &syn::Type) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "ToolCall")
+}
+
+/// Reads `name = true` / `name = false`.
+fn bool_value(name_value: &MetaNameValue, name: &str) -> Result<bool, Error> {
+    match &name_value.value {
+        Expr::Lit(syn::ExprLit {
+            lit: Lit::Bool(lit_bool),
+            ..
+        }) => Ok(lit_bool.value),
+        other => Err(Error::new_spanned(
+            other.to_token_stream(),
+            format!("Expected `true` or `false` for {name}"),
+        )),
+    }
 }
