@@ -89,3 +89,109 @@ async fn a_tool_call_parameter_gets_the_call_and_stays_out_of_the_schema() -> Re
 
     Ok(())
 }
+
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Debug)]
+struct Point {
+    x: i32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Debug)]
+enum Unit {
+    Celsius,
+}
+
+struct JsonStringToolBox;
+
+#[toolbox]
+impl JsonStringToolBox {
+    /// Takes complex arguments.
+    #[tool]
+    fn complex(
+        &self,
+        tags: Vec<String>,
+        point: Option<Point>,
+        unit: Unit,
+        note: String,
+    ) -> ToolResult {
+        Ok(format!("{tags:?} {point:?} {unit:?} {note}"))
+    }
+
+    /// The same tool, with the parsing turned off.
+    #[tool(parse_json_strings = false)]
+    fn exact(&self, tags: Vec<String>) -> ToolResult {
+        Ok(format!("{tags:?}"))
+    }
+}
+
+struct ExactToolBox;
+
+#[toolbox(parse_json_strings = false)]
+impl ExactToolBox {
+    /// Takes a list.
+    #[tool]
+    fn list(&self, tags: Vec<String>) -> ToolResult {
+        Ok(format!("{tags:?}"))
+    }
+
+    /// Takes a list, with the parsing turned back on.
+    #[tool(parse_json_strings = true)]
+    fn lenient(&self, tags: Vec<String>) -> ToolResult {
+        Ok(format!("{tags:?}"))
+    }
+}
+
+async fn call(toolbox: &impl ToolBox, name: &str, arguments: serde_json::Value) -> ToolResult {
+    let call = agentai::ToolCall::new("call_1", name, arguments);
+    toolbox
+        .call_tool(&call)
+        .await
+        .map(|output| output.text().unwrap_or_default())
+}
+
+#[tokio::test]
+async fn arrays_and_objects_sent_as_json_strings_are_parsed() {
+    let output = call(
+        &JsonStringToolBox,
+        "complex",
+        serde_json::json!({
+            "tags": "[\"a\", \"b\"]",
+            "point": "{\"x\": 1}",
+            "unit": "Celsius",
+            "note": "[1]",
+        }),
+    )
+    .await
+    .unwrap();
+    // A string argument keeps its JSON-looking text
+    assert_eq!(output, r#"["a", "b"] Some(Point { x: 1 }) Celsius [1]"#);
+}
+
+#[tokio::test]
+async fn strings_that_are_not_json_of_the_type_stay_errors() {
+    for tags in ["a, b", "{\"a\": 1}"] {
+        let result = call(
+            &JsonStringToolBox,
+            "complex",
+            serde_json::json!({"tags": tags, "unit": "Celsius", "note": ""}),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(ToolError::InvalidArguments(_))),
+            "{tags}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn parse_json_strings_can_be_turned_off_and_on() {
+    let tags = serde_json::json!({"tags": "[\"a\"]"});
+    for (toolbox, name, parsed) in [
+        (&JsonStringToolBox as &dyn ToolBox, "exact", false),
+        (&ExactToolBox, "list", false),
+        (&ExactToolBox, "lenient", true),
+    ] {
+        let call = agentai::ToolCall::new("call_1", name, tags.clone());
+        let result = toolbox.call_tool(&call).await;
+        assert_eq!(result.is_ok(), parsed, "{name}");
+    }
+}
