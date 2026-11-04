@@ -1,7 +1,7 @@
 //! The agent loop shared by every way of running an agent.
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
-use crate::convert::{FromGenai, IntoGenai};
+use crate::convert::{FromGenai, messages_into_genai};
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::prompt::Prompt;
 use crate::tool::{ToolBox, ToolOutput};
@@ -74,8 +74,7 @@ where
         }
 
         // The history does not change during the run: convert it once
-        let history: Vec<genai::chat::ChatMessage> =
-            history.into_iter().map(Message::into_genai).collect();
+        let history: Vec<genai::chat::ChatMessage> = messages_into_genai(history);
 
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
@@ -83,7 +82,7 @@ where
                 history
                     .iter()
                     .cloned()
-                    .chain(new_messages.iter().cloned().map(Message::into_genai))
+                    .chain(messages_into_genai(new_messages.iter().cloned()))
                     .collect(),
             );
             if !run.system.is_empty() {
