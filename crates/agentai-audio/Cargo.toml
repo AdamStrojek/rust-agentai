@@ -1,0 +1,51 @@
+[package]
+name = "agentai-audio"
+version = "0.5.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Adam Strojek <adam@strojek.info>"]
+license = "MIT"
+repository = "https://github.com/AdamStrojek/rust-agentai"
+description = "Text-to-speech and voice cloning for AgentAI agents."
+readme = "README.md"
+categories = ["multimedia::audio"]
+keywords = ["generative-ai", "agent", "text-to-speech", "voice-cloning"]
+
+[dependencies]
+agentai = { path = "../agentai", version = "0.5", default-features = false, optional = true }
+agentai-core = { path = "../agentai-core", version = "0.5", default-features = false, features = [
+    "reqwest",
+] }
+async-trait = "0.1.92"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+schemars = { version = "1.2", features = ["derive"], optional = true }
+thiserror = "2.0.21"
+base64 = "0.23"
+document-features = { version = "0.2" }
+
+[dev-dependencies]
+agentai = { path = "../agentai", version = "0.5" }
+anyhow = "1.0.104"
+tokio = { version = "1.54.0", features = ["full"] }
+
+[features]
+default = ["toolbox", "rustls-ring", "system-proxy"]
+#! Available features for `agentai-audio` crate.
+#!
+#! Features list:
+#!
+
+## Enables the agent tools: [`SpeechToolBox`](crate::SpeechToolBox). Without it the crate has only
+## [`SpeechGenerator`](crate::SpeechGenerator) and does not depend on `agentai`.
+toolbox = ["dep:agentai", "agentai/macros", "dep:schemars"]
+## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
+## store.
+rustls-ring = ["agentai-core/rustls-ring", "agentai?/rustls-ring"]
+## TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+rustls-aws-lc = ["agentai-core/rustls-aws-lc", "agentai?/rustls-aws-lc"]
+## TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined
+## with a `rustls-*` feature: set `default-features = false`.
+native-tls = ["agentai-core/native-tls", "agentai?/native-tls"]
+## Reads the macOS and Windows system proxy settings.
+system-proxy = ["agentai-core/system-proxy", "agentai?/system-proxy"]

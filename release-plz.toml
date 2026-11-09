@@ -66,7 +66,7 @@ commit_parsers = [
 name = "agentai"
 version_group = "agentai"
 changelog_path = "CHANGELOG.md"
-changelog_include = ["agentai-macros", "agentai-core", "agentai-image"]
+changelog_include = ["agentai-macros", "agentai-core", "agentai-image", "agentai-audio"]
 
 [[package]]
 name = "agentai-macros"
@@ -80,5 +80,10 @@ changelog_update = false
 
 [[package]]
 name = "agentai-image"
+version_group = "agentai"
+changelog_update = false
+
+[[package]]
+name = "agentai-audio"
 version_group = "agentai"
 changelog_update = false

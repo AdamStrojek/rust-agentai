@@ -1,0 +1,16 @@
+//! # AgentAI Audio
+//!
+//! Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai).
+//!
+//! The speech APIs live in [`provider`]; [`SpeechProvider`](provider::SpeechProvider) is the
+//! interface they implement. Audio comes back as an agentai `Media`, and the [`storage`] module
+//! (from `agentai-core`) has the traits to save it.
+
+pub mod provider;
+
+#[doc(inline)]
+pub use agentai_core::storage;
+pub use provider::{
+    AudioError, AudioFormat, AudioModel, CreateVoice, SpeechRequest, SpeechResponse, Voice,
+    VoiceInfo,
+};
