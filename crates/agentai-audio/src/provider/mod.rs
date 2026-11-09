@@ -7,6 +7,8 @@
 #[allow(dead_code)]
 mod wire;
 
+pub mod openai;
+
 use agentai_core::HttpError;
 use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
