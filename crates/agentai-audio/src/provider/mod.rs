@@ -470,7 +470,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AudioModel>, AudioError> 
 }
 
 #[cfg(test)]
-#[allow(dead_code)] // used by the provider tests added later
 pub(crate) mod test_support {
     use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse};
     use async_trait::async_trait;

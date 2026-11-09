@@ -8,6 +8,8 @@
 
 mod generator;
 pub mod provider;
+#[cfg(feature = "toolbox")]
+mod toolbox;
 mod voice_store;
 
 #[doc(inline)]
@@ -17,4 +19,6 @@ pub use provider::{
     AudioError, AudioFormat, AudioModel, CreateVoice, SpeechRequest, SpeechResponse, Voice,
     VoiceInfo,
 };
+#[cfg(feature = "toolbox")]
+pub use toolbox::{SpeechToolBox, SpeechToolOutput};
 pub use voice_store::{MemoryVoiceStore, StoredVoice, VoiceStore};
