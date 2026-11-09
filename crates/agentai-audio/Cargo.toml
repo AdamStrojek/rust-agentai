@@ -49,3 +49,7 @@ rustls-aws-lc = ["agentai-core/rustls-aws-lc", "agentai?/rustls-aws-lc"]
 native-tls = ["agentai-core/native-tls", "agentai?/native-tls"]
 ## Reads the macOS and Windows system proxy settings.
 system-proxy = ["agentai-core/system-proxy", "agentai?/system-proxy"]
+
+[[example]]
+name = "speech_tools"
+required-features = ["toolbox"]

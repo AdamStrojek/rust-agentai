@@ -30,6 +30,7 @@ This library is under heavy development. The interface may change at any time wi
 - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
 - **Images for vision models**: Send text and images together in a `Prompt`, by URL or from bytes. Plain text prompts work as before.
 - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with `ToolOutput`.
+- **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, oMLX) and clones voices from your code.
 - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New

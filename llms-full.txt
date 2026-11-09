@@ -31,7 +31,7 @@ All features are on by default, except `rustls-aws-lc` and `native-tls`.
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
 | `tokio` | tokio integrations, such as `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
 
-For a minimal build: `agentai = { version = "0.5", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` has the same TLS features.
+For a minimal build: `agentai = { version = "0.5", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` and `agentai-audio` have the same TLS features.
 
 ## Creating an agent
 
@@ -497,6 +497,40 @@ let agent = agent.with_toolbox(tools);
 - Providers are in `agentai_image::provider`. `ImageGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`, `openrouter::...`) or a well-known name (`gpt-image-*`, `dall-e-*`). `openai` reads `OPENAI_API_KEY`/`OPENAI_BASE_URL`; `openrouter` (`POST /images`, edits send the images as `input_references`) reads `OPENROUTER_API_KEY` and optionally `OPENROUTER_BASE_URL`. Set the key and base URL in code with `ImageGenerator::from_provider(OpenAiImageProvider::new(model, api_key, base_url))` (`agentai_image::provider::openai`) or `OpenRouterImageProvider::new(...)` (`provider::openrouter`). Implement `provider::ImageProvider` (`generate`, optionally `model`, `supports_edit`, `edit` and `list_models`) for other APIs.
 - Listing models: `agentai_image::provider::list_models("openai" | "openrouter").await?` (settings from env) or `generator.list_models().await?` returns `Vec<ImageModel>` with `model` (ready for `ImageGenerator::new`, e.g. `openrouter::bytedance-seed/seedream-4.5`), `id`, `name`, `description`, `accepts_images`. On the official OpenAI API only `gpt-image*`/`dall-e*` are kept; compatible servers return every model they list; OpenRouter lists models with image output.
 - API errors in the tools: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request or save) go to the model as `ToolError::Failed`.
+
+### Speech (`agentai-audio` crate)
+
+Text-to-speech and voice cloning are a separate crate: `cargo add agentai-audio`. Without an agent:
+
+```rust
+use agentai_audio::{SpeechGenerator, Voice};
+
+let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
+    .with_default_voice(Voice::id("alloy"));
+let response = generator.generate("Good morning").await?; // SpeechResponse
+// response.audio: agentai::Media (base64 or URL), response.id (with a storage), response.sample_rate
+```
+
+For an agent (feature `toolbox`, on by default):
+
+```rust
+use agentai_audio::storage::MemoryStorage;
+use agentai_audio::{SpeechToolBox, SpeechToolOutput};
+
+let mut tools = ToolBoxSet::new();
+tools.add_tool(
+    SpeechToolBox::new(generator, MemoryStorage::new())
+        .with_output(SpeechToolOutput::Metadata), // the default; or SpeechToolOutput::Media
+);
+```
+
+- `SpeechToolBox` tools: `generate_speech(text, name, voice?, instructions?)` and `list_voices()`. `name` is required and reaches the `MediaSave` storage, which chooses the ID; the extension of the audio type is added when missing. `voice` is a voice ID from `list_voices` or, when `descriptions_supported` is true in its answer, a description such as `warm low female`. Every audio is saved and the model gets its ID. No tool clones voices: `create_voice` stays in your code.
+- `SpeechToolOutput::Metadata` (the default) returns only JSON (`id`, `content_type`, `bytes`, `model`, `voice`, `sample_rate`; unset fields are left out), because most models cannot listen to audio; `SpeechToolOutput::Media` returns the audio and a text with its ID (the model must accept audio).
+- `with_voices(Vec<VoiceInfo>)` is an allowlist: `list_voices` returns exactly it, and a `voice` that is not in it is used as a description, or rejected when the provider takes none.
+- Cloning, from code: `generator.create_voice(CreateVoice::new(name, vec![sample]).with_transcript(..)).await?` returns the ID for `Voice::id(id)`; `supports_voice_cloning()` tells whether the provider can. ElevenLabs and oMLX can.
+- Providers are in `agentai_audio::provider`. `SpeechGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`, `elevenlabs::...`, `omlx::...`) or a well-known name (`tts-1*`, `gpt-4o-mini-tts*`, `eleven_*`). `openai` reads `OPENAI_API_KEY`/`OPENAI_BASE_URL` (OpenAI shuts its speech models down on 2027-01-06; other compatible servers keep working); `elevenlabs` reads `ELEVENLABS_API_KEY`/`ELEVENLABS_BASE_URL`; `omlx` reads `OMLX_ENDPOINT`/`OMLX_API_KEY`. Set them in code with `SpeechGenerator::from_provider(OpenAiSpeechProvider::new(model, api_key, base_url))` (also `ElevenLabsProvider`, `OmlxProvider`). Implement `provider::SpeechProvider` for other APIs.
+- oMLX has no voice library: it clones from a sample sent with every request. The provider keeps samples in a `VoiceStore` that you set explicitly, so `omlx::` through the model name cannot clone: `SpeechGenerator::from_provider(OmlxProvider::from_env(model)?.with_voice_store(MemoryVoiceStore::new()))`. `MemoryVoiceStore` is lost when the program ends; implement `VoiceStore` to keep samples.
+- Listing models: `agentai_audio::provider::list_models("openai" | "elevenlabs" | "omlx").await?` or `generator.list_models().await?`; voices: `generator.list_voices().await?`.
 
 ### MCP servers (`mcp-client`)
 
