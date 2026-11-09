@@ -7,6 +7,7 @@
 //! (from `agentai-core`) has the traits to save it.
 
 pub mod provider;
+mod voice_store;
 
 #[doc(inline)]
 pub use agentai_core::storage;
@@ -14,3 +15,4 @@ pub use provider::{
     AudioError, AudioFormat, AudioModel, CreateVoice, SpeechRequest, SpeechResponse, Voice,
     VoiceInfo,
 };
+pub use voice_store::{MemoryVoiceStore, StoredVoice, VoiceStore};

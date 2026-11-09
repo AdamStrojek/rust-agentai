@@ -8,6 +8,7 @@
 mod wire;
 
 pub mod elevenlabs;
+pub mod omlx;
 pub mod openai;
 
 use agentai_core::HttpError;
