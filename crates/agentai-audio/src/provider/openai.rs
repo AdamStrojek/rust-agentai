@@ -8,10 +8,9 @@
 //!
 //! OpenAI shuts down these models on 2027-01-06.
 
-use super::wire::{audio_media, send, with_bearer};
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo,
+    VoiceInfo, audio_media,
 };
 use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
 use async_trait::async_trait;
@@ -228,11 +227,10 @@ impl SpeechProvider for OpenAiSpeechProvider {
             response_format: request.format.map(format_name),
             speed: request.speed,
         };
-        let http = with_bearer(
-            HttpRequest::post(format!("{}/audio/speech", self.base_url)).with_json(&body)?,
-            &self.api_key,
-        );
-        let response = send(&*self.client, http).await?;
+        let http = HttpRequest::post(format!("{}/audio/speech", self.base_url))
+            .with_json(&body)?
+            .with_bearer_token(&self.api_key);
+        let response = self.client.send(http).await?.error_for_status()?;
         let format = request.format.unwrap_or(AudioFormat::Mp3);
         let mut audio = audio_media(&response, format.content_type())?;
         audio.name = request.name;
@@ -263,11 +261,9 @@ impl SpeechProvider for OpenAiSpeechProvider {
     /// Lists the models of `GET /models`. On the OpenAI API only speech models (`tts-1*`,
     /// `gpt-4o-mini-tts*`) are kept; compatible servers keep every model they list.
     async fn list_models(&self) -> Result<Vec<AudioModel>, AudioError> {
-        let request = with_bearer(
-            HttpRequest::get(format!("{}/models", self.base_url)),
-            &self.api_key,
-        );
-        let response = send(&*self.client, request).await?;
+        let request =
+            HttpRequest::get(format!("{}/models", self.base_url)).with_bearer_token(&self.api_key);
+        let response = self.client.send(request).await?.error_for_status()?;
         let list: ModelList = response
             .json()
             .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;

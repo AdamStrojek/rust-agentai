@@ -5,15 +5,22 @@
 //!
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
-use super::wire::{audio_media, media_bytes, percent_encode, send};
 use super::{
     AudioError, AudioFormat, AudioModel, CreateVoice, SpeechProvider, SpeechRequest,
-    SpeechResponse, Voice, VoiceInfo, extension_for,
+    SpeechResponse, Voice, VoiceInfo, audio_media, extension_for,
 };
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
 use async_trait::async_trait;
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// What is escaped in a query value: everything but the unreserved characters of RFC 3986.
+const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
 
 /// The ElevenLabs API endpoint.
 pub const DEFAULT_BASE_URL: &str = "https://api.elevenlabs.io";
@@ -198,7 +205,7 @@ impl SpeechProvider for ElevenLabsProvider {
         let mut url = format!("{}/v1/text-to-speech/{voice}", self.base_url);
         if let Some(output_format) = output_format {
             url.push_str("?output_format=");
-            url.push_str(&percent_encode(output_format));
+            url.extend(utf8_percent_encode(output_format, QUERY_VALUE));
         }
         let body = SpeechBody {
             text: &request.text,
@@ -207,7 +214,7 @@ impl SpeechProvider for ElevenLabsProvider {
             voice_settings: request.speed.map(|speed| VoiceSettings { speed }),
         };
         let http = self.authorize(HttpRequest::post(url).with_json(&body)?);
-        let response = send(&*self.client, http).await?;
+        let response = self.client.send(http).await?.error_for_status()?;
         let content_type = output_format.map_or("audio/mpeg", content_type_of);
         let mut audio = audio_media(&response, content_type)?;
         audio.name = request.name;
@@ -237,7 +244,7 @@ impl SpeechProvider for ElevenLabsProvider {
             form = form.with_text("description", description);
         }
         for (index, sample) in request.samples.iter().enumerate() {
-            let bytes = media_bytes(&*self.client, sample).await?;
+            let bytes = sample.bytes(&*self.client).await?;
             let filename = sample.name.clone().unwrap_or_else(|| {
                 format!(
                     "sample-{}.{}",
@@ -253,7 +260,7 @@ impl SpeechProvider for ElevenLabsProvider {
                 self.base_url
             )))
             .with_multipart(form);
-        let response = send(&*self.client, http).await?;
+        let response = self.client.send(http).await?.error_for_status()?;
         let created: CreatedVoice = response
             .json()
             .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
@@ -268,9 +275,13 @@ impl SpeechProvider for ElevenLabsProvider {
             let mut path = "/v2/voices?page_size=100".to_string();
             if let Some(token) = &token {
                 path.push_str("&next_page_token=");
-                path.push_str(&percent_encode(token));
+                path.extend(utf8_percent_encode(token, QUERY_VALUE));
             }
-            let response = send(&*self.client, self.get(&path)).await?;
+            let response = self
+                .client
+                .send(self.get(&path))
+                .await?
+                .error_for_status()?;
             let page: VoicePage = response
                 .json()
                 .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
@@ -291,7 +302,11 @@ impl SpeechProvider for ElevenLabsProvider {
 
     /// Lists the models of `GET /v1/models` that can speak.
     async fn list_models(&self) -> Result<Vec<AudioModel>, AudioError> {
-        let response = send(&*self.client, self.get("/v1/models")).await?;
+        let response = self
+            .client
+            .send(self.get("/v1/models"))
+            .await?
+            .error_for_status()?;
         let models: Vec<ModelEntry> = response
             .json()
             .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;

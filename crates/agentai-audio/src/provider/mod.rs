@@ -3,15 +3,13 @@
 //! [`SpeechProvider`] is the interface between your code and a text-to-speech API. Each
 //! submodule implements it for one API.
 
-mod wire;
-
 pub mod elevenlabs;
 pub mod omlx;
 pub mod openai;
 
-use agentai_core::HttpError;
 use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
+use agentai_core::{HttpError, HttpResponse};
 use async_trait::async_trait;
 use serde::Serialize;
 use thiserror::Error;
@@ -310,7 +308,7 @@ impl AudioModel {
 pub enum AudioError {
     /// The request could not be sent or the response could not be read.
     #[error(transparent)]
-    Http(#[from] HttpError),
+    Http(HttpError),
     /// The API answered with an error status.
     #[error("audio API error (status {status}): {message}")]
     Api { status: u16, message: String },
@@ -335,6 +333,25 @@ pub enum AudioError {
     /// The request cannot be fulfilled as given.
     #[error("invalid audio request: {0}")]
     InvalidRequest(String),
+}
+
+impl From<HttpError> for AudioError {
+    fn from(err: HttpError) -> Self {
+        match err {
+            HttpError::Status { status, message } => Self::Api { status, message },
+            err => Self::Http(err),
+        }
+    }
+}
+
+/// The body of a response as audio of the given type.
+fn audio_media(response: &HttpResponse, content_type: &str) -> Result<Media, AudioError> {
+    if response.body.is_empty() {
+        return Err(AudioError::InvalidResponse(
+            "the response has no audio".to_string(),
+        ));
+    }
+    Ok(Media::from_bytes(content_type, &response.body))
 }
 
 impl AudioError {

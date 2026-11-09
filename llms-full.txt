@@ -165,7 +165,7 @@ let result: AgentResult<String> = agent.run(prompt).with_history(&history).await
 ```
 
 - `Prompt::new()`, `Prompt::text(text)`, `.with_text(text)`, `.with_media(Media)`, `.with_image_url(url)`, `.with_image_bytes(content_type, bytes)`; read with `.parts()` (`Part::Text` and `Part::Media` only).
-- `Media::image_url(url)` guesses the MIME type from the extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, otherwise `image/jpeg`); `Media::from_url(content_type, url)` sets it yourself (Gemini needs the right type). Not every provider accepts URLs; use `Media::from_bytes(content_type, bytes)` (or `Media::from_base64` for data that is already encoded) then. `.with_name(name)` sets a file name, `.is_image()` checks the type.
+- `Media::image_url(url)` guesses the MIME type from the extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, otherwise `image/jpeg`); `Media::from_url(content_type, url)` sets it yourself (Gemini needs the right type). Not every provider accepts URLs; use `Media::from_bytes(content_type, bytes)` (or `Media::from_base64` for data that is already encoded) then. `.with_name(name)` sets a file name, `.is_image()` checks the type, `.byte_len()` returns the size of base64 media (`None` for a URL), and `.bytes(&client).await` returns the bytes, decoded or downloaded with an `HttpClient`.
 - The prompt becomes the first message of `result.new_messages`, images included, so follow-up questions in the same history can refer to them. Large images make every later request of the conversation bigger.
 
 ### History

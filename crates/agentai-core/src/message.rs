@@ -7,6 +7,7 @@
 //! Messages implement `Serialize` and `Deserialize` with a format defined by this crate, so a
 //! stored history keeps working when the LLM client used inside `agentai` changes.
 
+use crate::http::{HttpClient, HttpError, HttpRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -255,6 +256,34 @@ impl Media {
     /// Returns `true` when the MIME type is an image type.
     pub fn is_image(&self) -> bool {
         self.content_type.starts_with("image/")
+    }
+
+    /// Size of the media in bytes. `None` for a URL or invalid base64.
+    pub fn byte_len(&self) -> Option<usize> {
+        use base64::Engine;
+        match &self.source {
+            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .ok()
+                .map(|bytes| bytes.len()),
+            MediaSource::Url(_) => None,
+        }
+    }
+
+    /// Returns the bytes of the media: decoded base64, or downloaded from its URL with
+    /// `client`.
+    pub async fn bytes(&self, client: &dyn HttpClient) -> Result<Vec<u8>, HttpError> {
+        use base64::Engine;
+        match &self.source {
+            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|e| HttpError::InvalidMedia(e.to_string())),
+            MediaSource::Url(url) => Ok(client
+                .send(HttpRequest::get(url))
+                .await?
+                .error_for_status()?
+                .body),
+        }
     }
 }
 

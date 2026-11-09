@@ -10,14 +10,13 @@
 //! VoxCPM2. They are sent when set, and the server decides. Every field of a request has an
 //! equivalent, so none is left out.
 
-use super::wire::{audio_media, media_bytes, send, with_bearer};
 use super::{
     AudioError, AudioFormat, CreateVoice, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo,
+    VoiceInfo, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::{Media, MediaSource};
-use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
+use agentai_core::{HttpClient, HttpError, HttpRequest, ReqwestClient};
 use async_trait::async_trait;
 use serde::Serialize;
 use std::sync::Arc;
@@ -208,11 +207,10 @@ impl SpeechProvider for OmlxProvider {
             ref_audio,
             ref_text,
         };
-        let http = with_bearer(
-            HttpRequest::post(format!("{}/audio/speech", self.base_url)).with_json(&body)?,
-            &self.api_key,
-        );
-        let response = send(&*self.client, http).await?;
+        let http = HttpRequest::post(format!("{}/audio/speech", self.base_url))
+            .with_json(&body)?
+            .with_bearer_token(&self.api_key);
+        let response = self.client.send(http).await?.error_for_status()?;
         let format = request.format.unwrap_or(AudioFormat::Wav);
         let mut audio = audio_media(&response, format.content_type())?;
         audio.name = request.name;
@@ -235,18 +233,14 @@ impl SpeechProvider for OmlxProvider {
                 samples.len()
             ))
         })?;
-        let sample = match &sample.source {
-            MediaSource::Base64(data) if data.starts_with("data:") => {
-                return Err(AudioError::InvalidRequest(
-                    "the sample must be plain base64, not a data: URL".to_string(),
-                ));
-            }
-            MediaSource::Base64(_) => sample,
-            MediaSource::Url(_) => {
-                let bytes = media_bytes(&*self.client, &sample).await?;
-                Media::from_bytes(sample.content_type, bytes)
-            }
-        };
+        // Decoding also rejects what oMLX would, for example a `data:` URL
+        let bytes = sample.bytes(&*self.client).await.map_err(|err| match err {
+            HttpError::InvalidMedia(message) => AudioError::InvalidRequest(message),
+            err => err.into(),
+        })?;
+        let mut stored = Media::from_bytes(sample.content_type, bytes);
+        stored.name = sample.name;
+        let sample = stored;
         if matches!(&sample.source, MediaSource::Base64(data) if data.len() > MAX_REF_AUDIO_LEN) {
             return Err(AudioError::InvalidRequest(format!(
                 "the sample is larger than {} MiB",
@@ -480,7 +474,7 @@ mod tests {
         let http = MockHttp::new(vec![]);
         let store = MemoryVoiceStore::new();
         let p = provider(&http).with_voice_store(store.clone());
-        let big = Media::from_base64("audio/wav", "A".repeat(20 * 1024 * 1024 + 1));
+        let big = Media::from_base64("audio/wav", "A".repeat(20 * 1024 * 1024 + 4));
         assert!(matches!(
             p.create_voice(CreateVoice::new("A", vec![big])).await,
             Err(AudioError::InvalidRequest(_))

@@ -5,7 +5,7 @@
 //! (`gpt-image-*`, `dall-e-*`) and with other APIs that follow the same format.
 
 use super::{ImageEditRequest, ImageError, ImageModel, ImageProvider, ImageRequest, ImageResponse};
-use agentai_core::message::{Media, MediaSource};
+use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
 use base64::Engine;
@@ -99,22 +99,6 @@ impl OpenAiImageProvider {
     async fn send(&self, request: HttpRequest) -> Result<ImageResponse, ImageError> {
         parse_response(&send_request(&*self.client, &self.api_key, request).await?)
     }
-
-    /// Bytes of an image to upload: decoded base64, or downloaded from its URL.
-    async fn image_bytes(&self, media: &Media) -> Result<Vec<u8>, ImageError> {
-        match &media.source {
-            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .map_err(|e| ImageError::InvalidResponse(format!("invalid base64 image: {e}"))),
-            MediaSource::Url(url) => {
-                let response = self.client.send(HttpRequest::get(url)).await?;
-                if !response.is_success() {
-                    return Err(api_error(&response));
-                }
-                Ok(response.body)
-            }
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -161,7 +145,7 @@ impl ImageProvider for OpenAiImageProvider {
             form = form.with_text("quality", quality);
         }
         for (index, image) in request.images.iter().enumerate() {
-            let bytes = self.image_bytes(image).await?;
+            let bytes = image.bytes(&*self.client).await?;
             let filename = image.name.clone().unwrap_or_else(|| {
                 let extension = image.content_type.rsplit('/').next().unwrap_or("png");
                 format!("image-{}.{extension}", index + 1)
@@ -227,16 +211,8 @@ pub(super) async fn send_request(
     api_key: &str,
     request: HttpRequest,
 ) -> Result<HttpResponse, ImageError> {
-    let request = if api_key.is_empty() {
-        request
-    } else {
-        request.with_header("Authorization", format!("Bearer {api_key}"))
-    };
-    let response = client.send(request).await?;
-    if !response.is_success() {
-        return Err(api_error(&response));
-    }
-    Ok(response)
+    let response = client.send(request.with_bearer_token(api_key)).await?;
+    Ok(response.error_for_status()?)
 }
 
 pub(super) fn parse_response(response: &HttpResponse) -> Result<ImageResponse, ImageError> {
@@ -296,19 +272,6 @@ fn sniff_image_type(b64: &str) -> &'static str {
             ..,
         ] => "image/webp",
         _ => "image/png",
-    }
-}
-
-/// Reads `error.message` of an OpenAI error, or falls back to the body.
-fn api_error(response: &HttpResponse) -> ImageError {
-    let message = response
-        .json::<serde_json::Value>()
-        .ok()
-        .and_then(|json| json["error"]["message"].as_str().map(str::to_string))
-        .unwrap_or_else(|| response.text());
-    ImageError::Api {
-        status: response.status,
-        message,
     }
 }
 

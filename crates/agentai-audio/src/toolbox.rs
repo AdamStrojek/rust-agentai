@@ -3,7 +3,6 @@
 use crate::generator::SpeechGenerator;
 use crate::provider::{AudioError, SpeechRequest, SpeechResponse, Voice, VoiceInfo};
 use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult, toolbox};
-use agentai_core::message::MediaSource;
 use agentai_core::storage::MediaStorage;
 use serde::Serialize;
 
@@ -98,10 +97,7 @@ impl SpeechToolBox {
                 let metadata = SpeechMetadata {
                     id: response.id.as_deref(),
                     content_type: &response.audio.content_type,
-                    bytes: match &response.audio.source {
-                        MediaSource::Base64(data) => Some(base64_len(data)),
-                        MediaSource::Url(_) => None,
-                    },
+                    bytes: response.audio.byte_len(),
                     model: self.generator.model(),
                     voice,
                     sample_rate: response.sample_rate,
@@ -195,12 +191,6 @@ struct SpeechMetadata<'a> {
 struct VoiceList<'a> {
     voices: &'a [VoiceInfo],
     descriptions_supported: bool,
-}
-
-/// Size of base64 data once decoded, without decoding it.
-fn base64_len(data: &str) -> usize {
-    let padding = data.bytes().rev().take_while(|&b| b == b'=').count();
-    (data.len() / 4 * 3).saturating_sub(padding)
 }
 
 /// Rejected credentials cannot be fixed by the model; anything else (a missing voice, a
