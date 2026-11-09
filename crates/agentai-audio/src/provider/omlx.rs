@@ -39,8 +39,11 @@ const REF_TEXT_PLACEHOLDER: &str = ".";
 /// ```rust,no_run
 /// # use agentai_audio::provider::omlx::OmlxProvider;
 /// # use agentai_audio::MemoryVoiceStore;
-/// let provider = OmlxProvider::from_env("mlx-community/VoxCPM2-8bit")
+/// # fn main() -> Result<(), agentai_audio::AudioError> {
+/// let provider = OmlxProvider::from_env("mlx-community/VoxCPM2-8bit")?
 ///     .with_voice_store(MemoryVoiceStore::new());
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone)]
 pub struct OmlxProvider {
@@ -81,8 +84,8 @@ impl OmlxProvider {
     /// [`DEFAULT_BASE_URL`] when it is not set, and the optional API key from `OMLX_API_KEY`.
     ///
     /// No voice store is created, so cloning needs [`with_voice_store`](Self::with_voice_store).
-    pub fn from_env(model: impl Into<String>) -> Self {
-        Self::from_lookup(model, |name| std::env::var(name).ok())
+    pub fn from_env(model: impl Into<String>) -> Result<Self, AudioError> {
+        Ok(Self::from_lookup(model, |name| std::env::var(name).ok()))
     }
 
     fn from_lookup(model: impl Into<String>, lookup: impl Fn(&str) -> Option<String>) -> Self {
