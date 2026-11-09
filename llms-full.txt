@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.5.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.6.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -31,7 +31,7 @@ All features are on by default, except `rustls-aws-lc` and `native-tls`.
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
 | `tokio` | tokio integrations, such as `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
 
-For a minimal build: `agentai = { version = "0.5", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` has the same TLS features.
+For a minimal build: `agentai = { version = "0.6", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` and `agentai-audio` have the same TLS features.
 
 ## Creating an agent
 
@@ -165,7 +165,7 @@ let result: AgentResult<String> = agent.run(prompt).with_history(&history).await
 ```
 
 - `Prompt::new()`, `Prompt::text(text)`, `.with_text(text)`, `.with_media(Media)`, `.with_image_url(url)`, `.with_image_bytes(content_type, bytes)`; read with `.parts()` (`Part::Text` and `Part::Media` only).
-- `Media::image_url(url)` guesses the MIME type from the extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, otherwise `image/jpeg`); `Media::from_url(content_type, url)` sets it yourself (Gemini needs the right type). Not every provider accepts URLs; use `Media::from_bytes(content_type, bytes)` (or `Media::from_base64` for data that is already encoded) then. `.with_name(name)` sets a file name, `.is_image()` checks the type.
+- `Media::image_url(url)` guesses the MIME type from the extension (`png`, `jpg`/`jpeg`, `gif`, `webp`, otherwise `image/jpeg`); `Media::from_url(content_type, url)` sets it yourself (Gemini needs the right type). Not every provider accepts URLs; use `Media::from_bytes(content_type, bytes)` (or `Media::from_base64` for data that is already encoded) then. `.with_name(name)` sets a file name, `.is_image()` checks the type, `.byte_len()` returns the size of base64 media (`None` for a URL), and `.bytes(&client).await` returns the bytes, decoded or downloaded with an `HttpClient`.
 - The prompt becomes the first message of `result.new_messages`, images included, so follow-up questions in the same history can refer to them. Large images make every later request of the conversation bigger.
 
 ### History
@@ -498,6 +498,41 @@ let agent = agent.with_toolbox(tools);
 - Listing models: `agentai_image::provider::list_models("openai" | "openrouter").await?` (settings from env) or `generator.list_models().await?` returns `Vec<ImageModel>` with `model` (ready for `ImageGenerator::new`, e.g. `openrouter::bytedance-seed/seedream-4.5`), `id`, `name`, `description`, `accepts_images`. On the official OpenAI API only `gpt-image*`/`dall-e*` are kept; compatible servers return every model they list; OpenRouter lists models with image output.
 - API errors in the tools: rejected keys (401/403) are `ToolError::Configuration` and stop the run; other errors (a refused prompt, a failed request or save) go to the model as `ToolError::Failed`.
 
+### Speech (`agentai-audio` crate)
+
+Text-to-speech and voice cloning are a separate crate: `cargo add agentai-audio`. Without an agent:
+
+```rust
+use agentai_audio::{SpeechGenerator, Voice};
+
+let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
+    .with_default_voice(Voice::id("alloy"));
+let response = generator.generate("Good morning").await?; // SpeechResponse
+// response.audio: agentai::Media (base64 or URL), response.id (with a storage), response.sample_rate
+```
+
+For an agent (feature `toolbox`, on by default):
+
+```rust
+use agentai_audio::storage::MemoryStorage;
+use agentai_audio::{SpeechToolBox, SpeechToolOutput};
+
+let mut tools = ToolBoxSet::new();
+tools.add_tool(
+    SpeechToolBox::new(generator, MemoryStorage::new())
+        .with_output(SpeechToolOutput::Metadata), // the default; or SpeechToolOutput::Media
+);
+```
+
+- `SpeechToolBox` tools: `generate_speech(text, name, voice?, instructions?)` and `list_voices()`. `name` is required and reaches the `MediaSave` storage, which chooses the ID; the extension of the audio type is added when missing. `voice` is a voice ID from `list_voices` or, when `descriptions_supported` is true in its answer, a description such as `warm low female` (true for oMLX and for OpenAI models after `tts-1` on the official URL, false for OpenAI-compatible servers, where the text is a voice name). Every audio is saved and the model gets its ID. No tool clones voices: `create_voice` stays in your code.
+- `SpeechToolOutput::Metadata` (the default) returns only JSON (`id`, `content_type`, `bytes`, `model`, `voice`, `sample_rate`; unset fields are left out), because most models cannot listen to audio; `SpeechToolOutput::Media` returns the audio and a text with its ID (the model must accept audio).
+- `with_voices(Vec<VoiceInfo>)` is an allowlist: `list_voices` returns exactly it, and a `voice` that is not in it is used as a description, or rejected when the provider takes none. Use it whenever cloned voices exist: without it the model can use any stored or account voice by its ID.
+- OpenAI and ElevenLabs need a voice: `with_default_voice(Voice::id(..))` or `SpeechRequest::with_voice`, otherwise the request fails with `MissingVoice`; oMLX uses its own voice when none is set. Fields with no equivalent are not sent (ElevenLabs ignores `instructions`, OpenAI ignores `language`).
+- Cloning, from code: `generator.create_voice(name, &[sample], transcript, description).await?` (`transcript` and `description` are `Option<&str>`; oMLX needs the transcript: without it the server rejects the voice when it speaks) returns the ID for `Voice::id(id)`; `supports_voice_cloning()` tells whether the provider can. ElevenLabs and oMLX can.
+- Providers are in `agentai_audio::provider`. `SpeechGenerator::new(model)` picks one from a `provider::` prefix (`openai::...`, `elevenlabs::...`, `omlx::...`) or a well-known name (`tts-1*`, `gpt-4o-mini-tts*`, `eleven_*`). `openai` reads `OPENAI_API_KEY`/`OPENAI_BASE_URL` (OpenAI shuts its speech models down on 2027-01-06; other compatible servers keep working); `elevenlabs` reads `ELEVENLABS_API_KEY`/`ELEVENLABS_BASE_URL`; `omlx` reads `OMLX_ENDPOINT`/`OMLX_API_KEY`. Set them in code with `SpeechGenerator::from_provider(OpenAiSpeechProvider::new(model, api_key, base_url))` (also `ElevenLabsProvider`, `OmlxProvider`). Implement `provider::SpeechProvider` for other APIs.
+- oMLX has no voice library: it clones from a sample sent with every request. The provider keeps samples in a `VoiceStore` that you set explicitly, so `omlx::` through the model name cannot clone: `SpeechGenerator::from_provider(OmlxProvider::from_env(model)?.with_voice_store(MemoryVoiceStore::new()))`. `MemoryVoiceStore` is lost when the program ends; implement `VoiceStore` to keep samples. `VoiceStore::get` receives arbitrary untrusted text (what the model wrote as a voice), so a store backed by files or a database must return `Ok(None)` for anything that is not a valid ID.
+- Listing models: `agentai_audio::provider::list_models("openai" | "elevenlabs").await?` (`omlx` returns `Unsupported`) or `generator.list_models().await?`; voices: `generator.list_voices().await?`.
+
 ### MCP servers (`mcp-client`)
 
 `McpToolBox` exposes all tools of an MCP server. It is built on the official MCP Rust SDK, `rmcp`. It either starts the server as a child process and talks to it over stdio, or connects to a running server over Streamable HTTP.
@@ -528,7 +563,7 @@ The server's tool list is read once, when the toolbox is created.
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.5.0
+## Limits in 0.6.0
 
 - Tool results are text only; a tool cannot return an image to the model.
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.

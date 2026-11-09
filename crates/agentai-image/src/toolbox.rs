@@ -87,10 +87,7 @@ impl GenerateImageToolBox {
                         MediaSource::Url(url) => Some(url),
                         MediaSource::Base64(_) => None,
                     },
-                    bytes: match &response.image.source {
-                        MediaSource::Base64(data) => Some(base64_len(data)),
-                        MediaSource::Url(_) => None,
-                    },
+                    bytes: response.image.byte_len(),
                     model: self.generator.model(),
                     prompt,
                     revised_prompt: response.revised_prompt.as_deref(),
@@ -188,12 +185,6 @@ struct ImageMetadata<'a> {
     size: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     quality: Option<&'a str>,
-}
-
-/// Size of base64 data once decoded, without decoding it.
-fn base64_len(data: &str) -> usize {
-    let padding = data.bytes().rev().take_while(|&b| b == b'=').count();
-    data.len() / 4 * 3 - padding
 }
 
 /// Rejected credentials cannot be fixed by the model; anything else (a refused prompt, a

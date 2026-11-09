@@ -20,9 +20,22 @@
 //! - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
 //! - **Images for vision models**: Send text and images together in a [`Prompt`](crate::Prompt), by URL or from bytes. Plain text prompts work as before.
 //! - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with [`ToolOutput`](crate::tool::ToolOutput).
+//! - **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, oMLX) and clones voices from your code.
 //! - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 //!
 //! ## What's New
+//!
+//! #### 0.6.0 - Text-to-speech and voice cloning
+//!
+//! - **Speech generation**: the new [`agentai-audio`](https://docs.rs/agentai-audio) crate has
+//!   `SpeechGenerator` to speak texts from your code with OpenAI and compatible servers, ElevenLabs or oMLX.
+//!   `SpeechGenerator::new("elevenlabs::eleven_v4")?` takes the provider from the model name.
+//! - **Voice cloning**: `create_voice(name, samples, transcript, description)` clones a voice and returns an
+//!   ID for `Voice::id`, the same call on ElevenLabs and oMLX. oMLX needs the transcript of the sample and a
+//!   `VoiceStore` set with `with_voice_store`.
+//! - **Agents that speak**: `SpeechToolBox` gives a model `generate_speech` and `list_voices`; `with_voices`
+//!   limits it to the voices you allow. Cloning stays in your code.
+//! - Internal: `agentai-core` now has the HTTP and media helpers that `agentai-image` and `agentai-audio` share.
 //!
 //! #### 0.5.0 - Image generation, images in tool results
 //!

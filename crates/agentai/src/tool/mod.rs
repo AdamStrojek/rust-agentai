@@ -23,6 +23,9 @@
 //!   OpenAI and compatible APIs.
 //!   - `GenerateImageToolBox`: `generate_image` and `edit_image`, returning the image or only its metadata as JSON.
 //!   - `ReadMediaToolBox`: `read_media` gives the model a stored file (from any `MediaRead`) by its ID.
+//! - [`agentai-audio`](https://docs.rs/agentai-audio) (a separate crate, `cargo add agentai-audio`): speech tools for
+//!   OpenAI and compatible APIs, ElevenLabs and oMLX.
+//!   - `SpeechToolBox`: `generate_speech` and `list_voices`, returning the metadata of the audio as JSON or the audio itself.
 //!
 //! A tool returns text, or a [`ToolOutput`] with text and images for the model, for example an
 //! image read from disk (`Media::from_bytes`). The model sees the images in a user message right

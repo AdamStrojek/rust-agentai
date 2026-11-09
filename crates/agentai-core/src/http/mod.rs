@@ -51,6 +51,16 @@ impl HttpRequest {
         self
     }
 
+    /// Adds `Authorization: Bearer <token>`. An empty token adds nothing, for servers without
+    /// authentication.
+    pub fn with_bearer_token(self, token: &str) -> Self {
+        if token.is_empty() {
+            self
+        } else {
+            self.with_header("Authorization", format!("Bearer {token}"))
+        }
+    }
+
     /// Sets the body.
     pub fn with_body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = Some(body.into());
@@ -108,6 +118,36 @@ impl HttpResponse {
         (200..300).contains(&self.status)
     }
 
+    /// Returns the response for a 2xx status, otherwise [`HttpError::Status`] with the API's
+    /// error message.
+    pub fn error_for_status(self) -> Result<Self, HttpError> {
+        if self.is_success() {
+            Ok(self)
+        } else {
+            Err(HttpError::Status {
+                status: self.status,
+                message: self.error_message(),
+            })
+        }
+    }
+
+    /// The message of a JSON error body (`error.message`, or FastAPI's `detail` as a string,
+    /// an object with `message` or a list of validation errors), otherwise the whole body.
+    fn error_message(&self) -> String {
+        self.json::<serde_json::Value>()
+            .ok()
+            .and_then(|json| {
+                let detail = &json["detail"];
+                json["error"]["message"]
+                    .as_str()
+                    .or_else(|| detail.as_str())
+                    .or_else(|| detail["message"].as_str())
+                    .or_else(|| detail[0]["msg"].as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| self.text())
+    }
+
     /// Returns the value of the first header with this name, ignoring case.
     pub fn header(&self, name: &str) -> Option<&str> {
         find_header(&self.headers, name)
@@ -142,6 +182,12 @@ pub enum HttpError {
     /// A JSON body could not be written or read.
     #[error("invalid JSON body: {0}")]
     Json(serde_json::Error),
+    /// The server answered with an error status, see [`HttpResponse::error_for_status`].
+    #[error("HTTP status {status}: {message}")]
+    Status { status: u16, message: String },
+    /// The bytes of a [`Media`](crate::message::Media) are not valid base64.
+    #[error("invalid base64 media: {0}")]
+    InvalidMedia(String),
 }
 
 impl HttpError {
@@ -283,6 +329,27 @@ pub use reqwest::ReqwestClient;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_for_status_reads_every_error_shape() {
+        let message = |body: &str| match HttpResponse::new(400, body).error_for_status() {
+            Err(HttpError::Status {
+                status: 400,
+                message,
+            }) => message,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(message(r#"{"error": {"message": "openai"}}"#), "openai");
+        assert_eq!(message(r#"{"detail": "omlx"}"#), "omlx");
+        assert_eq!(message(r#"{"detail": {"message": "eleven"}}"#), "eleven");
+        assert_eq!(
+            message(r#"{"detail": [{"msg": "validation"}]}"#),
+            "validation"
+        );
+        assert_eq!(message(r#"{"other":1}"#), r#"{"other":1}"#);
+        assert_eq!(message("bad gateway"), "bad gateway");
+        assert!(HttpResponse::new(204, "").error_for_status().is_ok());
+    }
 
     #[test]
     fn multipart_body_has_the_fields_and_files_between_boundaries() {
