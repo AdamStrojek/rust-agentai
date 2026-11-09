@@ -159,11 +159,6 @@ impl OpenAiSpeechProvider {
             }
             None => None,
         };
-        if description.is_some() && self.is_tts1() {
-            return Err(AudioError::Unsupported(
-                "voice descriptions with tts-1 models",
-            ));
-        }
         let base = request
             .default_voice
             .as_ref()
@@ -460,25 +455,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tts1_rejects_descriptions() {
-        let http = MockHttp::new(vec![]);
-        let err = tts1(&http)
+    async fn tts1_sends_a_description_and_only_newer_models_advertise_it() {
+        let http = MockHttp::new(vec![HttpResponse::new(200, b"audio".to_vec())]);
+        tts1(&http)
             .generate(
                 SpeechRequest::new("hi")
                     .with_voice(Voice::description("warm"))
                     .with_default_voice(Voice::id("onyx")),
             )
-            .await;
-        assert!(matches!(err, Err(AudioError::Unsupported(_))));
-        assert!(http.requests.lock().unwrap().is_empty());
+            .await
+            .unwrap();
+        assert_eq!(body_json(&http.request(0))["instructions"], json!("warm"));
         assert!(!tts1(&http).supports_voice_description());
         assert!(official(&http).supports_voice_description());
         assert!(!compatible(&http).supports_voice_description());
-        // Without a default voice it is still Unsupported, not MissingVoice.
-        let err = tts1(&http)
-            .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
-            .await;
-        assert!(matches!(err, Err(AudioError::Unsupported(_))));
     }
 
     #[tokio::test]

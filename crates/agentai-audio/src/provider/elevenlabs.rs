@@ -6,9 +6,10 @@
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
 use super::{
-    AudioError, AudioFormat, AudioModel, CreateVoice, SpeechProvider, SpeechRequest,
-    SpeechResponse, Voice, VoiceInfo, audio_media, extension_for,
+    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
+    VoiceInfo, audio_media, extension_for,
 };
+use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
 use async_trait::async_trait;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
@@ -233,17 +234,23 @@ impl SpeechProvider for ElevenLabsProvider {
     ///
     /// When the API replies with `requires_verification: true`, the voice exists but cannot
     /// speak until it is verified at ElevenLabs. `transcript` is not used.
-    async fn create_voice(&self, request: CreateVoice) -> Result<String, AudioError> {
-        if request.samples.is_empty() {
+    async fn create_voice(
+        &self,
+        name: &str,
+        samples: &[Media],
+        _transcript: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<String, AudioError> {
+        if samples.is_empty() {
             return Err(AudioError::InvalidRequest(
                 "voice cloning needs at least one sample".to_string(),
             ));
         }
-        let mut form = Multipart::new().with_text("name", request.name);
-        if let Some(description) = request.description {
+        let mut form = Multipart::new().with_text("name", name);
+        if let Some(description) = description {
             form = form.with_text("description", description);
         }
-        for (index, sample) in request.samples.iter().enumerate() {
+        for (index, sample) in samples.iter().enumerate() {
             let bytes = sample.bytes(&*self.client).await?;
             let filename = sample.name.clone().unwrap_or_else(|| {
                 format!(
@@ -496,7 +503,7 @@ mod tests {
             Media::from_bytes("audio/mpeg", b"TWO"),
         ];
         let id = provider(&http)
-            .create_voice(CreateVoice::new("Adam", samples).with_description("my voice"))
+            .create_voice("Adam", &samples, None, Some("my voice"))
             .await
             .unwrap();
         assert_eq!(id, "new1");
@@ -537,7 +544,7 @@ mod tests {
 
         let http = MockHttp::new(vec![]);
         let err = provider(&http)
-            .create_voice(CreateVoice::new("Adam", vec![]))
+            .create_voice("Adam", &[], None, None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));

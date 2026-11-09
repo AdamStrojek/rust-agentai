@@ -200,44 +200,6 @@ impl SpeechResponse {
     }
 }
 
-/// A request to clone a voice from samples.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct CreateVoice {
-    /// Name of the new voice.
-    pub name: String,
-    /// Recordings of the voice.
-    pub samples: Vec<Media>,
-    /// What is said in the sample, when the provider needs it.
-    pub transcript: Option<String>,
-    /// Description of the voice.
-    pub description: Option<String>,
-}
-
-impl CreateVoice {
-    /// Creates a request with the name and the samples.
-    pub fn new(name: impl Into<String>, samples: Vec<Media>) -> Self {
-        Self {
-            name: name.into(),
-            samples,
-            transcript: None,
-            description: None,
-        }
-    }
-
-    /// Sets the transcript of the sample.
-    pub fn with_transcript(mut self, transcript: impl Into<String>) -> Self {
-        self.transcript = Some(transcript.into());
-        self
-    }
-
-    /// Sets the description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-}
-
 /// A voice a provider offers.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
@@ -387,10 +349,17 @@ pub trait SpeechProvider: Send + Sync + 'static {
         false
     }
 
-    /// Clones a voice and returns the ID to use with [`Voice::id`]. The default implementation
-    /// returns [`AudioError::Unsupported`].
-    async fn create_voice(&self, request: CreateVoice) -> Result<String, AudioError> {
-        let _ = request;
+    /// Clones a voice from recordings (`samples`) and returns the ID to use with [`Voice::id`].
+    /// `transcript` is what is said in the sample; oMLX rejects a cloned voice without it when
+    /// the voice speaks. The default implementation returns [`AudioError::Unsupported`].
+    async fn create_voice(
+        &self,
+        name: &str,
+        samples: &[Media],
+        transcript: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<String, AudioError> {
+        let _ = (name, samples, transcript, description);
         Err(AudioError::Unsupported("voice cloning"))
     }
 

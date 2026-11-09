@@ -36,7 +36,7 @@
 //!
 //! ```rust,no_run
 //! use agentai_audio::provider::omlx::OmlxProvider;
-//! use agentai_audio::{CreateVoice, MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
+//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
 //! use agentai::Media;
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,7 +45,9 @@
 //!     .with_voice_store(MemoryVoiceStore::new());
 //! let generator = SpeechGenerator::from_provider(provider);
 //! let sample = Media::from_bytes("audio/wav", std::fs::read("sample.wav")?);
-//! let voice = generator.create_voice(CreateVoice::new("me", vec![sample])).await?;
+//! let voice = generator
+//!     .create_voice("me", &[sample], Some("What is said in the sample."), None)
+//!     .await?;
 //! let response = generator
 //!     .generate_with(SpeechRequest::new("Hello").with_voice(Voice::id(voice)))
 //!     .await?;
@@ -108,8 +110,7 @@ mod voice_store;
 pub use agentai_core::storage;
 pub use generator::SpeechGenerator;
 pub use provider::{
-    AudioError, AudioFormat, AudioModel, CreateVoice, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo,
+    AudioError, AudioFormat, AudioModel, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
 };
 #[cfg(feature = "toolbox")]
 pub use toolbox::{SpeechToolBox, SpeechToolOutput};

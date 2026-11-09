@@ -1,9 +1,10 @@
 //! [`SpeechGenerator`]: speak texts and clone voices from your code.
 
 use crate::provider::{
-    self, AudioError, AudioFormat, AudioModel, CreateVoice, SpeechProvider, SpeechRequest,
-    SpeechResponse, Voice, VoiceInfo, extension_for,
+    self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
+    Voice, VoiceInfo, extension_for,
 };
+use agentai_core::message::Media;
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
 
@@ -140,10 +141,19 @@ impl SpeechGenerator {
         Ok(response)
     }
 
-    /// Clones a voice and returns the ID to use with [`Voice::id`]. Fails with
-    /// [`AudioError::Unsupported`] when the provider cannot clone voices.
-    pub async fn create_voice(&self, request: CreateVoice) -> Result<String, AudioError> {
-        self.provider.create_voice(request).await
+    /// Clones a voice from recordings (`samples`) and returns the ID to use with [`Voice::id`].
+    /// `transcript` is what is said in the sample; oMLX rejects a cloned voice without it when
+    /// the voice speaks. Fails with [`AudioError::Unsupported`] when the provider cannot clone voices.
+    pub async fn create_voice(
+        &self,
+        name: &str,
+        samples: &[Media],
+        transcript: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<String, AudioError> {
+        self.provider
+            .create_voice(name, samples, transcript, description)
+            .await
     }
 
     /// Lists the voices of the provider.

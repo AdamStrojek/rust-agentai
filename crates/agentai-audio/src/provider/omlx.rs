@@ -6,13 +6,12 @@
 //! sent with every request (`ref_audio` and `ref_text`), so the provider keeps the samples in a
 //! [`VoiceStore`] set with [`with_voice_store`](OmlxProvider::with_voice_store).
 //!
-//! The `speed` and `language` fields, and the sampler settings, appear to have no effect on
-//! VoxCPM2. They are sent when set, and the server decides. Every field of a request has an
-//! equivalent, so none is left out.
+//! Every field of a request has an equivalent, so none is left out. What the server does not
+//! accept comes back as [`AudioError::Api`].
 
 use super::{
-    AudioError, AudioFormat, CreateVoice, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, audio_media,
+    AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
+    audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::{Media, MediaSource};
@@ -27,12 +26,6 @@ pub const DEFAULT_BASE_URL: &str = "http://localhost:8000/v1";
 pub const ENDPOINT_ENV: &str = "OMLX_ENDPOINT";
 /// Environment variable with the API key. It is optional.
 pub const API_KEY_ENV: &str = "OMLX_API_KEY";
-
-/// Largest base64 sample the provider stores, in encoded bytes.
-const MAX_REF_AUDIO_LEN: usize = 20 * 1024 * 1024;
-/// `ref_text` when the voice has no transcript. The server requires the field, and accepted
-/// this value with `mlx-community/VoxCPM2-8bit`.
-const REF_TEXT_PLACEHOLDER: &str = ".";
 
 /// Provider for the speech API of an oMLX server.
 ///
@@ -164,14 +157,14 @@ struct SpeechBody<'a> {
     ref_text: Option<&'a str>,
 }
 
-fn format_name(format: AudioFormat) -> Result<&'static str, AudioError> {
+fn format_name(format: AudioFormat) -> &'static str {
     match format {
-        AudioFormat::Mp3 => Ok("mp3"),
-        AudioFormat::Wav => Ok("wav"),
-        AudioFormat::Opus => Ok("opus"),
-        AudioFormat::Flac => Ok("flac"),
-        AudioFormat::Pcm => Ok("pcm"),
-        _ => Err(AudioError::Unsupported("this format with oMLX")),
+        AudioFormat::Mp3 => "mp3",
+        AudioFormat::Wav => "wav",
+        AudioFormat::Opus => "opus",
+        AudioFormat::Flac => "flac",
+        AudioFormat::Aac => "aac",
+        AudioFormat::Pcm => "pcm",
     }
 }
 
@@ -182,7 +175,7 @@ impl SpeechProvider for OmlxProvider {
     }
 
     async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
-        let response_format = request.format.map(format_name).transpose()?;
+        let response_format = request.format.map(format_name);
         let (cloned, instructions) = self.resolve(&request).await?;
         let ref_audio = match cloned.as_ref().map(|voice| &voice.sample.source) {
             Some(MediaSource::Base64(data)) => Some(data.as_str()),
@@ -196,7 +189,7 @@ impl SpeechProvider for OmlxProvider {
         };
         let ref_text = cloned
             .as_ref()
-            .map(|voice| voice.transcript.as_deref().unwrap_or(REF_TEXT_PLACEHOLDER));
+            .and_then(|voice| voice.transcript.as_deref());
         let body = SpeechBody {
             model: &self.model,
             input: &request.text,
@@ -222,34 +215,34 @@ impl SpeechProvider for OmlxProvider {
     }
 
     /// Stores the sample in the voice store; nothing is sent to the server until a request
-    /// uses the voice. Needs exactly one sample.
-    async fn create_voice(&self, request: CreateVoice) -> Result<String, AudioError> {
+    /// uses the voice. Needs exactly one sample. Without `transcript` the server answers such a
+    /// request with an error, which is returned as [`AudioError::Api`].
+    async fn create_voice(
+        &self,
+        name: &str,
+        samples: &[Media],
+        transcript: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<String, AudioError> {
         let store = self.store.as_ref().ok_or(AudioError::Unsupported(
             "voice cloning without a voice store",
         ))?;
-        let [sample] = <[Media; 1]>::try_from(request.samples).map_err(|samples| {
-            AudioError::InvalidRequest(format!(
+        let [sample] = samples else {
+            return Err(AudioError::InvalidRequest(format!(
                 "oMLX clones from exactly one sample, got {}",
                 samples.len()
-            ))
-        })?;
+            )));
+        };
         // Decoding also rejects what oMLX would, for example a `data:` URL
         let bytes = sample.bytes(&*self.client).await.map_err(|err| match err {
             HttpError::InvalidMedia(message) => AudioError::InvalidRequest(message),
             err => err.into(),
         })?;
-        let mut stored = Media::from_bytes(sample.content_type, bytes);
-        stored.name = sample.name;
-        let sample = stored;
-        if matches!(&sample.source, MediaSource::Base64(data) if data.len() > MAX_REF_AUDIO_LEN) {
-            return Err(AudioError::InvalidRequest(format!(
-                "the sample is larger than {} MiB",
-                MAX_REF_AUDIO_LEN / 1024 / 1024
-            )));
-        }
-        let mut voice = StoredVoice::new(request.name, sample);
-        voice.description = request.description;
-        voice.transcript = request.transcript;
+        let mut stored = Media::from_bytes(sample.content_type.as_str(), bytes);
+        stored.name = sample.name.clone();
+        let mut voice = StoredVoice::new(name, stored);
+        voice.description = description.map(str::to_string);
+        voice.transcript = transcript.map(str::to_string);
         Ok(store.save(voice).await?)
     }
 
@@ -279,9 +272,7 @@ impl SpeechProvider for OmlxProvider {
 mod tests {
     use super::*;
     use crate::provider::test_support::{MockHttp, body_json};
-    use crate::provider::{
-        AudioError, AudioFormat, CreateVoice, SpeechProvider, SpeechRequest, Voice, VoiceInfo,
-    };
+    use crate::provider::{AudioError, SpeechProvider, SpeechRequest, Voice, VoiceInfo};
     use crate::{MemoryVoiceStore, VoiceStore};
     use agentai_core::HttpResponse;
     use agentai_core::message::{Media, MediaSource};
@@ -302,11 +293,11 @@ mod tests {
 
     async fn cloned(http: &Arc<MockHttp>, transcript: Option<&str>) -> OmlxProvider {
         let p = provider(http).with_voice_store(MemoryVoiceStore::new());
-        let mut request = CreateVoice::new("Adam", vec![sample()]);
-        if let Some(t) = transcript {
-            request = request.with_transcript(t);
-        }
-        assert_eq!(p.create_voice(request).await.unwrap(), "voice-1");
+        let id = p
+            .create_voice("Adam", &[sample()], transcript, None)
+            .await
+            .unwrap();
+        assert_eq!(id, "voice-1");
         p
     }
 
@@ -346,7 +337,7 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         assert!(p.supports_voice_cloning());
         let id = p
-            .create_voice(CreateVoice::new("Adam", vec![sample()]).with_transcript("hello"))
+            .create_voice("Adam", &[sample()], Some("hello"), None)
             .await
             .unwrap();
         assert_eq!(id, "voice-1");
@@ -361,16 +352,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_missing_transcript_sends_the_placeholder() {
+    async fn a_missing_transcript_sends_no_ref_text() {
         let http = MockHttp::new(vec![audio()]);
         let p = cloned(&http, None).await;
         p.generate(SpeechRequest::new("hi").with_voice(Voice::id("voice-1")))
             .await
             .unwrap();
-        assert_eq!(
-            body_json(&http.request(0))["ref_text"],
-            json!(REF_TEXT_PLACEHOLDER)
-        );
+        let body = body_json(&http.request(0));
+        assert_eq!(body["ref_audio"], json!("V0FW"));
+        assert!(body.get("ref_text").is_none());
     }
 
     #[tokio::test]
@@ -424,7 +414,7 @@ mod tests {
         let p = provider(&http);
         assert!(!p.supports_voice_cloning());
         assert!(matches!(
-            p.create_voice(CreateVoice::new("A", vec![sample()])).await,
+            p.create_voice("A", &[sample()], None, None).await,
             Err(AudioError::Unsupported(_))
         ));
         assert!(matches!(
@@ -462,23 +452,10 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         for samples in [vec![], vec![sample(), sample()]] {
             assert!(matches!(
-                p.create_voice(CreateVoice::new("A", samples)).await,
+                p.create_voice("A", &samples, None, None).await,
                 Err(AudioError::InvalidRequest(_))
             ));
         }
-        assert!(store.list().await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn oversized_sample() {
-        let http = MockHttp::new(vec![]);
-        let store = MemoryVoiceStore::new();
-        let p = provider(&http).with_voice_store(store.clone());
-        let big = Media::from_base64("audio/wav", "A".repeat(20 * 1024 * 1024 + 4));
-        assert!(matches!(
-            p.create_voice(CreateVoice::new("A", vec![big])).await,
-            Err(AudioError::InvalidRequest(_))
-        ));
         assert!(store.list().await.unwrap().is_empty());
     }
 
@@ -487,11 +464,9 @@ mod tests {
         let http = MockHttp::new(vec![HttpResponse::new(200, b"WAV".to_vec()), audio()]);
         let store = MemoryVoiceStore::new();
         let p = provider(&http).with_voice_store(store.clone());
+        let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
         let id = p
-            .create_voice(CreateVoice::new(
-                "A",
-                vec![Media::from_url("audio/wav", "http://x/a.wav")],
-            ))
+            .create_voice("A", &[url_sample], None, None)
             .await
             .unwrap();
         let stored = store.get(&id).await.unwrap().unwrap();
@@ -513,24 +488,10 @@ mod tests {
         let http = MockHttp::new(vec![HttpResponse::new(404, b"gone".to_vec())]);
         let store = MemoryVoiceStore::new();
         let p = provider(&http).with_voice_store(store.clone());
-        let result = p
-            .create_voice(CreateVoice::new(
-                "A",
-                vec![Media::from_url("audio/wav", "http://x/a.wav")],
-            ))
-            .await;
+        let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
+        let result = p.create_voice("A", &[url_sample], None, None).await;
         assert!(matches!(result, Err(AudioError::Api { status: 404, .. })));
         assert!(store.list().await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn aac_is_unsupported() {
-        let http = MockHttp::new(vec![]);
-        let result = provider(&http)
-            .generate(SpeechRequest::new("hi").with_format(AudioFormat::Aac))
-            .await;
-        assert!(matches!(result, Err(AudioError::Unsupported(_))));
-        assert!(http.requests.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -538,7 +499,7 @@ mod tests {
         let http = MockHttp::new(vec![]);
         let p = provider(&http).with_voice_store(MemoryVoiceStore::new());
         assert!(p.supports_voice_description());
-        p.create_voice(CreateVoice::new("Adam", vec![sample()]).with_description("calm"))
+        p.create_voice("Adam", &[sample()], None, Some("calm"))
             .await
             .unwrap();
         assert_eq!(
@@ -556,7 +517,7 @@ mod tests {
         let p = provider(&MockHttp::new(vec![])).with_voice_store(MemoryVoiceStore::new());
         let sample = Media::from_base64("audio/wav", "data:audio/wav;base64,V0FW");
         let err = p
-            .create_voice(CreateVoice::new("A", vec![sample]))
+            .create_voice("A", &[sample], None, None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));
