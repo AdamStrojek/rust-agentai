@@ -4,6 +4,8 @@
 //! `GET /models`. It works with OpenAI (`gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`) and with other
 //! servers that follow the same format.
 //!
+//! Fields without an equivalent are not sent: `language` is ignored.
+//!
 //! OpenAI shuts down these models on 2027-01-06.
 
 use super::wire::{audio_media, send, with_bearer};
@@ -128,10 +130,13 @@ impl OpenAiSpeechProvider {
             Voice::Id(value) | Voice::Auto(value) if !self.official() => {
                 Some(WireVoice::Name(value.clone()))
             }
-            Voice::Id(value) => Some(self.preset(value).map_or_else(
-                || WireVoice::Custom { id: value.clone() },
-                |p| WireVoice::Name(p.to_string()),
-            )),
+            Voice::Id(value) => Some(if let Some(preset) = self.preset(value) {
+                WireVoice::Name(preset.to_string())
+            } else if value.starts_with("voice_") {
+                WireVoice::Custom { id: value.clone() }
+            } else {
+                WireVoice::Name(value.clone())
+            }),
             Voice::Auto(value) => {
                 if let Some(preset) = self.preset(value) {
                     Some(WireVoice::Name(preset.to_string()))
@@ -155,6 +160,11 @@ impl OpenAiSpeechProvider {
             }
             None => None,
         };
+        if description.is_some() && self.is_tts1() {
+            return Err(AudioError::Unsupported(
+                "voice descriptions with tts-1 models",
+            ));
+        }
         let base = request
             .default_voice
             .as_ref()
@@ -163,11 +173,6 @@ impl OpenAiSpeechProvider {
         let Some(description) = description else {
             return Ok((base, request.instructions.clone()));
         };
-        if self.is_tts1() {
-            return Err(AudioError::Unsupported(
-                "voice descriptions with tts-1 models",
-            ));
-        }
         let instructions = match &request.instructions {
             Some(extra) => format!("{description}\n{extra}"),
             None => description,
@@ -238,8 +243,10 @@ impl SpeechProvider for OpenAiSpeechProvider {
         Ok(result)
     }
 
+    /// Only the OpenAI API with a model after `tts-1` takes a description (sent as
+    /// instructions). On compatible servers [`Voice::Auto`] is an ID, so this is `false`.
     fn supports_voice_description(&self) -> bool {
-        !self.is_tts1()
+        self.official() && !self.is_tts1()
     }
 
     /// The presets of the model. Only the OpenAI API has a fixed list; compatible servers
@@ -372,6 +379,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_voice_prefixed_ids_are_objects() {
+        let http = MockHttp::new(vec![audio()]);
+        let body = voice_body(
+            official(&http),
+            &http,
+            SpeechRequest::new("hi").with_voice(Voice::id("custom-name")),
+        )
+        .await;
+        assert_eq!(body["voice"], json!("custom-name"));
+    }
+
+    #[tokio::test]
     async fn auto_routes_presets_ids_and_descriptions() {
         let http = MockHttp::new(vec![audio()]);
         let body = voice_body(
@@ -458,6 +477,12 @@ mod tests {
         assert!(http.requests.lock().unwrap().is_empty());
         assert!(!tts1(&http).supports_voice_description());
         assert!(official(&http).supports_voice_description());
+        assert!(!compatible(&http).supports_voice_description());
+        // Without a default voice it is still Unsupported, not MissingVoice.
+        let err = tts1(&http)
+            .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
+            .await;
+        assert!(matches!(err, Err(AudioError::Unsupported(_))));
     }
 
     #[tokio::test]

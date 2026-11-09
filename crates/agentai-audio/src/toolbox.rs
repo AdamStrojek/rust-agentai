@@ -60,7 +60,8 @@ impl SpeechToolBox {
 
     /// Limits the voices to this list: `list_voices` returns it, and a voice the model gives
     /// that is not in it is used as a description of the voice, or rejected when the provider
-    /// takes none.
+    /// takes none. Use it whenever cloned voices exist: without it the model can use any stored
+    /// or account voice by its ID.
     pub fn with_voices(mut self, voices: Vec<VoiceInfo>) -> Self {
         self.voices = Some(voices);
         self
@@ -199,7 +200,7 @@ struct VoiceList<'a> {
 /// Size of base64 data once decoded, without decoding it.
 fn base64_len(data: &str) -> usize {
     let padding = data.bytes().rev().take_while(|&b| b == b'=').count();
-    data.len() / 4 * 3 - padding
+    (data.len() / 4 * 3).saturating_sub(padding)
 }
 
 /// Rejected credentials cannot be fixed by the model; anything else (a missing voice, a
@@ -461,5 +462,33 @@ mod tests {
             .map(|t| t.name)
             .collect();
         assert_eq!(names, ["generate_speech", "list_voices"]);
+    }
+
+    #[tokio::test]
+    async fn an_unlisted_clone_is_a_description_not_a_reference() {
+        use crate::voice_store::{MemoryVoiceStore, StoredVoice, VoiceStore};
+        let http = MockHttp::new(vec![audio()]);
+        let store = MemoryVoiceStore::new();
+        let id = store
+            .save(StoredVoice::new(
+                "Adam",
+                agentai_core::message::Media::from_bytes("audio/wav", b"WAV"),
+            ))
+            .await
+            .unwrap();
+        let provider = OmlxProvider::new("model", "", "http://local/v1")
+            .with_client(http.clone())
+            .with_voice_store(store);
+        let toolbox = toolbox(provider).with_voices(vec![VoiceInfo::new("other", "Other")]);
+        toolbox
+            .call_tool(&tool_call(
+                "generate_speech",
+                json!({"text": "hi", "name": "x", "voice": id}),
+            ))
+            .await
+            .unwrap();
+        let body = body_json(&http.request(0));
+        assert!(body.get("ref_audio").is_none());
+        assert_eq!(body["instructions"], json!(id));
     }
 }

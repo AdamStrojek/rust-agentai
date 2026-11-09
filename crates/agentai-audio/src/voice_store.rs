@@ -50,6 +50,10 @@ pub trait VoiceStore: Send + Sync + 'static {
     async fn save(&self, voice: StoredVoice) -> Result<String, StorageError>;
 
     /// Returns the voice stored under `id`, or `None`.
+    ///
+    /// `id` may be arbitrary untrusted text, for example what a model wrote as a voice. An
+    /// implementation backed by files or a database must return `Ok(None)` for anything that is
+    /// not a valid ID (no path traversal, no query injection).
     async fn get(&self, id: &str) -> Result<Option<StoredVoice>, StorageError>;
 
     /// Returns every voice with its ID, in the order they were saved.

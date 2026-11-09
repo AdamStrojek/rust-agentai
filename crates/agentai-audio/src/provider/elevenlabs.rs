@@ -2,6 +2,8 @@
 //!
 //! [`ElevenLabsProvider`] speaks text with `POST /v1/text-to-speech/{voice_id}`, clones voices
 //! with `POST /v1/voices/add` and lists voices and models.
+//!
+//! Fields without an equivalent are not sent: `instructions` is ignored.
 
 use super::wire::{audio_media, media_bytes, percent_encode, send};
 use super::{
@@ -281,7 +283,7 @@ impl SpeechProvider for ElevenLabsProvider {
                 }
             }));
             match page.next_page_token {
-                Some(next) if page.has_more => token = Some(next),
+                Some(next) if page.has_more && token.as_ref() != Some(&next) => token = Some(next),
                 _ => return Ok(voices),
             }
         }
@@ -579,5 +581,22 @@ mod tests {
         assert_eq!(models[0].model, "elevenlabs::eleven_v4");
         assert_eq!(models[0].id, "eleven_v4");
         assert_eq!(http.request(0).url, "https://api.test/v1/models");
+    }
+
+    #[tokio::test]
+    async fn list_voices_stops_on_a_repeated_token() {
+        let page = || {
+            json_response(
+                200,
+                json!({
+                    "voices": [{"voice_id": "v1", "name": "A"}],
+                    "has_more": true, "next_page_token": "same"
+                }),
+            )
+        };
+        let http = MockHttp::new(vec![page(), page(), page(), page()]);
+        let voices = provider(&http).list_voices().await.unwrap();
+        assert_eq!(voices.len(), 2);
+        assert_eq!(http.requests.lock().unwrap().len(), 2);
     }
 }

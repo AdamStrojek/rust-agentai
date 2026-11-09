@@ -22,6 +22,10 @@
 //! [`MediaSave`](storage::MediaSave) and gets an ID. The [`storage`] module (from
 //! `agentai-core`) has the storage traits and [`MemoryStorage`](storage::MemoryStorage).
 //!
+//! OpenAI and ElevenLabs need a voice: set a default one with
+//! [`with_default_voice`](SpeechGenerator::with_default_voice) or send `Voice` with each request,
+//! or the request fails with `MissingVoice`. oMLX uses its own voice when none is set.
+//!
 //! ## Cloning voices
 //!
 //! [`SpeechGenerator::create_voice`] clones a voice from samples and returns an ID for

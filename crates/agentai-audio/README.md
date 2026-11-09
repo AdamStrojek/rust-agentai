@@ -2,7 +2,8 @@
 
 Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai).
 
-- `SpeechGenerator` speaks texts and clones voices from your code.
+- `SpeechGenerator` speaks texts and clones voices from your code. OpenAI and ElevenLabs need a voice
+  (a default one or one per request), or the request fails with `MissingVoice`.
 - With the `toolbox` feature (on by default), `SpeechToolBox` gives an agent the `generate_speech` and
   `list_voices` tools. The model gets only the metadata of the audio as JSON by default
   (`SpeechToolOutput::Metadata`), or the audio itself (`SpeechToolOutput::Media`); `with_voices` limits

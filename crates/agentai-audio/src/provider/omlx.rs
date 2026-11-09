@@ -7,7 +7,8 @@
 //! [`VoiceStore`] set with [`with_voice_store`](OmlxProvider::with_voice_store).
 //!
 //! The `speed` and `language` fields, and the sampler settings, appear to have no effect on
-//! VoxCPM2. They are sent when set, and the server decides.
+//! VoxCPM2. They are sent when set, and the server decides. Every field of a request has an
+//! equivalent, so none is left out.
 
 use super::wire::{audio_media, media_bytes, send, with_bearer};
 use super::{
@@ -235,6 +236,11 @@ impl SpeechProvider for OmlxProvider {
             ))
         })?;
         let sample = match &sample.source {
+            MediaSource::Base64(data) if data.starts_with("data:") => {
+                return Err(AudioError::InvalidRequest(
+                    "the sample must be plain base64, not a data: URL".to_string(),
+                ));
+            }
             MediaSource::Base64(_) => sample,
             MediaSource::Url(_) => {
                 let bytes = media_bytes(&*self.client, &sample).await?;
@@ -549,5 +555,16 @@ mod tests {
                     .with_cloned(true)
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn create_voice_rejects_a_data_url_sample() {
+        let p = provider(&MockHttp::new(vec![])).with_voice_store(MemoryVoiceStore::new());
+        let sample = Media::from_base64("audio/wav", "data:audio/wav;base64,V0FW");
+        let err = p
+            .create_voice(CreateVoice::new("A", vec![sample]))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::InvalidRequest(_)));
     }
 }

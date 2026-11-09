@@ -12,6 +12,8 @@
 //!
 //! `AGENTAI_SPEECH_VOICE` is the default voice ID. OpenAI and ElevenLabs need one (without it the
 //! request fails with `MissingVoice`); oMLX does not, and uses its own voice when it is unset.
+//! With `omlx::`, setting it fails with `Unsupported`: `from_model` gives no voice store, so
+//! there are no voice IDs.
 
 use agentai::MediaSource;
 use agentai_audio::{SpeechGenerator, Voice};
@@ -33,13 +35,8 @@ async fn main() -> anyhow::Result<()> {
     match &response.audio.source {
         MediaSource::Base64(data) => {
             std::fs::create_dir_all("audio")?;
-            let extension = response
-                .audio
-                .content_type
-                .rsplit('/')
-                .next()
-                .unwrap_or("wav");
-            let path = format!("audio/greeting.{extension}");
+            let name = response.audio.name.as_deref().unwrap_or("greeting.wav");
+            let path = format!("audio/{name}");
             std::fs::write(
                 &path,
                 base64::engine::general_purpose::STANDARD.decode(data)?,

@@ -74,6 +74,7 @@ impl AudioFormat {
 
 /// File extension for an audio MIME type, for names of uploads.
 pub(crate) fn extension_for(content_type: &str) -> &str {
+    let content_type = content_type.split(';').next().unwrap_or("").trim();
     match content_type {
         "audio/mpeg" => "mp3",
         "audio/wav" => "wav",
@@ -100,9 +101,9 @@ pub struct SpeechRequest {
     pub format: Option<AudioFormat>,
     /// Speaking speed. Not sent when `None`.
     pub speed: Option<f64>,
-    /// Language of the text. Not sent when `None`.
+    /// Language of the text. Not sent when `None`; OpenAI has no equivalent and ignores it.
     pub language: Option<String>,
-    /// Style instructions. Not sent when `None`.
+    /// Style instructions. Not sent when `None`; ElevenLabs has no equivalent and ignores them.
     pub instructions: Option<String>,
     /// File name of the audio, set as [`Media::name`]. Never sent to the provider.
     pub name: Option<String>,
@@ -452,8 +453,9 @@ pub fn from_model(model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
     kind.build(name)
 }
 
-/// Lists the speech models of a provider (`openai`, `elevenlabs` or `omlx`), with its settings
-/// from environment variables as in [`from_model`].
+/// Lists the speech models of a provider (`openai` or `elevenlabs`; `omlx` returns
+/// [`AudioError::Unsupported`]), with its settings from environment variables as in
+/// [`from_model`].
 ///
 /// ```rust,no_run
 /// # async fn run() -> Result<(), agentai_audio::AudioError> {
@@ -553,5 +555,11 @@ mod tests {
             resolve("nope::x"),
             Err(AudioError::UnknownProvider(_))
         ));
+    }
+
+    #[test]
+    fn extension_ignores_mime_parameters() {
+        assert_eq!(extension_for("audio/webm;codecs=opus"), "webm");
+        assert_eq!(extension_for("audio/mpeg; charset=x"), "mp3");
     }
 }
