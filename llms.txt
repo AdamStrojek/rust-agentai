@@ -4,7 +4,7 @@
 
 Key facts for code generation:
 
-- The crate is pre-1.0 and the API changes between minor versions. This file was written for `agentai` 0.5.0 (schemars 1.x, Rust 1.88+); check the CHANGELOG for later changes.
+- The crate is pre-1.0 and the API changes between minor versions. This file was written for `agentai` 0.6.0 (schemars 1.x, Rust 1.88+); check the CHANGELOG for later changes.
 - The library is async. Examples use `tokio` with `#[tokio::main]` and return `anyhow::Result`.
 - Create an agent with `Agent::new(model, system)?` (returns `Result<_, AgentError>`), then optionally `.with_toolbox(toolbox)`. The provider comes from the model name (`gpt-*` OpenAI, `claude-*` Anthropic, ...) or a `provider::` prefix such as `open_router::vendor/model`; the API key from the provider's environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPEN_ROUTER_API_KEY`, ...). `Agent` is immutable configuration, cheap to `Clone` and `Send + Sync`.
 - Ask with `let result: AgentResult<T> = agent.run(prompt).with_history(&history).await?;` and read `result.answer`. Use `T = String` for plain text. Any other `T` turns on structured output. `AgentResult` also has `new_messages`, `usage` (summed over model calls), `stop_reason`, `reasoning_content` and `iterations`.

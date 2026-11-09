@@ -35,6 +35,18 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
+#### 0.6.0 - Text-to-speech and voice cloning
+
+- **Speech generation**: the new [`agentai-audio`](https://docs.rs/agentai-audio) crate has
+  `SpeechGenerator` to speak texts from your code with OpenAI and compatible servers, ElevenLabs or oMLX.
+  `SpeechGenerator::new("elevenlabs::eleven_v4")?` takes the provider from the model name.
+- **Voice cloning**: `create_voice(name, samples, transcript, description)` clones a voice and returns an
+  ID for `Voice::id`, the same call on ElevenLabs and oMLX. oMLX needs the transcript of the sample and a
+  `VoiceStore` set with `with_voice_store`.
+- **Agents that speak**: `SpeechToolBox` gives a model `generate_speech` and `list_voices`; `with_voices`
+  limits it to the voices you allow. Cloning stays in your code.
+- Internal: `agentai-core` now has the HTTP and media helpers that `agentai-image` and `agentai-audio` share.
+
 #### 0.5.0 - Image generation, images in tool results
 
 - **Image generation and editing**: the new [`agentai-image`](https://docs.rs/agentai-image) crate has
