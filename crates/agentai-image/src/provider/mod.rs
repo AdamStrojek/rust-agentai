@@ -181,7 +181,7 @@ impl ImageModel {
 pub enum ImageError {
     /// The request could not be sent or the response could not be read.
     #[error(transparent)]
-    Http(#[from] HttpError),
+    Http(HttpError),
     /// The API answered with an error status.
     #[error("image API error (status {status}): {message}")]
     Api { status: u16, message: String },
@@ -200,6 +200,15 @@ pub enum ImageError {
     /// The image was made but could not be saved in the storage.
     #[error("cannot save the image: {0}")]
     Storage(#[from] StorageError),
+}
+
+impl From<HttpError> for ImageError {
+    fn from(err: HttpError) -> Self {
+        match err {
+            HttpError::Status { status, message } => Self::Api { status, message },
+            err => Self::Http(err),
+        }
+    }
 }
 
 impl ImageError {

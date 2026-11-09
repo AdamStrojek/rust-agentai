@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.5.0...agentai-v0.6.0) - 2026-11-09
+
+### New features
+- *(audio)* add the agentai-audio crate: text-to-speech with OpenAI, ElevenLabs and oMLX (by @AdamStrojek)
+- *(audio)* clone voices with create_voice on ElevenLabs and oMLX (by @AdamStrojek)
+- *(audio)* let agents speak with SpeechToolBox: generate_speech and list_voices, with an allowlist of voices (by @AdamStrojek)
+- *(core)* add HttpRequest::with_bearer_token, HttpResponse::error_for_status, Media::bytes and Media::byte_len (by @AdamStrojek)
+
+### Changed
+- *(image)* share the HTTP and media helpers of agentai-core (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.5.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.4.0...agentai-v0.5.0) - 2026-11-04
 
 ### New features
