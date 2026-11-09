@@ -7,6 +7,7 @@
 #[allow(dead_code)]
 mod wire;
 
+pub mod elevenlabs;
 pub mod openai;
 
 use agentai_core::HttpError;
@@ -69,6 +70,19 @@ impl AudioFormat {
             Self::Aac => "audio/aac",
             Self::Pcm => "audio/pcm",
         }
+    }
+}
+
+/// File extension for an audio MIME type, for names of uploads.
+pub(crate) fn extension_for(content_type: &str) -> &str {
+    match content_type {
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        "audio/ogg" => "opus",
+        "audio/flac" => "flac",
+        "audio/aac" => "aac",
+        "audio/pcm" => "pcm",
+        other => other.rsplit('/').next().unwrap_or(other),
     }
 }
 
