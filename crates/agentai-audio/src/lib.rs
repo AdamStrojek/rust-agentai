@@ -6,11 +6,13 @@
 //! interface they implement. Audio comes back as an agentai `Media`, and the [`storage`] module
 //! (from `agentai-core`) has the traits to save it.
 
+mod generator;
 pub mod provider;
 mod voice_store;
 
 #[doc(inline)]
 pub use agentai_core::storage;
+pub use generator::SpeechGenerator;
 pub use provider::{
     AudioError, AudioFormat, AudioModel, CreateVoice, SpeechRequest, SpeechResponse, Voice,
     VoiceInfo,

@@ -3,8 +3,6 @@
 //! [`SpeechProvider`] is the interface between your code and a text-to-speech API. Each
 //! submodule implements it for one API.
 
-// The providers use the helpers in `wire`.
-#[allow(dead_code)]
 mod wire;
 
 pub mod elevenlabs;
@@ -396,6 +394,81 @@ pub trait SpeechProvider: Send + Sync + 'static {
     }
 }
 
+/// The APIs [`from_model`] knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderKind {
+    OpenAi,
+    ElevenLabs,
+    Omlx,
+}
+
+impl ProviderKind {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "openai" => Some(Self::OpenAi),
+            "elevenlabs" => Some(Self::ElevenLabs),
+            "omlx" => Some(Self::Omlx),
+            _ => None,
+        }
+    }
+
+    fn build(self, model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
+        Ok(match self {
+            Self::OpenAi => Box::new(openai::OpenAiSpeechProvider::from_env(model)?),
+            Self::ElevenLabs => Box::new(elevenlabs::ElevenLabsProvider::from_env(model)?),
+            Self::Omlx => Box::new(omlx::OmlxProvider::from_env(model)?),
+        })
+    }
+}
+
+/// Splits `provider::model` and finds the provider.
+fn resolve(model: &str) -> Result<(ProviderKind, &str), AudioError> {
+    let unknown = || AudioError::UnknownProvider(model.to_string());
+    match model.split_once("::") {
+        Some((provider, name)) => ProviderKind::from_name(provider)
+            .map(|kind| (kind, name))
+            .ok_or_else(unknown),
+        None if model.starts_with("tts-1") || model.starts_with("gpt-4o-mini-tts") => {
+            Ok((ProviderKind::OpenAi, model))
+        }
+        None if model.starts_with("eleven_") => Ok((ProviderKind::ElevenLabs, model)),
+        None => Err(unknown()),
+    }
+}
+
+/// Creates the provider for a model name, with its settings from environment variables.
+///
+/// The provider comes from a `provider::` prefix (`openai::`, `elevenlabs::`, `omlx::`), for
+/// example `omlx::mlx-community/VoxCPM2-8bit`, or, for well-known names (`tts-1*`,
+/// `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the prefix for other models behind
+/// an OpenAI-compatible API. See each provider's `from_env` for its variables.
+///
+/// An `omlx::` provider made here has no voice store, so it cannot clone voices or use
+/// [`Voice::Id`] of cloned voices. Build it with [`OmlxProvider::with_voice_store`](omlx::OmlxProvider::with_voice_store)
+/// and pass it to [`SpeechGenerator::from_provider`](crate::SpeechGenerator::from_provider)
+/// instead.
+pub fn from_model(model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
+    let (kind, name) = resolve(model)?;
+    kind.build(name)
+}
+
+/// Lists the speech models of a provider (`openai`, `elevenlabs` or `omlx`), with its settings
+/// from environment variables as in [`from_model`].
+///
+/// ```rust,no_run
+/// # async fn run() -> Result<(), agentai_audio::AudioError> {
+/// for model in agentai_audio::provider::list_models("elevenlabs").await? {
+///     println!("{} {:?}", model.model, model.name);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub async fn list_models(provider: &str) -> Result<Vec<AudioModel>, AudioError> {
+    let kind = ProviderKind::from_name(provider)
+        .ok_or_else(|| AudioError::UnknownProvider(provider.to_string()))?;
+    kind.build("")?.list_models().await
+}
+
 #[cfg(test)]
 #[allow(dead_code)] // used by the provider tests added later
 pub(crate) mod test_support {
@@ -444,5 +517,42 @@ pub(crate) mod test_support {
 
     pub(crate) fn body_json(request: &HttpRequest) -> Value {
         serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_names_select_the_provider() {
+        assert_eq!(
+            resolve("omlx::mlx-community/VoxCPM2-8bit").unwrap(),
+            (ProviderKind::Omlx, "mlx-community/VoxCPM2-8bit")
+        );
+        assert_eq!(
+            resolve("elevenlabs::x").unwrap(),
+            (ProviderKind::ElevenLabs, "x")
+        );
+        assert_eq!(
+            resolve("eleven_v4").unwrap(),
+            (ProviderKind::ElevenLabs, "eleven_v4")
+        );
+        assert_eq!(
+            resolve("tts-1-hd").unwrap(),
+            (ProviderKind::OpenAi, "tts-1-hd")
+        );
+        assert_eq!(
+            resolve("gpt-4o-mini-tts").unwrap(),
+            (ProviderKind::OpenAi, "gpt-4o-mini-tts")
+        );
+        assert!(matches!(
+            resolve("gpt-4o"),
+            Err(AudioError::UnknownProvider(_))
+        ));
+        assert!(matches!(
+            resolve("nope::x"),
+            Err(AudioError::UnknownProvider(_))
+        ));
     }
 }
