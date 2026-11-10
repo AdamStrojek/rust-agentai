@@ -15,7 +15,7 @@
 //! not forwarded: each one is replaced by a short placeholder such as `[image omitted]`.
 
 use crate::message::ToolCall;
-use crate::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
+use crate::tool::{Tool, ToolBox, ToolError, ToolResult, ToolReturn};
 use async_trait::async_trait;
 use log::trace;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
@@ -163,7 +163,7 @@ impl ToolBox for McpToolBox {
         Ok(self.tools.clone())
     }
 
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
         let tool_name = &call.name;
         // Lets `ToolBoxSet` try the next toolbox for tools this server does not have
         if !self.tools.iter().any(|t| &t.name == tool_name) {
@@ -263,9 +263,12 @@ mod tests {
             "target_timezone": "America/New_York",
             "time": "12:00"
         });
-        let result = mcp_tools
+        let ToolReturn::Done(result) = mcp_tools
             .call_tool(&ToolCall::new("call_1", "convert_time", arguments))
-            .await?;
+            .await?
+        else {
+            panic!("expected ToolReturn::Done");
+        };
 
         // Assert that the result is a non-empty string (the converted time)
         assert!(!result.text().unwrap_or_default().is_empty());

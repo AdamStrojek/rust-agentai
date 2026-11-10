@@ -558,7 +558,7 @@ pub fn toolbox(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if method.sig.asyncness.is_some() {
                     method_call.extend(quote! {.await});
                 }
-                // A method may return text or a `ToolOutput`
+                // A method may return text, a `ToolOutput`, or a `ToolReturn`
                 method_call.extend(quote! {.map(::core::convert::Into::into)});
 
                 match_arms.extend(quote! {
@@ -587,7 +587,7 @@ pub fn toolbox(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ])
             }
 
-            async fn call_tool(&self, call: &::agentai::ToolCall) -> Result<::agentai::tool::ToolOutput, ToolError> {
+            async fn call_tool(&self, call: &::agentai::ToolCall) -> Result<::agentai::tool::ToolReturn, ToolError> {
                  match call.name.as_str() {
                      #match_arms
                      _ => {

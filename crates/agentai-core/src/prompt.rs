@@ -37,6 +37,14 @@ impl Prompt {
         Self::default()
     }
 
+    /// Returns `true` when the prompt has no parts, or only empty or whitespace text parts.
+    pub fn is_empty(&self) -> bool {
+        self.parts.iter().all(|part| match part {
+            Part::Text(text) => text.trim().is_empty(),
+            _ => false,
+        })
+    }
+
     /// Creates a prompt with text.
     pub fn text(text: impl Into<String>) -> Self {
         Self::new().with_text(text)
@@ -103,5 +111,22 @@ impl IntoPrompt for Prompt {
 impl IntoPrompt for Media {
     fn into_prompt(self) -> Prompt {
         Prompt::new().with_media(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prompt_is_empty() {
+        assert!(Prompt::new().is_empty());
+        assert!(Prompt::text("").is_empty());
+        assert!(Prompt::text("   \n\t  ").is_empty());
+
+        assert!(!Prompt::text("hello").is_empty());
+        assert!(!Prompt::new()
+            .with_media(Media::from_bytes("image/png", b"test"))
+            .is_empty());
     }
 }
