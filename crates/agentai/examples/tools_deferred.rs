@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         ColorChoice::Auto,
     )?;
 
-    // Uses Gemini by default (reads `GEMINI_API_KEY` from the environment).
+    // Uses OpenRouter by default (reads `OPEN_ROUTER_API_KEY` from the environment).
     // Override the model with `AGENTAI_MODEL` if desired.
     let model = std::env::var("AGENTAI_MODEL").unwrap_or_else(|_| "open_router::nvidia/nemotron-3.5-super-vl:free".to_string());
 
