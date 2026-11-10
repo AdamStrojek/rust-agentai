@@ -91,9 +91,9 @@ system-proxy = ["agentai-core/system-proxy", "reqwest/system-proxy", "genai/syst
 
 ## Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
 mcp-client = ["dep:rmcp", "dep:tokio"]
-## Enables tokio integrations, such as writing a stream to a tokio writer with
-## [`AgentStream::print_to_tokio`](crate::AgentStream::print_to_tokio)
-tokio = ["dep:tokio"]
+## Enables tokio integrations, such as [`TokioDeferredTaskToolBox`](crate::tool::TokioDeferredTaskToolBox)
+## and writing a stream to a tokio writer with [`AgentStream::print_to_tokio`](crate::AgentStream::print_to_tokio)
+tokio = ["dep:tokio", "tokio/rt", "tokio/sync", "tokio/time", "macros"]
 ## Enables support for macro [`#[toolbox]`](crate::tool::toolbox)
 macros = ["agentai-macros"]
 ## Enables support for [buildin tools](crate::tool::buildin)
