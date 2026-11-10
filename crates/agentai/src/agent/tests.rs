@@ -1,7 +1,7 @@
 use super::*;
 use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
 use crate::message::{Message, ToolCall};
-use crate::tool::{Tool, ToolOutput, ToolResult};
+use crate::tool::{Tool, ToolOutput, ToolResult, ToolReturn};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -148,7 +148,7 @@ impl ToolBox for FailingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Err((self.make_error)())
     }
 }
@@ -409,7 +409,7 @@ impl ToolBox for EchoToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Ok("echoed".into())
     }
 }
@@ -423,9 +423,10 @@ impl ToolBox for ImageToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Ok(ToolOutput::from_text("image-1.png")
-            .with_media(crate::Media::from_base64("image/png", "aGk=")))
+            .with_media(crate::Media::from_base64("image/png", "aGk="))
+            .into())
     }
 }
 
@@ -817,7 +818,7 @@ impl ToolBox for RecordingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
         self.0.lock().unwrap().push(call.clone());
         Ok("echoed".into())
     }
@@ -1191,4 +1192,400 @@ async fn images_in_the_prompt_are_sent_and_kept_in_the_messages() {
         assert_eq!(user["content"], expected);
         assert_eq!(new_messages[0].parts, prompt.parts());
     }
+}
+
+fn named_tool_call_reply(id: &str, name: &str, arguments: Value) -> (u16, String) {
+    let body = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": arguments.to_string() }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    (200, body.to_string())
+}
+
+fn streamed_named_tool_call_reply(id: &str, name: &str, arguments: Value) -> (u16, String) {
+    sse(vec![
+        sse_chunk(
+            json!({ "role": "assistant", "tool_calls": [{
+                "index": 0, "id": id, "type": "function",
+                "function": { "name": name, "arguments": arguments.to_string() }
+            }]}),
+            None,
+        ),
+        sse_chunk(json!({}), Some("tool_calls")),
+        sse_usage(),
+    ])
+}
+
+/// Toolbox with one tool, `slow_job`, that returns a deferred task waiting on `gate`.
+struct GatedDeferredToolBox {
+    gate: Arc<tokio::sync::Notify>,
+}
+
+#[crate::tool::toolbox]
+impl GatedDeferredToolBox {
+    /// Starts a background job that finishes once `gate` is notified.
+    #[tool]
+    fn slow_job(&self) -> ToolResult<ToolReturn> {
+        let gate = self.gate.clone();
+        Ok(ToolReturn::deferred("job started", async move {
+            gate.notified().await;
+            Ok(ToolOutput::from_text("job finished"))
+        }))
+    }
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn deferred_task_can_be_awaited_during_a_streamed_run() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBoxSet};
+    use futures_util::StreamExt;
+    use std::time::Duration;
+
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let deferred =
+        TokioDeferredTaskToolBox::new().with_default_timeout(Duration::from_millis(10));
+    let mut tools = ToolBoxSet::new();
+    tools.add_tool(GatedDeferredToolBox { gate: gate.clone() });
+    tools.add_tool(deferred.clone());
+
+    let llm = MockLlm::start(vec![
+        // 1. Model starts the deferred job
+        streamed_named_tool_call_reply("call_1", "slow_job", json!({})),
+        // 2. Model waits while the task is still blocked -> non-destructive timeout
+        streamed_named_tool_call_reply("call_2", "wait_deferred_task", json!({"task_id": "call_1"})),
+        // 3. After the gate opens, model waits again and gets the final output
+        streamed_named_tool_call_reply("call_3", "wait_deferred_task", json!({"task_id": "call_1"})),
+        // 4. Final answer
+        streamed_text_reply(&["All done"]),
+    ])
+    .await;
+
+    let mut stream = llm
+        .agent()
+        .with_toolbox(tools)
+        .run_stream::<String>("run job")
+        .await
+        .unwrap();
+
+    let mut final_result = None;
+    let mut wait_results = 0;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            AgentEvent::DeferredTask(task) => deferred.spawn(task),
+            AgentEvent::ToolResult { tool, content, .. } if tool == "wait_deferred_task" => {
+                wait_results += 1;
+                if wait_results == 1 {
+                    assert_eq!(content.text().as_deref(), Some("Task 'call_1' is still running."));
+                    // Unblock the background task before the second wait_deferred_task call
+                    gate.notify_one();
+                } else {
+                    assert_eq!(content.text().as_deref(), Some("job finished"));
+                }
+            }
+            AgentEvent::Finished(result) => final_result = Some(result),
+            _ => {}
+        }
+    }
+
+    let result = final_result.unwrap();
+    assert_eq!(result.answer, "All done");
+    assert!(result.deferred_tasks.is_empty());
+    assert!(result.unstarted_deferred_tasks.is_empty());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBoxSet};
+    use futures_util::StreamExt;
+
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let deferred = TokioDeferredTaskToolBox::new();
+    let mut tools = ToolBoxSet::new();
+    tools.add_tool(GatedDeferredToolBox { gate: gate.clone() });
+    tools.add_tool(deferred.clone());
+
+    let llm = MockLlm::start(vec![
+        // Run 1: starts the deferred task and answers while it is still running
+        streamed_named_tool_call_reply("call_1", "slow_job", json!({})),
+        streamed_text_reply(&["Working in the background"]),
+        // Run 2: starts with only the notification, fetches the result and answers
+        named_tool_call_reply("call_2", "get_deferred_task", json!({"task_id": "call_1"})),
+        text_reply("Background result: job finished"),
+    ])
+    .await;
+
+    let agent = llm.agent().with_toolbox(tools);
+    let mut history = Vec::new();
+
+    // Run 1
+    let mut stream = agent.run_stream::<String>("start it").await.unwrap();
+    let mut run1_result = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            AgentEvent::DeferredTask(task) => deferred.spawn(task),
+            AgentEvent::Finished(result) => run1_result = Some(result),
+            _ => {}
+        }
+    }
+    let run1 = run1_result.unwrap();
+    assert_eq!(run1.answer, "Working in the background");
+    assert_eq!(run1.deferred_tasks.len(), 1);
+    assert!(!run1.deferred_tasks[0].is_finished());
+    history.extend(run1.new_messages);
+
+    // Task completes between runs
+    gate.notify_one();
+    while !run1.deferred_tasks[0].is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    // Run 2 starts with an empty prompt and the deferred task handles from Run 1
+    let run2: AgentResult<String> = agent
+        .run(crate::Prompt::new())
+        .with_history(&history)
+        .with_deferred_tasks(run1.deferred_tasks)
+        .await
+        .unwrap();
+
+    assert_eq!(run2.answer, "Background result: job finished");
+    assert!(run2.deferred_tasks.is_empty());
+    // The first new message of Run 2 is the user notification for call_1
+    assert_eq!(
+        run2.new_messages[0],
+        Message::tool_notification("call_1", "slow_job")
+    );
+    // And the tool result of get_deferred_task was sent to the model in request #3
+    let last_request = request_json(&llm, 3);
+    assert!(last_request.to_string().contains("job finished"));
+}
+
+#[tokio::test]
+async fn non_streaming_run_returns_unstarted_deferred_tasks() {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let llm = MockLlm::start(vec![
+        named_tool_call_reply("call_1", "slow_job", json!({})),
+        text_reply("started"),
+    ])
+    .await;
+
+    let mut result: AgentResult<String> = llm
+        .agent()
+        .with_toolbox(GatedDeferredToolBox { gate: gate.clone() })
+        .run("start")
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "started");
+    assert_eq!(result.unstarted_deferred_tasks.len(), 1);
+    assert_eq!(result.deferred_tasks.len(), 1);
+    assert!(!result.deferred_tasks[0].is_finished());
+
+    let task = result.unstarted_deferred_tasks.pop().unwrap();
+    assert_eq!(task.id, "call_1");
+    assert_eq!(task.tool, "slow_job");
+
+    let run_fut = tokio::spawn(task.run());
+    gate.notify_one();
+    run_fut.await.unwrap();
+    assert!(result.deferred_tasks[0].is_finished());
+    let output = result.deferred_tasks[0].take_result().unwrap().unwrap();
+    assert_eq!(output.text().as_deref(), Some("job finished"));
+    assert!(result.deferred_tasks[0].is_consumed());
+}
+
+#[tokio::test]
+async fn empty_prompt_without_finished_deferred_tasks_returns_error() {
+    let llm = MockLlm::start(vec![]).await;
+    let agent = llm.agent();
+
+    // 1. Empty prompt with no deferred tasks
+    let err = agent.run::<String>(crate::Prompt::new()).await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 2. Empty string prompt with no deferred tasks
+    let err = agent.run::<String>("").await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 3. Whitespace-only prompt with no deferred tasks
+    let err = agent.run::<String>("   ").await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 4. Empty prompt with an unfinished deferred task
+    let (_task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("c1", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("done")) }),
+    );
+    let err = agent
+        .run::<String>(crate::Prompt::new())
+        .with_deferred_tasks(vec![handle])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 5. Streamed empty prompt also yields EmptyPrompt error
+    use futures_util::StreamExt;
+    let mut stream = agent
+        .run_stream::<String>(crate::Prompt::new())
+        .await
+        .unwrap();
+    let stream_err = stream.next().await.unwrap().unwrap_err();
+    assert!(matches!(stream_err, AgentError::EmptyPrompt));
+
+    // Ensure the model was never called
+    assert!(llm.requests().is_empty());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn failed_deferred_tasks_always_reach_the_model_as_recoverable_errors() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let errors = [
+        ToolError::NotFound("x".into()),
+        ToolError::InvalidArguments("bad".into()),
+        ToolError::Failed("boom".into()),
+        ToolError::Configuration("no key".into()),
+        ToolError::fatal(std::io::Error::other("io")),
+    ];
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    for (index, error) in errors.into_iter().enumerate() {
+        let id = format!("call_{index}");
+        let (task, _handle) = crate::tool::DeferredTask::new(
+            &ToolCall::new(&id, "slow_job", json!({})),
+            Box::pin(async move { Err(error) }),
+        );
+        deferred.spawn(task);
+
+        let call = ToolCall::new(
+            "fetch",
+            "wait_deferred_task",
+            json!({"task_id": id, "timeout_seconds": 5}),
+        );
+        let err = tokio::time::timeout(Duration::from_secs(10), deferred.call_tool(&call))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::Failed(_)),
+            "task {id} failed with {err:?}, expected a recoverable ToolError::Failed"
+        );
+        assert!(err.is_recoverable());
+    }
+}
+
+#[tokio::test]
+async fn dropped_deferred_task_marks_handle_cancelled_and_notifies_model() {
+    let llm = MockLlm::start(vec![text_reply("Acknowledged cancellation")]).await;
+    let agent = llm.agent();
+
+    let (task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("c1", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("done")) }),
+    );
+    assert!(!handle.is_finished());
+    assert!(!handle.is_cancelled());
+
+    // Dropping the task without running it marks the shared state as cancelled
+    drop(task);
+    assert!(handle.is_finished());
+    assert!(handle.is_cancelled());
+    assert!(handle.take_result().is_none());
+
+    // A run with an empty prompt and a cancelled handle sends a cancellation notification
+    let result: AgentResult<String> = agent
+        .run(crate::Prompt::new())
+        .with_deferred_tasks(vec![handle])
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Acknowledged cancellation");
+    assert!(result.deferred_tasks.is_empty());
+    assert_eq!(
+        result.new_messages[0],
+        Message::tool_cancelled_notification("c1", "slow_job")
+    );
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn panicking_deferred_task_cancels_handle_and_wakes_waiters_with_recoverable_error() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    let (task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("panic_1", "slow_job", json!({})),
+        Box::pin(async {
+            panic!("boom inside background task");
+        }),
+    );
+    deferred.spawn(task);
+
+    let call = ToolCall::new(
+        "fetch",
+        "wait_deferred_task",
+        json!({"task_id": "panic_1", "timeout_seconds": 5}),
+    );
+    let err = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
+        .await
+        .expect("wait_deferred_task should be woken when task panics, not time out")
+        .unwrap_err();
+    assert!(matches!(err, ToolError::Failed(_)));
+    assert!(err.is_recoverable());
+    assert!(handle.is_cancelled());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn duplicate_deferred_task_id_does_not_overwrite_first_task() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    let (task1, handle1) = crate::tool::DeferredTask::new(
+        &ToolCall::new("dup_id", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("first result")) }),
+    );
+    let (task2, handle2) = crate::tool::DeferredTask::new(
+        &ToolCall::new("dup_id", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("second result")) }),
+    );
+
+    deferred.spawn(task1);
+    deferred.spawn(task2);
+
+    // The duplicate second task is dropped immediately and marked cancelled
+    assert!(handle2.is_cancelled());
+
+    // Waiting on dup_id returns the first task's result
+    let call = ToolCall::new(
+        "fetch",
+        "wait_deferred_task",
+        json!({"task_id": "dup_id", "timeout_seconds": 5}),
+    );
+    let ret = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
+        .await
+        .unwrap()
+        .unwrap();
+    let ToolReturn::Done(output) = ret else {
+        panic!("expected ToolReturn::Done");
+    };
+    assert_eq!(output.text().as_deref(), Some("first result"));
+    assert!(handle1.is_consumed());
 }
