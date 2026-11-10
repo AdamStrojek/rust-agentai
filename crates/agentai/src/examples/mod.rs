@@ -17,6 +17,8 @@ pub mod simple;
 pub mod streaming;
 pub mod struct_output;
 pub mod tools_custom;
+pub mod tools_deferred;
+pub mod tools_deferred_non_streaming;
 pub mod tools_mcp;
 pub mod tools_web;
 pub mod vision;
