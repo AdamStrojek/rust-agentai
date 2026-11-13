@@ -1366,11 +1366,56 @@ async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
     // The first new message of Run 2 is the user notification for call_1
     assert_eq!(
         run2.new_messages[0],
-        Message::tool_notification("call_1", "slow_job")
+        Message::user("Deferred task call_1 (slow_job) has finished.")
     );
     // And the tool result of get_deferred_task was sent to the model in request #3
     let last_request = request_json(&llm, 3);
     assert!(last_request.to_string().contains("job finished"));
+}
+
+#[tokio::test]
+async fn multiple_deferred_task_notifications_share_one_message() {
+    use crate::tool::DeferredTask;
+
+    let (completed_task_1, completed_handle_1) = DeferredTask::new(
+        &ToolCall::new("call_1", "first_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("first result")) }),
+    );
+    completed_task_1.run().await;
+
+    let (cancelled_task, cancelled_handle) = DeferredTask::new(
+        &ToolCall::new("call_2", "cancelled_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("unused")) }),
+    );
+    drop(cancelled_task);
+
+    let (completed_task_3, completed_handle_3) = DeferredTask::new(
+        &ToolCall::new("call_3", "third_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("third result")) }),
+    );
+    completed_task_3.run().await;
+
+    let llm = MockLlm::start(vec![text_reply("Acknowledged notifications")]).await;
+    let result: AgentResult<String> = llm
+        .agent()
+        .run(crate::Prompt::new())
+        .with_deferred_tasks(vec![
+            completed_handle_1,
+            cancelled_handle,
+            completed_handle_3,
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.new_messages[0],
+        Message::user(
+            "Deferred task call_1 (first_job) has finished.\n\
+             Deferred task call_2 (cancelled_job) was cancelled before completing.\n\
+             Deferred task call_3 (third_job) has finished."
+        )
+    );
+    assert_eq!(result.new_messages.len(), 2);
 }
 
 #[tokio::test]
@@ -1518,7 +1563,7 @@ async fn dropped_deferred_task_marks_handle_cancelled_and_notifies_model() {
     assert!(result.deferred_tasks.is_empty());
     assert_eq!(
         result.new_messages[0],
-        Message::tool_cancelled_notification("c1", "slow_job")
+        Message::user("Deferred task c1 (slow_job) was cancelled before completing.")
     );
 }
 
@@ -1583,8 +1628,9 @@ async fn duplicate_deferred_task_id_does_not_overwrite_first_task() {
         .await
         .unwrap()
         .unwrap();
-    let ToolReturn::Done(output) = ret else {
-        panic!("expected ToolReturn::Done");
+    let output = match ret {
+        ToolReturn::Done(output) => output,
+        ToolReturn::Deferred { .. } => unreachable!("expected ToolReturn::Done"),
     };
     assert_eq!(output.text().as_deref(), Some("first result"));
     assert!(handle1.is_consumed());

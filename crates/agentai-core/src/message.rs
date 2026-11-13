@@ -57,16 +57,20 @@ impl Message {
         Self::new(Role::Tool, vec![Part::ToolResponse(response)])
     }
 
-    /// Creates a user message notifying the model that a deferred tool call has finished.
-    pub fn tool_notification(call_id: &str, tool: &str) -> Self {
-        Self::user(format!("Deferred task {call_id} ({tool}) has finished."))
-    }
-
-    /// Creates a user message notifying the model that a deferred tool call was cancelled before completing.
-    pub fn tool_cancelled_notification(call_id: &str, tool: &str) -> Self {
-        Self::user(format!(
-            "Deferred task {call_id} ({tool}) was cancelled before completing."
-        ))
+    /// Creates one user message from deferred task notification lines.
+    ///
+    /// Returns `None` when there are no notifications.
+    pub fn deferred_task_notifications(
+        notifications: impl IntoIterator<Item = String>,
+    ) -> Option<Self> {
+        let mut text = String::new();
+        for notification in notifications {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&notification);
+        }
+        (!text.is_empty()).then(|| Self::user(text))
     }
 
     /// Returns the text parts joined together, or `None` when the message has no text.

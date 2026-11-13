@@ -85,7 +85,7 @@ where
 
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
-            notify_finished_deferred_tasks(&mut deferred_tasks, &mut new_messages);
+            append_deferred_task_notifications(&mut deferred_tasks, &mut new_messages);
             if iteration == 0 && new_messages.is_empty() {
                 Err(AgentError::EmptyPrompt)?;
             }
@@ -210,13 +210,12 @@ where
     }
 }
 
-/// Checks active deferred task handles without blocking, removes finished or cancelled ones, and
-/// appends a user notification message for each so the model knows it can fetch the result (or
-/// that the task was cancelled).
-fn notify_finished_deferred_tasks(
+/// Removes terminal deferred task handles and appends one user message with their notifications.
+fn append_deferred_task_notifications(
     deferred_tasks: &mut Vec<DeferredTaskHandle>,
     new_messages: &mut Vec<Message>,
 ) {
+    let mut notifications = Vec::new();
     deferred_tasks.retain(|handle| {
         if handle.is_consumed() {
             false
@@ -225,9 +224,9 @@ fn notify_finished_deferred_tasks(
                 "Deferred task cancelled, notifying model: {} ({})",
                 handle.id, handle.tool
             );
-            new_messages.push(Message::tool_cancelled_notification(
-                &handle.id,
-                &handle.tool,
+            notifications.push(format!(
+                "Deferred task {} ({}) was cancelled before completing.",
+                handle.id, handle.tool
             ));
             false
         } else if handle.is_finished() {
@@ -235,12 +234,18 @@ fn notify_finished_deferred_tasks(
                 "Deferred task finished, notifying model: {} ({})",
                 handle.id, handle.tool
             );
-            new_messages.push(Message::tool_notification(&handle.id, &handle.tool));
+            notifications.push(format!(
+                "Deferred task {} ({}) has finished.",
+                handle.id, handle.tool
+            ));
             false
         } else {
             true
         }
     });
+    if let Some(message) = Message::deferred_task_notifications(notifications) {
+        new_messages.push(message);
+    }
 }
 
 /// Drives a run to the end and returns its result.
