@@ -1,7 +1,7 @@
 //! Tests for the options of the `#[tool(...)]` attribute.
 #![cfg(feature = "macros")]
 
-use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, toolbox};
+use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, ToolReturn, toolbox};
 
 struct StrictToolBox;
 
@@ -84,7 +84,9 @@ async fn a_tool_call_parameter_gets_the_call_and_stays_out_of_the_schema() -> Re
     assert_eq!(schema["required"], serde_json::json!(["text"]));
 
     let call = agentai::ToolCall::new("call_7", "echo_id", serde_json::json!({"text": "hi"}));
-    let output = CallToolBox.call_tool(&call).await?;
+    let ToolReturn::Done(output) = CallToolBox.call_tool(&call).await? else {
+        panic!("expected ToolReturn::Done");
+    };
     assert_eq!(output.text().as_deref(), Some("call_7 hi"));
 
     Ok(())
@@ -142,10 +144,10 @@ impl ExactToolBox {
 
 async fn call(toolbox: &impl ToolBox, name: &str, arguments: serde_json::Value) -> ToolResult {
     let call = agentai::ToolCall::new("call_1", name, arguments);
-    toolbox
-        .call_tool(&call)
-        .await
-        .map(|output| output.text().unwrap_or_default())
+    let ToolReturn::Done(output) = toolbox.call_tool(&call).await? else {
+        panic!("expected ToolReturn::Done");
+    };
+    Ok(output.text().unwrap_or_default())
 }
 
 #[tokio::test]

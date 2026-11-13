@@ -70,6 +70,9 @@ pub enum AgentError {
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
     MaxIterationsReached(usize),
+    /// A run was started without a prompt and with no finished deferred task notifications to send.
+    #[error("no prompt and no finished deferred task notifications to send")]
+    EmptyPrompt,
     /// A tool failed with a fatal error ([`ToolError::is_recoverable`] is `false`),
     /// which stops the run.
     #[error("tool '{tool}' failed: {source}")]

@@ -43,14 +43,23 @@
 #[cfg(feature = "tools-buildin")]
 pub mod buildin;
 
+#[cfg(feature = "tokio")]
+pub mod deferred;
+
 #[cfg(feature = "mcp-client")]
 pub mod mcp;
 
 #[cfg(feature = "tools-web")]
 pub mod web;
 
-use crate::message::ToolCall;
+#[cfg(feature = "tokio")]
+pub use deferred::TokioDeferredTaskToolBox;
+
+use crate::message::{Media, ToolCall};
 pub use crate::message::ToolOutput;
+use futures_util::future::BoxFuture;
+use std::fmt;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use thiserror::Error;
 
 /// Represents a tool definition that can be exposed to an agent.
@@ -123,9 +132,233 @@ impl Tool {
 }
 
 /// Result of a tool. Tool methods in a [`#[toolbox]`](crate::tool::toolbox) usually return
-/// `ToolResult` (text) or `ToolResult<ToolOutput>` (text and images);
-/// [`ToolBox::call_tool`] returns `ToolResult<ToolOutput>`.
+/// `ToolResult` (text), `ToolResult<ToolOutput>` (text and images) or `ToolResult<ToolReturn>`
+/// (for deferred tools); [`ToolBox::call_tool`] returns `ToolResult<ToolReturn>`.
 pub type ToolResult<T = String> = Result<T, ToolError>;
+
+/// What a tool returns from [`ToolBox::call_tool`]: either an immediate [`ToolOutput`]
+/// ([`ToolReturn::Done`]) or an immediate response message paired with a background task
+/// ([`ToolReturn::Deferred`]).
+///
+/// [`ToolOutput`], `String`, `&str` and [`Media`] convert into [`ToolReturn::Done`], so tools
+/// in a [`#[toolbox]`](crate::tool::toolbox) that return `ToolResult` or `ToolResult<ToolOutput>`
+/// work without changes.
+#[non_exhaustive]
+pub enum ToolReturn {
+    /// The tool finished immediately with this output.
+    Done(ToolOutput),
+    /// The tool started a background task. `message` is sent to the model right away as the
+    /// [`ToolResponse`](crate::ToolResponse) for this [`ToolCall`], and `task` is yielded by the
+    /// agent as a [`DeferredTask`] so the caller (for example `TokioDeferredTaskToolBox`) can
+    /// spawn it.
+    Deferred {
+        /// Immediate response text sent to the model for this tool call.
+        message: String,
+        /// Unstarted background future that produces the final [`ToolOutput`].
+        task: BoxFuture<'static, ToolResult<ToolOutput>>,
+    },
+}
+
+impl ToolReturn {
+    /// Creates an immediate [`ToolReturn::Done`] from anything that converts into [`ToolOutput`].
+    pub fn done(output: impl Into<ToolOutput>) -> Self {
+        Self::Done(output.into())
+    }
+
+    /// Creates a [`ToolReturn::Deferred`] with an immediate message for the model and an
+    /// unstarted background future.
+    pub fn deferred(
+        message: impl Into<String>,
+        task: impl std::future::Future<Output = ToolResult<ToolOutput>> + Send + 'static,
+    ) -> Self {
+        Self::Deferred {
+            message: message.into(),
+            task: Box::pin(task),
+        }
+    }
+}
+
+impl fmt::Debug for ToolReturn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Done(output) => f.debug_tuple("Done").field(output).finish(),
+            Self::Deferred { message, .. } => f
+                .debug_struct("Deferred")
+                .field("message", message)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+impl From<ToolOutput> for ToolReturn {
+    fn from(output: ToolOutput) -> Self {
+        Self::Done(output)
+    }
+}
+
+impl From<String> for ToolReturn {
+    fn from(text: String) -> Self {
+        Self::Done(ToolOutput::from(text))
+    }
+}
+
+impl From<&str> for ToolReturn {
+    fn from(text: &str) -> Self {
+        Self::Done(ToolOutput::from(text))
+    }
+}
+
+impl From<Media> for ToolReturn {
+    fn from(media: Media) -> Self {
+        Self::Done(ToolOutput::from(media))
+    }
+}
+
+#[derive(Debug)]
+enum TaskState {
+    Running,
+    Finished(ToolResult<ToolOutput>),
+    Taken,
+    Cancelled,
+}
+
+#[derive(Debug)]
+struct SharedTaskState(Mutex<TaskState>);
+
+impl SharedTaskState {
+    fn lock(&self) -> MutexGuard<'_, TaskState> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+struct CancelOnDrop(Arc<SharedTaskState>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        let mut state = self.0.lock();
+        if matches!(*state, TaskState::Running) {
+            *state = TaskState::Cancelled;
+        }
+    }
+}
+
+/// An unstarted background task returned by a tool via [`ToolReturn::Deferred`].
+///
+/// The agent yields each `DeferredTask` as [`AgentEvent::DeferredTask`](crate::agent::AgentEvent::DeferredTask)
+/// during [`Agent::run_stream`](crate::agent::Agent::run_stream) (or collects it in
+/// `AgentResult::unstarted_deferred_tasks` when not streaming), while keeping the matching
+/// [`DeferredTaskHandle`] to track completion without depending on an async runtime.
+pub struct DeferredTask {
+    /// Id of the [`ToolCall`] that created this task.
+    pub id: String,
+    /// Name of the tool that created this task.
+    pub tool: String,
+    task: BoxFuture<'static, ToolResult<ToolOutput>>,
+    shared: Arc<SharedTaskState>,
+    _guard: CancelOnDrop,
+}
+
+impl DeferredTask {
+    /// Creates a linked `(DeferredTask, DeferredTaskHandle)` pair for `call`.
+    pub fn new(
+        call: &ToolCall,
+        task: BoxFuture<'static, ToolResult<ToolOutput>>,
+    ) -> (Self, DeferredTaskHandle) {
+        let shared = Arc::new(SharedTaskState(Mutex::new(TaskState::Running)));
+        let handle = DeferredTaskHandle {
+            id: call.id.clone(),
+            tool: call.name.clone(),
+            shared: shared.clone(),
+        };
+        let deferred = Self {
+            id: call.id.clone(),
+            tool: call.name.clone(),
+            task,
+            _guard: CancelOnDrop(shared.clone()),
+            shared,
+        };
+        (deferred, handle)
+    }
+
+    /// Returns a [`DeferredTaskHandle`] sharing this task's state.
+    pub fn handle(&self) -> DeferredTaskHandle {
+        DeferredTaskHandle {
+            id: self.id.clone(),
+            tool: self.tool.clone(),
+            shared: self.shared.clone(),
+        }
+    }
+
+    /// Runs the deferred task to completion and stores its result in the shared state.
+    pub async fn run(self) {
+        let result = self.task.await;
+        *self.shared.lock() = TaskState::Finished(result);
+    }
+}
+
+impl fmt::Debug for DeferredTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredTask")
+            .field("id", &self.id)
+            .field("tool", &self.tool)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Runtime-neutral handle that tracks the state and result of a [`DeferredTask`].
+///
+/// Returned in `AgentResult::deferred_tasks` for tasks that are still running when a run ends,
+/// and passed to a later run so the agent can notify the model once they complete.
+#[derive(Debug, Clone)]
+pub struct DeferredTaskHandle {
+    /// Id of the [`ToolCall`] that created this task.
+    pub id: String,
+    /// Name of the tool that created this task.
+    pub tool: String,
+    shared: Arc<SharedTaskState>,
+}
+
+impl DeferredTaskHandle {
+    /// Returns `true` once the matching [`DeferredTask`] is no longer running (completed, consumed, or cancelled).
+    pub fn is_finished(&self) -> bool {
+        !matches!(*self.shared.lock(), TaskState::Running)
+    }
+
+    /// Returns `true` when the [`DeferredTask`] was dropped or panicked before completing.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(*self.shared.lock(), TaskState::Cancelled)
+    }
+
+    /// Returns `true` when the completed result has already been taken.
+    pub fn is_consumed(&self) -> bool {
+        matches!(*self.shared.lock(), TaskState::Taken)
+    }
+
+    /// Takes the completed result out of the handle, marking it as consumed.
+    ///
+    /// Returns `None` if the task is still running, was cancelled, or its result was already taken.
+    pub fn take_result(&self) -> Option<ToolResult<ToolOutput>> {
+        let mut state = self.shared.lock();
+        if matches!(*state, TaskState::Finished(_)) {
+            let TaskState::Finished(result) = std::mem::replace(&mut *state, TaskState::Taken)
+            else {
+                unreachable!()
+            };
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn status_str(&self) -> &'static str {
+        match &*self.shared.lock() {
+            TaskState::Running => "running",
+            TaskState::Finished(Ok(_)) => "completed",
+            TaskState::Finished(Err(_)) => "failed",
+            TaskState::Taken => "consumed",
+            TaskState::Cancelled => "cancelled",
+        }
+    }
+}
 
 /// Replaces arguments that the model sent as a string with JSON inside, where the schema wants
 /// an array or an object, with the parsed value.
@@ -277,9 +510,9 @@ pub trait ToolBox: Send + Sync + 'static {
     /// ```
     ///
     /// # Returns
-    /// The tool's [`ToolOutput`] on success, or a `ToolError` if the tool call fails or the
+    /// The tool's [`ToolReturn`] on success, or a `ToolError` if the tool call fails or the
     /// tool is not found ([`ToolError::NotFound`]).
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput>;
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn>;
 }
 
 /// Errors that can occur when working with `ToolBox`es and tools.
@@ -389,7 +622,7 @@ impl ToolBox for ToolBoxSet {
     /// It finds the correct `ToolBox` that contains the tool and delegates the call.
     /// If multiple toolboxes contain a tool with the same name, the one that was
     /// added first will be used.
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
         for toolbox in &self.toolboxes {
             match toolbox.call_tool(call).await {
                 Err(ToolError::NotFound(_)) => {

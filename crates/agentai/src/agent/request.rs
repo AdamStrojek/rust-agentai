@@ -5,7 +5,7 @@ use super::stream::AgentStream;
 use super::{Agent, AgentError, ChatOptions, StopReason, Usage};
 use crate::message::Message;
 use crate::prompt::Prompt;
-use crate::tool::ToolBox;
+use crate::tool::{DeferredTask, DeferredTaskHandle, ToolBox};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use std::any::TypeId;
@@ -42,6 +42,8 @@ pub struct RunOptions {
     /// Options to send instead of [`Agent::with_chat_options`]. They replace the agent's
     /// options as a whole, they are not merged with them.
     pub chat_options: Option<ChatOptions>,
+    /// Handles of deferred tasks from earlier runs that may finish before or during this run.
+    pub deferred_tasks: Vec<DeferredTaskHandle>,
 }
 
 impl RunOptions {
@@ -74,13 +76,27 @@ impl RunOptions {
         self
     }
 
+    /// Passes [`DeferredTaskHandle`]s from an earlier run so this run can notify the model
+    /// when they finish.
+    pub fn with_deferred_tasks(
+        mut self,
+        deferred_tasks: impl IntoIterator<Item = DeferredTaskHandle>,
+    ) -> Self {
+        self.deferred_tasks = deferred_tasks.into_iter().collect();
+        self
+    }
+
     /// Returns these options with every field set in `other` replaced by its value.
-    fn merge(self, other: RunOptions) -> Self {
+    fn merge(mut self, other: RunOptions) -> Self {
+        if !other.deferred_tasks.is_empty() {
+            self.deferred_tasks = other.deferred_tasks;
+        }
         Self {
             model: other.model.or(self.model),
             toolbox: other.toolbox.or(self.toolbox),
             max_iterations: other.max_iterations.or(self.max_iterations),
             chat_options: other.chat_options.or(self.chat_options),
+            deferred_tasks: self.deferred_tasks,
         }
     }
 }
@@ -104,6 +120,13 @@ pub struct AgentResult<D> {
     pub reasoning_content: Option<String>,
     /// Number of model calls made in the run.
     pub iterations: usize,
+    /// Handles of deferred tasks that are still unfinished when the run ended. Pass them to the
+    /// next run with [`AgentRequest::with_deferred_tasks`].
+    pub deferred_tasks: Vec<DeferredTaskHandle>,
+    /// Unstarted [`DeferredTask`]s collected when the run was driven without manually reading
+    /// [`AgentEvent::DeferredTask`](super::AgentEvent::DeferredTask) from the stream (for
+    /// example via [`Agent::run`], [`AgentStream::finish`] or [`AgentStream::listen`]).
+    pub unstarted_deferred_tasks: Vec<DeferredTask>,
 }
 
 /// Mode of an [`AgentRequest`] created by [`Agent::run`]: awaiting it returns a [`AgentResult`].
@@ -179,6 +202,16 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
         self
     }
 
+    /// Passes [`DeferredTaskHandle`]s from an earlier run so this run can notify the model
+    /// when they finish.
+    pub fn with_deferred_tasks(
+        mut self,
+        deferred_tasks: impl IntoIterator<Item = DeferredTaskHandle>,
+    ) -> Self {
+        self.options.deferred_tasks = deferred_tasks.into_iter().collect();
+        self
+    }
+
     /// Applies a set of overrides. Fields set in `options` replace the ones set before.
     pub fn with_options(mut self, options: RunOptions) -> Self {
         self.options = self.options.merge(options);
@@ -211,6 +244,7 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
             } else {
                 Some(response_format::<D>()?)
             },
+            deferred_tasks: options.deferred_tasks,
         };
         Ok((run, self.history.to_vec(), self.prompt))
     }

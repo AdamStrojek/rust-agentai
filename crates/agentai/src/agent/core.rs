@@ -4,7 +4,7 @@ use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReas
 use crate::convert::{FromGenai, messages_into_genai};
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::prompt::Prompt;
-use crate::tool::{ToolBox, ToolOutput};
+use crate::tool::{DeferredTask, DeferredTaskHandle, ToolBox, ToolOutput, ToolReturn};
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt, pin_mut};
 use genai::Client;
@@ -25,6 +25,7 @@ pub(super) struct ResolvedRun {
     pub(super) chat_options: ChatOptions,
     /// JSON schema of the answer for structured output, `None` for a text answer
     pub(super) response_format: Option<JsonSpec>,
+    pub(super) deferred_tasks: Vec<DeferredTaskHandle>,
 }
 
 /// One model call, reduced to what the loop needs.
@@ -43,7 +44,7 @@ struct Step {
 /// [`AgentResult::new_messages`]. With `streaming`, the model answers are streamed and text and
 /// reasoning deltas are sent as events.
 pub(super) fn run_loop<D>(
-    run: ResolvedRun,
+    mut run: ResolvedRun,
     history: Vec<Message>,
     prompt: Prompt,
     streaming: bool,
@@ -52,10 +53,16 @@ where
     D: DeserializeOwned + JsonSchema + Send + 'static,
 {
     try_stream! {
+        let mut deferred_tasks = std::mem::take(&mut run.deferred_tasks);
+        let is_empty_prompt = prompt.is_empty();
         let prompt = Message::from(prompt);
         let media = prompt.parts.iter().filter(|part| matches!(part, Part::Media(_))).count();
         debug!("Agent Question: {} ({media} media)", prompt.text().unwrap_or_default());
-        let mut new_messages = vec![prompt];
+        let mut new_messages = if is_empty_prompt {
+            Vec::new()
+        } else {
+            vec![prompt]
+        };
         let mut usage = Usage::default();
 
         // Agent options, plus the response format for structured output
@@ -78,6 +85,11 @@ where
 
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
+            append_deferred_task_notifications(&mut deferred_tasks, &mut new_messages);
+            if iteration == 0 && new_messages.is_empty() {
+                Err(AgentError::EmptyPrompt)?;
+            }
+
             let mut chat_req = ChatRequest::from_messages(
                 history
                     .iter()
@@ -146,8 +158,13 @@ where
                     }
                     yield AgentEvent::ToolCall(tool_call.clone());
                     let outcome = call_tool(run.toolbox.as_deref(), &tool_call).await;
-                    let ToolOutcome { content, is_error, .. } = outcome;
-                    fatal = outcome.fatal;
+                    let ToolOutcome {
+                        content,
+                        is_error,
+                        fatal: outcome_fatal,
+                        deferred,
+                    } = outcome;
+                    fatal = outcome_fatal;
                     new_messages.push(Message::tool_response(ToolResponse::new(&tool_call, content.clone())));
                     yield AgentEvent::ToolResult {
                         call_id: tool_call.id,
@@ -155,6 +172,10 @@ where
                         content,
                         is_error,
                     };
+                    if let Some((task, handle)) = deferred {
+                        deferred_tasks.push(handle);
+                        yield AgentEvent::DeferredTask(task);
+                    }
                 }
                 if let Some(err) = fatal {
                     Err(err)?;
@@ -179,6 +200,8 @@ where
                 stop_reason: step.stop_reason,
                 reasoning_content: step.reasoning_content,
                 iterations: iteration + 1,
+                deferred_tasks,
+                unstarted_deferred_tasks: Vec::new(),
             });
             return;
         }
@@ -187,14 +210,58 @@ where
     }
 }
 
+/// Removes terminal deferred task handles and appends one user message with their notifications.
+fn append_deferred_task_notifications(
+    deferred_tasks: &mut Vec<DeferredTaskHandle>,
+    new_messages: &mut Vec<Message>,
+) {
+    let mut notifications = Vec::new();
+    deferred_tasks.retain(|handle| {
+        if handle.is_consumed() {
+            false
+        } else if handle.is_cancelled() {
+            debug!(
+                "Deferred task cancelled, notifying model: {} ({})",
+                handle.id, handle.tool
+            );
+            notifications.push(format!(
+                "Deferred task {} ({}) was cancelled before completing.",
+                handle.id, handle.tool
+            ));
+            false
+        } else if handle.is_finished() {
+            debug!(
+                "Deferred task finished, notifying model: {} ({})",
+                handle.id, handle.tool
+            );
+            notifications.push(format!(
+                "Deferred task {} ({}) has finished.",
+                handle.id, handle.tool
+            ));
+            false
+        } else {
+            true
+        }
+    });
+    if let Some(message) = Message::deferred_task_notifications(notifications) {
+        new_messages.push(message);
+    }
+}
+
 /// Drives a run to the end and returns its result.
 pub(super) async fn finish<D>(
     events: impl Stream<Item = Result<AgentEvent<D>, AgentError>>,
 ) -> Result<AgentResult<D>, AgentError> {
     pin_mut!(events);
+    let mut unstarted_deferred_tasks = Vec::new();
     while let Some(event) = events.next().await {
-        if let AgentEvent::Finished(result) = event? {
-            return Ok(result);
+        match event? {
+            AgentEvent::DeferredTask(task) => unstarted_deferred_tasks.push(task),
+            AgentEvent::Finished(mut result) => {
+                result.unstarted_deferred_tasks = unstarted_deferred_tasks;
+                return Ok(result);
+            }
+            _ => {}
         }
     }
     unreachable!("the agent loop ends with a result or an error")
@@ -296,6 +363,8 @@ struct ToolOutcome {
     is_error: bool,
     /// Set for a fatal error: the run stops once every tool call has a response.
     fatal: Option<AgentError>,
+    /// Set when the tool returned [`ToolReturn::Deferred`].
+    deferred: Option<(DeferredTask, DeferredTaskHandle)>,
 }
 
 impl ToolOutcome {
@@ -304,6 +373,7 @@ impl ToolOutcome {
             content: content.into(),
             is_error: true,
             fatal: None,
+            deferred: None,
         }
     }
 }
@@ -324,7 +394,7 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
         ));
     };
     match toolbox.call_tool(tool_call).await {
-        Ok(result) => {
+        Ok(ToolReturn::Done(result)) => {
             trace!(
                 "Tool result: {} ({} media)",
                 result.text().unwrap_or_default(),
@@ -334,6 +404,16 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
                 content: result,
                 is_error: false,
                 fatal: None,
+                deferred: None,
+            }
+        }
+        Ok(ToolReturn::Deferred { message, task }) => {
+            trace!("Tool deferred: {message}");
+            ToolOutcome {
+                content: message.into(),
+                is_error: false,
+                fatal: None,
+                deferred: Some(DeferredTask::new(tool_call, task)),
             }
         }
         Err(err) if err.is_recoverable() => {
@@ -352,6 +432,7 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
                     tool: tool_call.name.clone(),
                     source,
                 }),
+                deferred: None,
             }
         }
     }
