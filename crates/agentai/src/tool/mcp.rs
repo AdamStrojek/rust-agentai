@@ -267,7 +267,7 @@ mod tests {
             .call_tool(&ToolCall::new("call_1", "convert_time", arguments))
             .await?
         else {
-            panic!("expected ToolReturn::Done");
+            anyhow::bail!("expected ToolReturn::Done");
         };
 
         // Assert that the result is a non-empty string (the converted time)
