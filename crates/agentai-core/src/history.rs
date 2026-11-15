@@ -81,6 +81,10 @@ pub struct HistoryPruning {
     /// Replace media (images, audio, files) in user messages and tool results with a short
     /// text such as `[omitted image/png: cat.png]`, so the model knows a file was there. Tools
     /// that return files should also say how to get them again, for example by an ID.
+    ///
+    /// The reasoning that follows replaced media in the same turn is removed too, even
+    /// without [`reasoning`](HistoryPruning::reasoning): Anthropic rejects thinking blocks
+    /// whose earlier content changed.
     pub media: bool,
     /// Remove the model's reasoning: [`Part::Reasoning`], [`Part::ReasoningSignature`],
     /// [`Part::ProviderData`] and the signatures of tool calls.
@@ -108,22 +112,27 @@ impl HistoryPruning {
             .rposition(|message| message.role == Role::Assistant && message.tool_calls().is_empty())
             .map_or(0, |last_answer| last_answer + 1);
         let (old, current) = history.split_at(finished);
-        old.iter()
-            .cloned()
-            .map(|message| self.prune_message(message))
-            .filter(|message| !message.parts.is_empty())
-            .chain(current.iter().cloned())
-            .collect()
-    }
-
-    fn prune_message(&self, mut message: Message) -> Message {
-        if self.reasoning {
-            message = message.without_reasoning();
+        // Set once media of the current turn was replaced: the reasoning after it is stale
+        let mut media_replaced = false;
+        let mut pruned = Vec::with_capacity(history.len());
+        for message in old {
+            if message.role == Role::User {
+                media_replaced = false;
+            }
+            let mut message = message.clone();
+            if self.reasoning || media_replaced {
+                message = message.without_reasoning();
+            }
+            if self.media && has_media(&message.parts) {
+                message = message.without_media();
+                media_replaced = true;
+            }
+            if !message.parts.is_empty() {
+                pruned.push(message);
+            }
         }
-        if self.media {
-            message = message.without_media();
-        }
-        message
+        pruned.extend(current.iter().cloned());
+        pruned
     }
 }
 
@@ -147,6 +156,20 @@ impl Message {
     ///
     /// Only remove it from finished turns: during a tool loop, Anthropic and Gemini need the
     /// reasoning back unchanged.
+    ///
+    /// Anthropic also rejects a stored history whose thinking was created with another system
+    /// prompt or other tools. After changing them, remove the reasoning once and save the
+    /// history again:
+    ///
+    /// ```rust
+    /// # use agentai_core::message::Message;
+    /// # let history: Vec<Message> = Vec::new();
+    /// let history: Vec<Message> = history
+    ///     .into_iter()
+    ///     .map(Message::without_reasoning)
+    ///     .filter(|message| !message.parts.is_empty())
+    ///     .collect();
+    /// ```
     pub fn without_reasoning(mut self) -> Self {
         self.parts.retain(|part| {
             !matches!(
@@ -161,6 +184,14 @@ impl Message {
         }
         self
     }
+}
+
+fn has_media(parts: &[Part]) -> bool {
+    parts.iter().any(|part| match part {
+        Part::Media(_) => true,
+        Part::ToolResponse(response) => has_media(&response.content),
+        _ => false,
+    })
 }
 
 fn parts_without_media(parts: Vec<Part>) -> Vec<Part> {
@@ -251,6 +282,33 @@ mod tests {
         ];
         assert_eq!(pruned[..4], expected_old[..]);
         assert_eq!(pruned[4..], history[5..]);
+    }
+
+    #[test]
+    fn media_alone_removes_the_reasoning_after_the_replaced_media_in_its_turn() {
+        let history = history();
+        let pruned = HistoryPruning::default().with_media(true).prune(&history);
+
+        let bare_call = ToolCall::new("1", "draw", json!({}));
+        // The user's image is replaced, so the tool call after it loses its reasoning
+        assert_eq!(
+            pruned[1],
+            Message::new(Role::Assistant, vec![Part::ToolCall(bare_call)])
+        );
+        assert_eq!(pruned[4..], history[5..]);
+
+        // A turn without media keeps its reasoning
+        let call = ToolCall::new("1", "draw", json!({}));
+        let text_only = vec![
+            Message::user("hi"),
+            history[1].clone(),
+            Message::tool_response(ToolResponse::new(&call, "Drew it")),
+            Message::assistant("done"),
+        ];
+        assert_eq!(
+            HistoryPruning::default().with_media(true).prune(&text_only),
+            text_only
+        );
     }
 
     #[test]

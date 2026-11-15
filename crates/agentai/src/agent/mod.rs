@@ -296,6 +296,10 @@ impl Agent {
     }
 
     /// Sets the system prompt sent with every request. An empty system prompt is not sent.
+    ///
+    /// Anthropic rejects a history whose thinking was created with another system prompt:
+    /// after changing it, remove the reasoning from stored histories once with
+    /// [`Message::without_reasoning`](crate::Message::without_reasoning).
     pub fn with_system(mut self, system: impl Into<String>) -> Self {
         self.system = system.into().trim().to_string();
         self
