@@ -1,8 +1,14 @@
 name: Claude Review
 
 # Adding the `claude-review` label to a pull request asks Claude for a code review.
+#
+# `pull_request_target` runs in this repository's context, so the review also works
+# for pull requests from forks (`pull_request` gets no secrets and a read-only token
+# there). It has secrets, so the PR's code must never run: the checkout stays on the
+# base branch (only for CLAUDE.md) and Claude reads the change through `gh pr diff`,
+# with no cargo commands allowed.
 on:
-  pull_request:
+  pull_request_target:
     types: [labeled]
 
 jobs:
@@ -47,4 +53,4 @@ jobs:
             that has a "Breaking changes" section.
           claude_args: |
             --model claude-sonnet-5-5
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(cargo check:*),Bash(cargo clippy:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
