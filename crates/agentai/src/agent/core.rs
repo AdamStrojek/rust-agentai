@@ -25,6 +25,9 @@ pub(super) struct ResolvedRun {
     pub(super) chat_options: ChatOptions,
     /// JSON schema of the answer for structured output, `None` for a text answer
     pub(super) response_format: Option<JsonSpec>,
+    /// Budget every model call is charged to
+    #[cfg(feature = "budget")]
+    pub(super) budget: Option<super::budget::RunBudget>,
 }
 
 /// One model call, reduced to what the loop needs.
@@ -57,6 +60,8 @@ where
         debug!("Agent Question: {} ({media} media)", prompt.text().unwrap_or_default());
         let mut new_messages = vec![prompt];
         let mut usage = Usage::default();
+        #[cfg(feature = "budget")]
+        let mut cost_usd = run.budget.as_ref().map(|_| 0.0);
 
         // Agent options, plus the response format for structured output
         let mut chat_opts = run.chat_options.to_genai();
@@ -78,6 +83,10 @@ where
 
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
+            #[cfg(feature = "budget")]
+            if let Some(budget) = &run.budget {
+                budget.check()?;
+            }
             let mut chat_req = ChatRequest::from_messages(
                 history
                     .iter()
@@ -121,6 +130,10 @@ where
             } else {
                 exec_step(&run, chat_req, &chat_opts).await?
             };
+            #[cfg(feature = "budget")]
+            if let (Some(budget), Some(cost)) = (&run.budget, cost_usd.as_mut()) {
+                *cost += budget.charge(&step.usage);
+            }
             usage += step.usage;
 
             // A cut-off answer is incomplete: tool arguments may be truncated JSON, and a
@@ -179,6 +192,8 @@ where
                 stop_reason: step.stop_reason,
                 reasoning_content: step.reasoning_content,
                 iterations: iteration + 1,
+                #[cfg(feature = "budget")]
+                cost_usd,
             });
             return;
         }

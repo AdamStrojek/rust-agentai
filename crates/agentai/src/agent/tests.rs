@@ -1192,3 +1192,119 @@ async fn images_in_the_prompt_are_sent_and_kept_in_the_messages() {
         assert_eq!(new_messages[0].parts, prompt.parts());
     }
 }
+
+/// Budget with a `limit_usd` cap and an agent that charges it, pricing the mock model `m` at
+/// $1 per input token and $2 per output token, so every mock reply costs $3.
+#[cfg(feature = "budget")]
+fn budget_agent(llm: &MockLlm, limit_usd: f64) -> (Agent, Arc<llm_budget::AgentBudget>) {
+    let budget = Arc::new(
+        llm_budget::AgentBudget::builder("test", limit_usd)
+            .build()
+            .unwrap(),
+    );
+    let mut prices = llm_budget::PriceTable::new();
+    prices.insert(llm_budget::ModelPrice {
+        model: "m".to_string(),
+        provider: "openai".to_string(),
+        input_per_million: 1_000_000.0,
+        output_per_million: 2_000_000.0,
+        cache_read_per_million: None,
+        cache_write_per_million: None,
+        max_input_tokens: None,
+    });
+    let agent = llm
+        .agent()
+        .with_budget(budget.clone())
+        .with_price_table(prices);
+    (agent, budget)
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn budget_is_charged_for_every_model_call() {
+    let llm = MockLlm::start(vec![
+        tool_call_reply(),
+        text_reply("done"),
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["done"]),
+    ])
+    .await;
+    let (agent, budget) = budget_agent(&llm, 100.0);
+    let toolbox = Arc::new(FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    });
+
+    let result: AgentResult<String> = agent
+        .run("question")
+        .with_toolbox_arc(toolbox.clone())
+        .await
+        .unwrap();
+    assert_eq!(result.cost_usd, Some(6.0));
+
+    // Streamed runs are charged too, and genai's `provider::` prefix finds the price of `m`
+    let streamed = agent
+        .run_stream::<String>("question")
+        .with_model("openai::m")
+        .with_toolbox_arc(toolbox)
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    assert_eq!(streamed.cost_usd, Some(6.0));
+    assert_eq!(budget.spent_usd(), 12.0);
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn crossed_budget_stops_the_run_before_the_next_call() {
+    let llm = MockLlm::start(vec![tool_call_reply()]).await;
+    let (agent, budget) = budget_agent(&llm, 2.0);
+    let toolbox = FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    };
+
+    let err = agent
+        .with_toolbox(toolbox)
+        .run::<String>("question")
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            AgentError::Budget(llm_budget::BudgetError::AgentExhausted { .. })
+        ),
+        "{err:?}"
+    );
+    // The call that crossed the limit was made, so it is booked
+    assert_eq!(budget.spent_usd(), 3.0);
+    assert_eq!(llm.requests().len(), 1);
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn a_model_without_a_price_fails_before_calling_the_model() {
+    let llm = MockLlm::start(vec![]).await;
+    let budget = Arc::new(
+        llm_budget::AgentBudget::builder("test", 1.0)
+            .build()
+            .unwrap(),
+    );
+
+    let err = llm
+        .agent()
+        .with_budget(budget)
+        .run::<String>("question")
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            AgentError::Budget(llm_budget::BudgetError::UnknownModel(ref model)) if model == "m"
+        ),
+        "{err:?}"
+    );
+    assert!(llm.requests().is_empty());
+}
