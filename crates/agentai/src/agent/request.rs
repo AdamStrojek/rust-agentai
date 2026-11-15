@@ -206,6 +206,7 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
             chat_options: options
                 .chat_options
                 .unwrap_or_else(|| agent.chat_options.clone()),
+            history_processors: agent.history_processors.clone(),
             response_format: if is_answer_string {
                 None
             } else {

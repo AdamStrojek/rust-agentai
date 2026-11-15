@@ -1192,3 +1192,72 @@ async fn images_in_the_prompt_are_sent_and_kept_in_the_messages() {
         assert_eq!(new_messages[0].parts, prompt.parts());
     }
 }
+
+#[tokio::test]
+async fn history_processors_change_every_request_but_keep_the_current_tool_loop() {
+    let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
+    let agent = llm
+        .agent()
+        .with_toolbox(ImageToolBox)
+        .with_history_processor(crate::HistoryPruning::default().with_media(true));
+    let image = crate::Media::from_base64("image/png", "aGk=").with_name("cat.png");
+    let history = vec![
+        Message::new(
+            crate::Role::User,
+            vec![crate::Part::Text("Look".into()), crate::Part::Media(image)],
+        ),
+        Message::assistant("A cat"),
+    ];
+
+    agent
+        .run::<String>("draw")
+        .with_history(&history)
+        .await
+        .unwrap();
+
+    for index in 0..2 {
+        assert_eq!(
+            request_json(&llm, index)["messages"][1]["content"],
+            json!("Look\n\n[omitted image/png: cat.png]")
+        );
+    }
+    // The image returned by the tool in this run is still sent
+    let attachment = request_json(&llm, 1)["messages"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(attachment["role"], json!("user"));
+    assert!(
+        attachment
+            .to_string()
+            .contains("data:image/png;base64,aGk=")
+    );
+}
+
+#[tokio::test]
+async fn a_failing_history_processor_stops_the_run_before_the_model_call() {
+    struct Failing;
+
+    #[async_trait]
+    impl crate::HistoryProcessor for Failing {
+        async fn process(
+            &self,
+            _messages: Vec<Message>,
+        ) -> Result<Vec<Message>, crate::history::HistoryError> {
+            Err("summary failed".into())
+        }
+    }
+
+    let llm = MockLlm::start(vec![text_reply("ok")]).await;
+    let error = llm
+        .agent()
+        .with_history_processor(Failing)
+        .run::<String>("q")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AgentError::History(_)), "{error:?}");
+    assert!(llm.requests().is_empty());
+}
