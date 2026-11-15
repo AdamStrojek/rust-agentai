@@ -6,7 +6,9 @@ name: Claude Review
 # for pull requests from forks (`pull_request` gets no secrets and a read-only token
 # there). It has secrets, so the PR's code must never run: the checkout stays on the
 # base branch (only for CLAUDE.md) and Claude reads the change through `gh pr diff`,
-# with no cargo commands allowed.
+# with no cargo commands allowed. The Claude GitHub App token exchange rejects this
+# event, so the action uses the workflow's `GITHUB_TOKEN` (comments come from
+# github-actions[bot]).
 on:
   pull_request_target:
     types: [labeled]
@@ -19,7 +21,6 @@ jobs:
       contents: read
       pull-requests: write
       issues: read
-      id-token: write
       actions: read
     steps:
       - name: Checkout repository
@@ -31,6 +32,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
