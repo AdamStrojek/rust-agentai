@@ -346,6 +346,9 @@ impl Agent {
     /// Only the request changes: your history and [`AgentResult::new_messages`] keep
     /// everything. A failing processor stops the run with [`AgentError::History`].
     ///
+    /// Processors get their own copy of the messages before every model call, media included,
+    /// so a long history with many images is copied once per call.
+    ///
     /// ```no_run
     /// use agentai::{Agent, HistoryPruning, Message};
     ///

@@ -34,8 +34,9 @@ pub struct ChatOptions {
     /// How much the model should reason, for models that support it.
     pub reasoning_effort: Option<ReasoningEffort>,
     /// HTTP headers added to every request, for example `anthropic-beta` to turn on a beta
-    /// feature. A header with the same name replaces the earlier value, so put several betas in
-    /// one comma-separated value.
+    /// feature. Keep the names in lower case:
+    /// [`with_extra_header`](ChatOptions::with_extra_header) does, so that one name is one
+    /// header.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra_headers: BTreeMap<String, String>,
     /// Provider-specific fields merged into the request body, for options `agentai` does not
@@ -81,15 +82,18 @@ impl ChatOptions {
         self
     }
 
-    /// Adds an HTTP header sent with every request. A header with the same name replaces the
-    /// earlier value.
+    /// Adds an HTTP header sent with every request. A header with the same name, in any letter
+    /// case, replaces the earlier value, so put several Anthropic betas in one comma-separated
+    /// `anthropic-beta` value.
     pub fn with_extra_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.extra_headers.insert(name.into(), value.into());
+        let name = name.into().to_ascii_lowercase();
+        self.extra_headers.insert(name, value.into());
         self
     }
 
     /// Sets provider-specific fields merged into the request body, for options `agentai` does
-    /// not have yet. The fields are sent as they are, to the provider of the model.
+    /// not have yet. The fields are sent as they are, to the provider of the model. A second
+    /// call replaces the value of the first one, so put all fields in one object.
     ///
     /// Only top-level fields are merged: a field replaces the whole field `agentai` would send,
     /// so give the complete object. For example Anthropic's `thinking` object replaces the one
