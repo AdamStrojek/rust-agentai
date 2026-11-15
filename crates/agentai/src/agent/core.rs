@@ -2,6 +2,7 @@
 
 use super::{AgentError, AgentEvent, AgentResult, ChatOptions, LlmError, StopReason, Usage};
 use crate::convert::{FromGenai, messages_into_genai};
+use crate::history::HistoryProcessor;
 use crate::message::{Message, Part, Role, ToolCall, ToolResponse};
 use crate::prompt::Prompt;
 use crate::tool::{ToolBox, ToolOutput};
@@ -23,6 +24,7 @@ pub(super) struct ResolvedRun {
     pub(super) toolbox: Option<Arc<dyn ToolBox>>,
     pub(super) max_iterations: usize,
     pub(super) chat_options: ChatOptions,
+    pub(super) history_processors: Vec<Arc<dyn HistoryProcessor>>,
     /// JSON schema of the answer for structured output, `None` for a text answer
     pub(super) response_format: Option<JsonSpec>,
 }
@@ -43,7 +45,7 @@ struct Step {
 /// [`AgentResult::new_messages`]. With `streaming`, the model answers are streamed and text and
 /// reasoning deltas are sent as events.
 pub(super) fn run_loop<D>(
-    run: ResolvedRun,
+    mut run: ResolvedRun,
     history: Vec<Message>,
     prompt: Prompt,
     streaming: bool,
@@ -73,18 +75,31 @@ where
                 .with_capture_reasoning_content(true);
         }
 
-        // The history does not change during the run: convert it once
-        let history: Vec<genai::chat::ChatMessage> = messages_into_genai(history);
+        // Without processors the history does not change during the run: convert it once
+        let processors = std::mem::take(&mut run.history_processors);
+        let genai_history = if processors.is_empty() {
+            messages_into_genai(history.iter().cloned())
+        } else {
+            Vec::new()
+        };
 
         for iteration in 0..run.max_iterations {
             debug!("Agent iteration: {iteration}");
-            let mut chat_req = ChatRequest::from_messages(
-                history
+            let messages = if processors.is_empty() {
+                genai_history
                     .iter()
                     .cloned()
                     .chain(messages_into_genai(new_messages.iter().cloned()))
-                    .collect(),
-            );
+                    .collect()
+            } else {
+                let mut messages: Vec<Message> =
+                    history.iter().chain(&new_messages).cloned().collect();
+                for processor in &processors {
+                    messages = processor.process(messages).await.map_err(AgentError::History)?;
+                }
+                messages_into_genai(messages)
+            };
+            let mut chat_req = ChatRequest::from_messages(messages);
             if !run.system.is_empty() {
                 chat_req = chat_req.with_system(run.system.clone());
             }
