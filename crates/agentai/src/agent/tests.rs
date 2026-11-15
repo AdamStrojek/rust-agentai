@@ -11,10 +11,13 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Minimal OpenAI-compatible server that replays canned responses and records request bodies.
+/// Minimal OpenAI-compatible server that replays canned responses and records requests.
 struct MockLlm {
     base_url: String,
+    /// Bodies of the requests
     requests: Arc<Mutex<Vec<String>>>,
+    /// Request line and headers of the requests
+    heads: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockLlm {
@@ -24,15 +27,18 @@ impl MockLlm {
         let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
+        let heads = Arc::new(Mutex::new(Vec::new()));
+        let recorded_heads = heads.clone();
         tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let queue = queue.clone();
                 let recorded = recorded.clone();
+                let recorded_heads = recorded_heads.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
                     let mut chunk = [0u8; 4096];
-                    let body = loop {
+                    let (head, body) = loop {
                         let n = socket.read(&mut chunk).await.unwrap();
                         if n == 0 {
                             return;
@@ -49,10 +55,11 @@ impl MockLlm {
                                 })
                                 .unwrap_or(0);
                             if body.len() >= len {
-                                break body.to_string();
+                                break (head.to_string(), body.to_string());
                             }
                         }
                     };
+                    recorded_heads.lock().unwrap().push(head);
                     recorded.lock().unwrap().push(body);
                     let (status, payload) = queue
                         .lock()
@@ -73,7 +80,11 @@ impl MockLlm {
                 });
             }
         });
-        Self { base_url, requests }
+        Self {
+            base_url,
+            requests,
+            heads,
+        }
     }
 
     fn agent(&self) -> Agent {
@@ -82,6 +93,11 @@ impl MockLlm {
 
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
+    }
+
+    /// Request line and headers of the request at `index`, header names in lower case.
+    fn head(&self, index: usize) -> String {
+        self.heads.lock().unwrap()[index].to_ascii_lowercase()
     }
 }
 
@@ -1260,4 +1276,22 @@ async fn a_failing_history_processor_stops_the_run_before_the_model_call() {
 
     assert!(matches!(error, AgentError::History(_)), "{error:?}");
     assert!(llm.requests().is_empty());
+}
+
+#[tokio::test]
+async fn extra_headers_and_body_fields_are_sent() {
+    let llm = MockLlm::start(vec![text_reply("hi")]).await;
+    let options = ChatOptions::default()
+        .with_extra_header("x-test", "yes")
+        .with_extra_body(json!({"x_test": {"nested": 1}}));
+
+    let _: AgentResult<String> = llm
+        .agent()
+        .with_chat_options(options)
+        .run("question")
+        .await
+        .unwrap();
+
+    assert_eq!(request_json(&llm, 0)["x_test"], json!({"nested": 1}));
+    assert!(llm.head(0).contains("\r\nx-test: yes"), "{}", llm.head(0));
 }
