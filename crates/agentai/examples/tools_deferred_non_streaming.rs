@@ -18,7 +18,7 @@ use agentai::tool::{
     TokioDeferredTaskToolBox, Tool, ToolBox, ToolBoxSet, ToolError, ToolOutput, ToolResult,
     ToolReturn, toolbox,
 };
-use agentai::{Agent, Message, Prompt, ToolCall};
+use agentai::{Agent, Message, Prompt};
 use anyhow::Result;
 use log::LevelFilter;
 use simplelog::{ColorChoice, Config, TermLogger, TerminalMode};
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     )?;
 
     let model = std::env::var("AGENTAI_MODEL")
-        .unwrap_or_else(|_| "open_router::nvidia/nemotron-3.5-super-vl:free".to_string());
+        .unwrap_or_else(|_| "open_router::openrouter/free".to_string());
 
     let deferred = TokioDeferredTaskToolBox::new();
 
@@ -105,19 +105,15 @@ impl SlowToolBox {
     #[tool]
     fn slow_task(
         &self,
-        call: &ToolCall,
         /// How many seconds the background task should sleep before finishing.
         sleep_seconds: u64,
     ) -> ToolResult<ToolReturn> {
-        let task_id = call.id.clone();
         Ok(ToolReturn::deferred(
-            format!(
-                "Queued slow_task in the background (task_id: '{task_id}', sleep: {sleep_seconds}s)."
-            ),
+            format!("Queued slow_task in the background (sleep: {sleep_seconds}s)."),
             async move {
                 tokio::time::sleep(Duration::from_secs(sleep_seconds)).await;
                 Ok(ToolOutput::from_text(format!(
-                    "slow_task '{task_id}' completed after sleeping for {sleep_seconds}s!"
+                    "slow_task completed after sleeping for {sleep_seconds}s!"
                 )))
             },
         ))

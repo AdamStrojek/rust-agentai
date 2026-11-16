@@ -12,7 +12,7 @@ use agentai::tool::{
     TokioDeferredTaskToolBox, Tool, ToolBox, ToolBoxSet, ToolError, ToolOutput, ToolResult,
     ToolReturn, toolbox,
 };
-use agentai::{Agent, AgentEvent, Message, ToolCall};
+use agentai::{Agent, AgentEvent, Message};
 use anyhow::Result;
 use futures_util::StreamExt;
 use log::LevelFilter;
@@ -37,7 +37,8 @@ async fn main() -> Result<()> {
 
     // Uses OpenRouter by default (reads `OPEN_ROUTER_API_KEY` from the environment).
     // Override the model with `AGENTAI_MODEL` if desired.
-    let model = std::env::var("AGENTAI_MODEL").unwrap_or_else(|_| "open_router::nvidia/nemotron-3.5-super-vl:free".to_string());
+    let model = std::env::var("AGENTAI_MODEL")
+        .unwrap_or_else(|_| "open_router::openrouter/free".to_string());
 
     // `TokioDeferredTaskToolBox` spawns deferred tasks onto Tokio and exposes
     // `list_deferred_tasks`, `get_deferred_task`, and `wait_deferred_task`.
@@ -75,7 +76,10 @@ Then wait for each task to finish using `wait_deferred_task` with a 1-second tim
                 std::io::stdout().flush()?;
             }
             AgentEvent::ToolCall(call) => {
-                println!("\n[tool call] {} ({}): {}", call.name, call.id, call.arguments);
+                println!(
+                    "\n[tool call] {} ({}): {}",
+                    call.name, call.id, call.arguments
+                );
             }
             AgentEvent::ToolResult {
                 call_id,
@@ -115,19 +119,15 @@ impl SlowToolBox {
     #[tool]
     fn slow_task(
         &self,
-        call: &ToolCall,
         /// How many seconds the background task should sleep before finishing.
         sleep_seconds: u64,
     ) -> ToolResult<ToolReturn> {
-        let task_id = call.id.clone();
         Ok(ToolReturn::deferred(
-            format!(
-                "Started slow_task in the background (task_id: '{task_id}', sleep: {sleep_seconds}s)."
-            ),
+            format!("Started slow_task in the background (sleep: {sleep_seconds}s)."),
             async move {
                 tokio::time::sleep(Duration::from_secs(sleep_seconds)).await;
                 Ok(ToolOutput::from_text(format!(
-                    "slow_task '{task_id}' completed after sleeping for {sleep_seconds}s!"
+                    "slow_task completed after sleeping for {sleep_seconds}s!"
                 )))
             },
         ))
