@@ -4,6 +4,9 @@
 //!
 //! - [`message`] and [`prompt`]: the conversation types (`Message`, `Part`, `Media`,
 //!   `ToolOutput`, `Prompt`, ...), re-exported by `agentai`.
+//! - [`history`]: [`HistoryProcessor`](history::HistoryProcessor) changes the messages sent to
+//!   the model, [`HistoryPruning`](history::HistoryPruning) removes media and reasoning from
+//!   finished turns.
 //! - [`storage`]: [`MediaStorage`](storage::MediaStorage) (`MediaRead` + `MediaSave`), a
 //!   blob storage for images and other files, with [`MemoryStorage`](storage::MemoryStorage).
 //! - HTTP: the [`HttpClient`] trait hides the HTTP stack, so crates such as `agentai-image` send
@@ -24,6 +27,7 @@ compile_error!(
      To use native-tls, set `default-features = false` and enable `native-tls`."
 );
 
+pub mod history;
 mod http;
 pub mod message;
 pub mod prompt;

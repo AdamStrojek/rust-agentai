@@ -126,7 +126,7 @@ pub struct ToolCall {
     pub arguments: Value,
     /// Reasoning signatures some providers attach to the call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    signatures: Vec<String>,
+    pub(crate) signatures: Vec<String>,
 }
 
 impl ToolCall {
