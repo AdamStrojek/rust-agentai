@@ -261,7 +261,11 @@ mod tests {
     }
 
     async fn call_done(toolbox: &impl ToolBox, name: &str, arguments: Value) -> ToolOutput {
-        match toolbox.call_tool(&tool_call(name, arguments)).await.unwrap() {
+        match toolbox
+            .call_tool(&tool_call(name, arguments))
+            .await
+            .unwrap()
+        {
             ToolReturn::Done(output) => output,
             other => panic!("expected ToolReturn::Done, got {other:?}"),
         }

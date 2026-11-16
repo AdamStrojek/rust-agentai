@@ -125,8 +125,10 @@ mod tests {
         assert!(Prompt::text("   \n\t  ").is_empty());
 
         assert!(!Prompt::text("hello").is_empty());
-        assert!(!Prompt::new()
-            .with_media(Media::from_bytes("image/png", b"test"))
-            .is_empty());
+        assert!(
+            !Prompt::new()
+                .with_media(Media::from_bytes("image/png", b"test"))
+                .is_empty()
+        );
     }
 }

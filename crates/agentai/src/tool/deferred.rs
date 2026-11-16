@@ -121,7 +121,11 @@ impl TokioDeferredTaskToolBox {
         if !handle.is_finished() {
             return Ok(None);
         }
-        let handle = tasks.remove(task_id).unwrap();
+        let Some(handle) = tasks.remove(task_id) else {
+            return Err(ToolError::InvalidArguments(format!(
+                "unknown deferred task '{task_id}'"
+            )));
+        };
         if handle.is_cancelled() {
             return Err(ToolError::Failed(format!(
                 "Deferred task '{task_id}' ({}) was cancelled before completing.",
@@ -133,7 +137,7 @@ impl TokioDeferredTaskToolBox {
                 "deferred task '{task_id}' result has already been retrieved"
             )));
         };
-        
+
         match result {
             Ok(output) => Ok(Some(output)),
             Err(err) => Err(ToolError::Failed(err.to_string())),
