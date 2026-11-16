@@ -55,12 +55,21 @@ pub mod web;
 #[cfg(feature = "tokio")]
 pub use deferred::TokioDeferredTaskToolBox;
 
-use crate::message::{Media, ToolCall};
 pub use crate::message::ToolOutput;
+use crate::message::{Media, ToolCall};
 use futures_util::future::BoxFuture;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use thiserror::Error;
+
+static NEXT_DEFERRED_TASK_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_deferred_task_id(call_id: &str) -> String {
+    // fetch_add wraps automatically on overflow, which takes millennia anyway.
+    let sequence = NEXT_DEFERRED_TASK_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{call_id}-deferred-{sequence}")
+}
 
 /// Represents a tool definition that can be exposed to an agent.
 ///
@@ -148,9 +157,9 @@ pub enum ToolReturn {
     /// The tool finished immediately with this output.
     Done(ToolOutput),
     /// The tool started a background task. `message` is sent to the model right away as the
-    /// [`ToolResponse`](crate::ToolResponse) for this [`ToolCall`], and `task` is yielded by the
-    /// agent as a [`DeferredTask`] so the caller (for example `TokioDeferredTaskToolBox`) can
-    /// spawn it.
+    /// [`ToolResponse`](crate::ToolResponse) for this [`ToolCall`], followed by the task ID.
+    /// `task` is yielded by the agent as a [`DeferredTask`] so the caller (for example
+    /// `TokioDeferredTaskToolBox`) can spawn it.
     Deferred {
         /// Immediate response text sent to the model for this tool call.
         message: String,
@@ -166,7 +175,7 @@ impl ToolReturn {
     }
 
     /// Creates a [`ToolReturn::Deferred`] with an immediate message for the model and an
-    /// unstarted background future.
+    /// unstarted background future. The agent appends the task ID to the message.
     pub fn deferred(
         message: impl Into<String>,
         task: impl std::future::Future<Output = ToolResult<ToolOutput>> + Send + 'static,
@@ -248,7 +257,7 @@ impl Drop for CancelOnDrop {
 /// `AgentResult::unstarted_deferred_tasks` when not streaming), while keeping the matching
 /// [`DeferredTaskHandle`] to track completion without depending on an async runtime.
 pub struct DeferredTask {
-    /// Id of the [`ToolCall`] that created this task.
+    /// Task ID, derived from the creating [`ToolCall`] ID and a process-wide counter.
     pub id: String,
     /// Name of the tool that created this task.
     pub tool: String,
@@ -259,18 +268,21 @@ pub struct DeferredTask {
 
 impl DeferredTask {
     /// Creates a linked `(DeferredTask, DeferredTaskHandle)` pair for `call`.
+    ///
+    /// The task ID includes a process-wide counter and is distinct from the tool-call ID.
     pub fn new(
         call: &ToolCall,
         task: BoxFuture<'static, ToolResult<ToolOutput>>,
     ) -> (Self, DeferredTaskHandle) {
         let shared = Arc::new(SharedTaskState(Mutex::new(TaskState::Running)));
+        let id = next_deferred_task_id(&call.id);
         let handle = DeferredTaskHandle {
-            id: call.id.clone(),
+            id: id.clone(),
             tool: call.name.clone(),
             shared: shared.clone(),
         };
         let deferred = Self {
-            id: call.id.clone(),
+            id,
             tool: call.name.clone(),
             task,
             _guard: CancelOnDrop(shared.clone()),
@@ -310,7 +322,7 @@ impl fmt::Debug for DeferredTask {
 /// and passed to a later run so the agent can notify the model once they complete.
 #[derive(Debug, Clone)]
 pub struct DeferredTaskHandle {
-    /// Id of the [`ToolCall`] that created this task.
+    /// Task ID, including a process-wide counter.
     pub id: String,
     /// Name of the tool that created this task.
     pub tool: String,

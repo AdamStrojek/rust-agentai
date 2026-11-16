@@ -409,11 +409,12 @@ async fn call_tool(toolbox: Option<&dyn ToolBox>, tool_call: &ToolCall) -> ToolO
         }
         Ok(ToolReturn::Deferred { message, task }) => {
             trace!("Tool deferred: {message}");
+            let (deferred, handle) = DeferredTask::new(tool_call, task);
             ToolOutcome {
-                content: message.into(),
+                content: format!("{message}\nDeferred task ID: {}", deferred.id).into(),
                 is_error: false,
                 fatal: None,
-                deferred: Some(DeferredTask::new(tool_call, task)),
+                deferred: Some((deferred, handle)),
             }
         }
         Err(err) if err.is_recoverable() => {
