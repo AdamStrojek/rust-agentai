@@ -15,15 +15,17 @@ use tokio::net::TcpListener;
 struct MockLlm {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
+    responses: Arc<Mutex<VecDeque<(u16, String)>>>,
 }
 
 impl MockLlm {
     async fn start(responses: Vec<(u16, String)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1/", listener.local_addr().unwrap());
-        let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
+        let responses = Arc::new(Mutex::new(VecDeque::from(responses)));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
+        let queue = responses.clone();
         tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
@@ -73,7 +75,11 @@ impl MockLlm {
                 });
             }
         });
-        Self { base_url, requests }
+        Self {
+            base_url,
+            requests,
+            responses,
+        }
     }
 
     fn agent(&self) -> Agent {
@@ -82,6 +88,10 @@ impl MockLlm {
 
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
+    }
+
+    fn push_response(&self, response: (u16, String)) {
+        self.responses.lock().unwrap().push_back(response);
     }
 }
 
@@ -1255,22 +1265,16 @@ async fn deferred_task_can_be_awaited_during_a_streamed_run() {
     use std::time::Duration;
 
     let gate = Arc::new(tokio::sync::Notify::new());
-    let deferred =
-        TokioDeferredTaskToolBox::new().with_default_timeout(Duration::from_millis(10));
+    let deferred = TokioDeferredTaskToolBox::new().with_default_timeout(Duration::from_millis(10));
     let mut tools = ToolBoxSet::new();
     tools.add_tool(GatedDeferredToolBox { gate: gate.clone() });
     tools.add_tool(deferred.clone());
 
-    let llm = MockLlm::start(vec![
-        // 1. Model starts the deferred job
-        streamed_named_tool_call_reply("call_1", "slow_job", json!({})),
-        // 2. Model waits while the task is still blocked -> non-destructive timeout
-        streamed_named_tool_call_reply("call_2", "wait_deferred_task", json!({"task_id": "call_1"})),
-        // 3. After the gate opens, model waits again and gets the final output
-        streamed_named_tool_call_reply("call_3", "wait_deferred_task", json!({"task_id": "call_1"})),
-        // 4. Final answer
-        streamed_text_reply(&["All done"]),
-    ])
+    let llm = MockLlm::start(vec![streamed_named_tool_call_reply(
+        "call_1",
+        "slow_job",
+        json!({}),
+    )])
     .await;
 
     let mut stream = llm
@@ -1282,17 +1286,37 @@ async fn deferred_task_can_be_awaited_during_a_streamed_run() {
 
     let mut final_result = None;
     let mut wait_results = 0;
+    let mut deferred_id = None;
     while let Some(event) = stream.next().await {
         match event.unwrap() {
-            AgentEvent::DeferredTask(task) => deferred.spawn(task),
+            AgentEvent::DeferredTask(task) => {
+                let task_id = task.id.clone();
+                deferred_id = Some(task_id.clone());
+                deferred.spawn(task);
+                llm.push_response(streamed_named_tool_call_reply(
+                    "call_2",
+                    "wait_deferred_task",
+                    json!({"task_id": task_id}),
+                ));
+            }
             AgentEvent::ToolResult { tool, content, .. } if tool == "wait_deferred_task" => {
                 wait_results += 1;
                 if wait_results == 1 {
-                    assert_eq!(content.text().as_deref(), Some("Task 'call_1' is still running."));
+                    let task_id = deferred_id.as_ref().unwrap();
+                    assert_eq!(
+                        content.text().unwrap(),
+                        format!("Task '{task_id}' is still running.")
+                    );
                     // Unblock the background task before the second wait_deferred_task call
                     gate.notify_one();
+                    llm.push_response(streamed_named_tool_call_reply(
+                        "call_3",
+                        "wait_deferred_task",
+                        json!({"task_id": task_id}),
+                    ));
                 } else {
                     assert_eq!(content.text().as_deref(), Some("job finished"));
+                    llm.push_response(streamed_text_reply(&["All done"]));
                 }
             }
             AgentEvent::Finished(result) => final_result = Some(result),
@@ -1322,9 +1346,6 @@ async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
         // Run 1: starts the deferred task and answers while it is still running
         streamed_named_tool_call_reply("call_1", "slow_job", json!({})),
         streamed_text_reply(&["Working in the background"]),
-        // Run 2: starts with only the notification, fetches the result and answers
-        named_tool_call_reply("call_2", "get_deferred_task", json!({"task_id": "call_1"})),
-        text_reply("Background result: job finished"),
     ])
     .await;
 
@@ -1345,6 +1366,8 @@ async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
     assert_eq!(run1.answer, "Working in the background");
     assert_eq!(run1.deferred_tasks.len(), 1);
     assert!(!run1.deferred_tasks[0].is_finished());
+    let task_id = run1.deferred_tasks[0].id.clone();
+    assert!(request_json(&llm, 1).to_string().contains(&task_id));
     history.extend(run1.new_messages);
 
     // Task completes between runs
@@ -1354,6 +1377,12 @@ async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
     }
 
     // Run 2 starts with an empty prompt and the deferred task handles from Run 1
+    llm.push_response(named_tool_call_reply(
+        "call_2",
+        "get_deferred_task",
+        json!({"task_id": task_id}),
+    ));
+    llm.push_response(text_reply("Background result: job finished"));
     let run2: AgentResult<String> = agent
         .run(crate::Prompt::new())
         .with_history(&history)
@@ -1363,10 +1392,10 @@ async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
 
     assert_eq!(run2.answer, "Background result: job finished");
     assert!(run2.deferred_tasks.is_empty());
-    // The first new message of Run 2 is the user notification for call_1
+    // The first new message of Run 2 is the user notification for the unique task ID.
     assert_eq!(
         run2.new_messages[0],
-        Message::user("Deferred task call_1 (slow_job) has finished.")
+        Message::user(format!("Deferred task {task_id} (slow_job) has finished."))
     );
     // And the tool result of get_deferred_task was sent to the model in request #3
     let last_request = request_json(&llm, 3);
@@ -1381,18 +1410,21 @@ async fn multiple_deferred_task_notifications_share_one_message() {
         &ToolCall::new("call_1", "first_job", json!({})),
         Box::pin(async { Ok(ToolOutput::from_text("first result")) }),
     );
+    let completed_id_1 = completed_task_1.id.clone();
     completed_task_1.run().await;
 
     let (cancelled_task, cancelled_handle) = DeferredTask::new(
         &ToolCall::new("call_2", "cancelled_job", json!({})),
         Box::pin(async { Ok(ToolOutput::from_text("unused")) }),
     );
+    let cancelled_id = cancelled_task.id.clone();
     drop(cancelled_task);
 
     let (completed_task_3, completed_handle_3) = DeferredTask::new(
         &ToolCall::new("call_3", "third_job", json!({})),
         Box::pin(async { Ok(ToolOutput::from_text("third result")) }),
     );
+    let completed_id_3 = completed_task_3.id.clone();
     completed_task_3.run().await;
 
     let llm = MockLlm::start(vec![text_reply("Acknowledged notifications")]).await;
@@ -1409,11 +1441,11 @@ async fn multiple_deferred_task_notifications_share_one_message() {
 
     assert_eq!(
         result.new_messages[0],
-        Message::user(
-            "Deferred task call_1 (first_job) has finished.\n\
-             Deferred task call_2 (cancelled_job) was cancelled before completing.\n\
-             Deferred task call_3 (third_job) has finished."
-        )
+        Message::user(format!(
+            "Deferred task {completed_id_1} (first_job) has finished.\n\
+             Deferred task {cancelled_id} (cancelled_job) was cancelled before completing.\n\
+             Deferred task {completed_id_3} (third_job) has finished."
+        ))
     );
     assert_eq!(result.new_messages.len(), 2);
 }
@@ -1440,7 +1472,8 @@ async fn non_streaming_run_returns_unstarted_deferred_tasks() {
     assert!(!result.deferred_tasks[0].is_finished());
 
     let task = result.unstarted_deferred_tasks.pop().unwrap();
-    assert_eq!(task.id, "call_1");
+    assert!(task.id.starts_with("call_1-deferred-"));
+    assert_eq!(result.deferred_tasks[0].id, task.id);
     assert_eq!(task.tool, "slow_job");
 
     let run_fut = tokio::spawn(task.run());
@@ -1515,12 +1548,13 @@ async fn failed_deferred_tasks_always_reach_the_model_as_recoverable_errors() {
             &ToolCall::new(&id, "slow_job", json!({})),
             Box::pin(async move { Err(error) }),
         );
+        let task_id = task.id.clone();
         deferred.spawn(task);
 
         let call = ToolCall::new(
             "fetch",
             "wait_deferred_task",
-            json!({"task_id": id, "timeout_seconds": 5}),
+            json!({"task_id": task_id, "timeout_seconds": 5}),
         );
         let err = tokio::time::timeout(Duration::from_secs(10), deferred.call_tool(&call))
             .await
@@ -1543,6 +1577,7 @@ async fn dropped_deferred_task_marks_handle_cancelled_and_notifies_model() {
         &ToolCall::new("c1", "slow_job", json!({})),
         Box::pin(async { Ok(ToolOutput::from_text("done")) }),
     );
+    let task_id = handle.id.clone();
     assert!(!handle.is_finished());
     assert!(!handle.is_cancelled());
 
@@ -1563,7 +1598,9 @@ async fn dropped_deferred_task_marks_handle_cancelled_and_notifies_model() {
     assert!(result.deferred_tasks.is_empty());
     assert_eq!(
         result.new_messages[0],
-        Message::user("Deferred task c1 (slow_job) was cancelled before completing.")
+        Message::user(format!(
+            "Deferred task {task_id} (slow_job) was cancelled before completing."
+        ))
     );
 }
 
@@ -1580,12 +1617,13 @@ async fn panicking_deferred_task_cancels_handle_and_wakes_waiters_with_recoverab
             panic!("boom inside background task");
         }),
     );
+    let task_id = task.id.clone();
     deferred.spawn(task);
 
     let call = ToolCall::new(
         "fetch",
         "wait_deferred_task",
-        json!({"task_id": "panic_1", "timeout_seconds": 5}),
+        json!({"task_id": task_id, "timeout_seconds": 5}),
     );
     let err = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
         .await
@@ -1598,7 +1636,7 @@ async fn panicking_deferred_task_cancels_handle_and_wakes_waiters_with_recoverab
 
 #[cfg(feature = "tokio")]
 #[tokio::test]
-async fn duplicate_deferred_task_id_does_not_overwrite_first_task() {
+async fn repeated_call_ids_produce_distinct_deferred_task_ids() {
     use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
     use std::time::Duration;
 
@@ -1611,27 +1649,32 @@ async fn duplicate_deferred_task_id_does_not_overwrite_first_task() {
         &ToolCall::new("dup_id", "slow_job", json!({})),
         Box::pin(async { Ok(ToolOutput::from_text("second result")) }),
     );
+    let task_id1 = task1.id.clone();
+    let task_id2 = task2.id.clone();
+    assert_ne!(task_id1, task_id2);
+    assert_eq!(handle1.id, task_id1);
+    assert_eq!(handle2.id, task_id2);
 
     deferred.spawn(task1);
     deferred.spawn(task2);
 
-    // The duplicate second task is dropped immediately and marked cancelled
-    assert!(handle2.is_cancelled());
+    for (task_id, expected) in [(task_id1, "first result"), (task_id2, "second result")] {
+        let call = ToolCall::new(
+            "fetch",
+            "wait_deferred_task",
+            json!({"task_id": task_id, "timeout_seconds": 5}),
+        );
+        let ret = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
+            .await
+            .unwrap()
+            .unwrap();
+        let output = match ret {
+            ToolReturn::Done(output) => output,
+            ToolReturn::Deferred { .. } => unreachable!("expected ToolReturn::Done"),
+        };
+        assert_eq!(output.text().as_deref(), Some(expected));
+    }
 
-    // Waiting on dup_id returns the first task's result
-    let call = ToolCall::new(
-        "fetch",
-        "wait_deferred_task",
-        json!({"task_id": "dup_id", "timeout_seconds": 5}),
-    );
-    let ret = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
-        .await
-        .unwrap()
-        .unwrap();
-    let output = match ret {
-        ToolReturn::Done(output) => output,
-        ToolReturn::Deferred { .. } => unreachable!("expected ToolReturn::Done"),
-    };
-    assert_eq!(output.text().as_deref(), Some("first result"));
     assert!(handle1.is_consumed());
+    assert!(handle2.is_consumed());
 }
