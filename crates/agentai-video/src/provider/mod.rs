@@ -4,6 +4,7 @@
 //! for one API. Implement it yourself to use another API.
 
 pub mod comfy_serve;
+pub mod openrouter;
 pub(crate) mod video_api;
 
 use agentai_core::HttpError;
@@ -313,12 +314,14 @@ pub trait VideoProvider: Send + Sync + 'static {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderKind {
     ComfyServe,
+    OpenRouter,
 }
 
 impl ProviderKind {
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "comfy-serve" => Some(Self::ComfyServe),
+            "openrouter" => Some(Self::OpenRouter),
             _ => None,
         }
     }
@@ -326,6 +329,7 @@ impl ProviderKind {
     fn build(self, model: &str) -> Result<Box<dyn VideoProvider>, VideoError> {
         Ok(match self {
             Self::ComfyServe => Box::new(comfy_serve::ComfyServeVideoProvider::from_env(model)?),
+            Self::OpenRouter => Box::new(openrouter::OpenRouterVideoProvider::from_env(model)?),
         })
     }
 }
@@ -346,7 +350,7 @@ pub fn from_model(model: &str) -> Result<Box<dyn VideoProvider>, VideoError> {
     kind.build(name)
 }
 
-/// Lists the video models of a provider (`comfy-serve`), with its settings from environment
+/// Lists the video models of a provider (`comfy-serve`, `openrouter`), with its settings from environment
 /// variables as in [`from_model`].
 ///
 /// ```rust,no_run
@@ -396,8 +400,6 @@ pub(crate) mod tests {
             self.0.requests.lock().unwrap()[index].clone()
         }
 
-        // TODO(task 4): used by the OpenRouter tests.
-        #[allow(dead_code)]
         pub(crate) fn request_count(&self) -> usize {
             self.0.requests.lock().unwrap().len()
         }
@@ -430,6 +432,10 @@ pub(crate) mod tests {
         assert_eq!(
             resolve("comfy-serve::wan/2.2").unwrap(),
             (ProviderKind::ComfyServe, "wan/2.2")
+        );
+        assert_eq!(
+            resolve("openrouter::google/veo-3.1").unwrap(),
+            (ProviderKind::OpenRouter, "google/veo-3.1")
         );
         for model in ["wan", "comfy::wan", "other::wan"] {
             assert!(matches!(resolve(model), Err(VideoError::UnknownProvider(m)) if m == model));
