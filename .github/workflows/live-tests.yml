@@ -6,7 +6,7 @@ name: Live Tests
 # `pull_request` from a fork gets no secrets, so this uses `pull_request_target`, which
 # has them. That means the PR's code runs with the API keys: label a PR only after
 # reading its diff. The run tests the PR merged into the current base branch (like
-# CI), as it is when labeled, so later pushes need a new label (remove it and add it
+# CI) and stops if its head is not the labeled commit, so later pushes need a new label (remove it and add it
 # again). It uses no cache, so the PR's code cannot poison the base branch's cache.
 on:
   pull_request_target:
@@ -26,6 +26,15 @@ jobs:
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           persist-credentials: false
+          fetch-depth: 2
+      - name: Check that the labeled commit is tested
+        env:
+          LABELED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$(git rev-parse HEAD^2)" != "$LABELED_SHA" ]; then
+            echo "::error::The pull request changed after it was labeled; label it again"
+            exit 1
+          fi
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Setup uv
