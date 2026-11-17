@@ -7,10 +7,39 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.6.0 → 0.7.0 (YYYY-MM-DD)](#060--070-yyyy-mm-dd)
 - [0.4.0 → 0.5.0 (YYYY-MM-DD)](#040--050-yyyy-mm-dd)
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.6.0 → 0.7.0 (YYYY-MM-DD)
+
+### `agentai-audio`: `SpeechRequest::voice` is now `voices`
+
+A request can carry several voices, in speaker order, for dialogue models such as Fish Audio
+`drama-3`, so the field `voice: Option<Voice>` is now `voices: Vec<Voice>`. `with_voice` adds a voice
+to the list, so code that calls it once needs no change. Calling it again no longer replaces the
+voice: it adds a second one, which providers with one voice (OpenAI, ElevenLabs, oMLX) reject with
+`AudioError::Unsupported`. Use `with_voices(vec![..])` to replace the list. Code that reads or sets
+the field directly:
+
+```rust
+// 0.6.0
+let mut request = SpeechRequest::new("Hello");
+request.voice = Some(Voice::id("alloy"));
+if let Some(voice) = &request.voice { /* ... */ }
+```
+
+```rust
+// 0.7.0
+let mut request = SpeechRequest::new("Hello");
+request.voices = vec![Voice::id("alloy")];
+if let Some(voice) = request.voices.first() { /* ... */ }
+```
+
+A custom `SpeechProvider` that speaks with one voice should return `AudioError::Unsupported` when
+`voices` has more than one entry, as the built-in OpenAI, ElevenLabs and oMLX providers do.
 
 ## 0.4.0 → 0.5.0 (YYYY-MM-DD)
 
