@@ -87,7 +87,9 @@ pub enum VideoInputs {
     None,
     /// Image-to-video: at least one of the two frames.
     Frames {
+        /// The image the video starts with.
         first: Option<Media>,
+        /// The image the video ends with.
         last: Option<Media>,
     },
     /// Reference-to-video.
@@ -100,8 +102,11 @@ pub enum VideoInputs {
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct VideoReferences {
+    /// Reference images.
     pub images: Vec<Media>,
+    /// Reference videos.
     pub videos: Vec<Media>,
+    /// Reference audio.
     pub audio: Vec<Media>,
     /// Indices into `videos` whose sound is also an audio input.
     pub video_sound: Vec<u32>,
@@ -170,8 +175,11 @@ impl VideoJob {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum JobStatus {
+    /// Waiting to start.
     Queued,
+    /// Being generated.
     Running,
+    /// Done: [`VideoProvider::download`] returns the video.
     Completed,
     /// The job failed, with the provider's message.
     Failed(String),
@@ -184,10 +192,15 @@ pub enum JobStatus {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum VideoInputKind {
+    /// An image the video starts with.
     FirstFrame,
+    /// An image the video ends with.
     LastFrame,
+    /// A reference image.
     Image,
+    /// A reference video.
     Video,
+    /// A reference audio.
     Audio,
 }
 
@@ -202,11 +215,15 @@ pub struct VideoModel {
     pub model: String,
     /// The ID of the model at the provider.
     pub id: String,
+    /// A display name.
     pub name: Option<String>,
     /// Lengths in seconds, ascending.
     pub durations: Option<Vec<u32>>,
+    /// Resolutions, in the format of the provider.
     pub resolutions: Option<Vec<String>>,
+    /// Aspect ratios, in the format of the provider.
     pub aspect_ratios: Option<Vec<String>>,
+    /// The kinds of input the model accepts.
     pub inputs: Option<Vec<VideoInputKind>>,
 }
 
@@ -234,7 +251,12 @@ pub enum VideoError {
     Http(HttpError),
     /// The API answered with an error status.
     #[error("video API error (status {status}): {message}")]
-    Api { status: u16, message: String },
+    Api {
+        /// HTTP status code.
+        status: u16,
+        /// Message of the API.
+        message: String,
+    },
     /// The API answered with something the provider cannot read.
     #[error("invalid video API response: {0}")]
     InvalidResponse(String),
@@ -350,8 +372,8 @@ pub fn from_model(model: &str) -> Result<Box<dyn VideoProvider>, VideoError> {
     kind.build(name)
 }
 
-/// Lists the video models of a provider (`comfy-serve`, `openrouter`), with its settings from environment
-/// variables as in [`from_model`].
+/// Lists the video models of a provider (`comfy-serve`, `openrouter`), with its settings from
+/// environment variables as in [`from_model`].
 ///
 /// ```rust,no_run
 /// # async fn run() -> Result<(), agentai_video::VideoError> {
