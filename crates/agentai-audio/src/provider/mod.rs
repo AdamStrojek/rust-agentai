@@ -505,9 +505,9 @@ fn resolve(model: &str) -> Result<(ProviderKind, &str), AudioError> {
 /// Creates the provider for a model name, with its settings from environment variables.
 ///
 /// The provider comes from a `provider::` prefix (`openai::`, `elevenlabs::`, `fishaudio::`,
-/// `omlx::`), for example `omlx::mlx-community/VoxCPM2-8bit` or `fishaudio::drama-3`, or, for well-known names (`tts-1*`,
-/// `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the prefix for other models behind
-/// an OpenAI-compatible API. See each provider's `from_env` for its variables.
+/// `omlx::`), for example `omlx::mlx-community/VoxCPM2-8bit` or `fishaudio::drama-3`, or, for
+/// well-known names (`tts-1*`, `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the
+/// prefix for other models behind an OpenAI-compatible API. See each provider's `from_env` for its variables.
 ///
 /// An `omlx::` provider made here has no voice store, so it cannot clone voices or use
 /// [`Voice::Id`] of cloned voices; a `fishaudio::` one uses only voices of the Fish Audio

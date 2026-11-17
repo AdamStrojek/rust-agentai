@@ -451,8 +451,20 @@ fn parse_timestamp_stream(body: &[u8]) -> Result<(Vec<u8>, Vec<WordTimestamp>), 
         let Some(data) = line.strip_prefix("data:") else {
             continue;
         };
+        // Only JSON objects are events; skip anything else, such as a `[DONE]` sentinel
+        let Ok(serde_json::Value::Object(object)) = serde_json::from_str(data.trim()) else {
+            continue;
+        };
+        if !object.contains_key("audio_base64")
+            && let Some(message) = object.get("message").or(object.get("error"))
+        {
+            let message = message
+                .as_str()
+                .map_or_else(|| message.to_string(), String::from);
+            return Err(invalid(format!("error event in the stream: {message}")));
+        }
         let event: TimestampEvent =
-            serde_json::from_str(data.trim()).map_err(|e| invalid(e.to_string()))?;
+            serde_json::from_value(object.into()).map_err(|e| invalid(e.to_string()))?;
         audio.extend(
             base64::engine::general_purpose::STANDARD
                 .decode(&event.audio_base64)
@@ -587,11 +599,13 @@ mod tests {
             json!({"audio_duration": 1.0, "segments": segments})
         };
         let body = [
+            ": keep-alive\n\n".to_string(),
             event(b"AB", 0, 0.0, Value::Null),
             event(b"CD", 0, 0.0, words(&[("Hi", 0.0, 0.25)])),
             event(b"", 0, 0.0, words(&[("Hi", 0.0, 0.5), ("there", 0.5, 1.0)])),
             event(b"EF", 1, 1.5, Value::Null),
             event(b"", 1, 1.5, words(&[("Bye", 0.25, 0.75)])),
+            "data: [DONE]\n\n".to_string(),
         ]
         .concat();
         let http = MockHttp::new(vec![HttpResponse::new(200, body)]);
@@ -615,6 +629,21 @@ mod tests {
                 WordTimestamp::new("there", 0.5, 1.0),
                 WordTimestamp::new("Bye", 1.75, 2.25),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_error_event_fails_the_timestamp_stream() {
+        let body = "data: {\"audio_base64\": \"QUI=\", \"chunk_seq\": 0}\n\n\
+                    data: {\"status\": 503, \"message\": \"server overloaded\"}\n\n";
+        let http = MockHttp::new(vec![HttpResponse::new(200, body)]);
+        let err = provider(&http)
+            .generate(SpeechRequest::new("hi").with_timestamps(true))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, AudioError::InvalidResponse(m) if m.contains("server overloaded")),
+            "{err}"
         );
     }
 
