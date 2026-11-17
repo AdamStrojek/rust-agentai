@@ -11,7 +11,7 @@ use std::sync::Arc;
 use agentai_core::message::{Media, MediaSource};
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, ReqwestClient};
 use async_trait::async_trait;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::{
     JobStatus, VideoError, VideoInputs, VideoJob, VideoModel, VideoProvider, VideoRequest,
@@ -30,11 +30,12 @@ pub const BASE_URL_ENV: &str = "OPENROUTER_BASE_URL";
 /// ```rust,no_run
 /// # use agentai_video::provider::openrouter::OpenRouterVideoProvider;
 /// # fn main() -> Result<(), agentai_video::VideoError> {
-/// // From `OPENROUTER_API_KEY` and, if set, `OPENROUTER_BASE_URL`
-/// let provider = OpenRouterVideoProvider::from_env("google/veo-3.1")?;
+/// // From `OPENROUTER_API_KEY` and, if set, `OPENROUTER_BASE_URL`; the model name is only an
+/// // example, list the real ones with `list_models`
+/// let provider = OpenRouterVideoProvider::from_env("example-vendor/example-video-model")?;
 /// // Or everything in code
 /// let provider = OpenRouterVideoProvider::new(
-///     "google/veo-3.1",
+///     "example-vendor/example-video-model",
 ///     "sk-or-...",
 ///     agentai_video::provider::openrouter::DEFAULT_BASE_URL,
 /// );
@@ -101,21 +102,7 @@ impl OpenRouterVideoProvider {
     }
 
     fn body(&self, video: VideoRequest) -> Result<Value, VideoError> {
-        let mut json = Map::new();
-        json.insert("model".into(), json!(self.model));
-        json.insert("prompt".into(), json!(video.prompt));
-        if let Some(duration) = video.duration {
-            json.insert("duration".into(), json!(duration));
-        }
-        if let Some(resolution) = video.resolution {
-            json.insert("resolution".into(), json!(resolution));
-        }
-        if let Some(aspect_ratio) = video.aspect_ratio {
-            json.insert("aspect_ratio".into(), json!(aspect_ratio));
-        }
-        if let Some(seed) = video.seed {
-            json.insert("seed".into(), json!(seed));
-        }
+        let mut json = video_api::request_options(&self.model, &video);
         match &video.inputs {
             VideoInputs::None => {}
             VideoInputs::Frames { first, last } => {
@@ -138,6 +125,9 @@ impl OpenRouterVideoProvider {
                 }
                 if !refs.audio.is_empty() {
                     return Err(VideoError::Unsupported("reference audio"));
+                }
+                if !refs.video_sound.is_empty() {
+                    return Err(VideoError::Unsupported("video sound"));
                 }
                 if !refs.images.is_empty() {
                     let images: Vec<Value> = refs.images.iter().map(image_entry).collect();
@@ -254,6 +244,9 @@ mod tests {
         for refs in [
             VideoReferences::new().with_video(image.clone()),
             VideoReferences::new().with_audio(image.clone()),
+            VideoReferences::new()
+                .with_image(image.clone())
+                .with_video_sound(0),
         ] {
             assert!(matches!(
                 provider

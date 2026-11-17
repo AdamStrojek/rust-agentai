@@ -6,7 +6,7 @@ use std::sync::Arc;
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::{
     JobStatus, VideoError, VideoInputs, VideoJob, VideoModel, VideoProvider, VideoRequest,
@@ -95,21 +95,7 @@ impl ComfyServeVideoProvider {
         request: HttpRequest,
         video: VideoRequest,
     ) -> Result<HttpRequest, VideoError> {
-        let mut json = Map::new();
-        json.insert("model".into(), json!(self.model));
-        json.insert("prompt".into(), json!(video.prompt));
-        if let Some(duration) = video.duration {
-            json.insert("duration".into(), json!(duration));
-        }
-        if let Some(resolution) = video.resolution {
-            json.insert("resolution".into(), json!(resolution));
-        }
-        if let Some(aspect_ratio) = video.aspect_ratio {
-            json.insert("aspect_ratio".into(), json!(aspect_ratio));
-        }
-        if let Some(seed) = video.seed {
-            json.insert("seed".into(), json!(seed));
-        }
+        let mut json = video_api::request_options(&self.model, &video);
 
         let mut files: Vec<(&str, &Media)> = Vec::new();
         match &video.inputs {
@@ -125,7 +111,7 @@ impl ComfyServeVideoProvider {
                     json.insert("video_sound".into(), json!(refs.video_sound));
                 }
             }
-            _ => {}
+            VideoInputs::None => {}
         }
 
         if files.is_empty() {
@@ -144,17 +130,19 @@ impl ComfyServeVideoProvider {
     }
 }
 
-/// File extension for a MIME type: its subtype, with the two common names that differ.
+/// File extension for a MIME type: its subtype when that is plain ASCII letters and digits,
+/// with the two common names that differ, otherwise `bin`. Parameters are ignored.
 fn extension(content_type: &str) -> &str {
-    match content_type {
+    let mime = content_type.split(';').next().unwrap_or("").trim();
+    match mime {
         "audio/mpeg" => "mp3",
         "video/quicktime" => "mov",
         other => other
-            .split(';')
-            .next()
-            .and_then(|mime| mime.split_once('/'))
-            .map(|(_, subtype)| subtype.trim())
-            .filter(|subtype| !subtype.is_empty())
+            .split_once('/')
+            .map(|(_, subtype)| subtype)
+            .filter(|subtype| {
+                !subtype.is_empty() && subtype.chars().all(|c| c.is_ascii_alphanumeric())
+            })
             .unwrap_or("bin"),
     }
 }
@@ -262,7 +250,7 @@ mod tests {
     async fn frames_go_as_multipart_after_the_request_part() {
         let http = MockHttp::new(vec![json_response(202, json!({"id": "j"}))]);
         let first = Media::from_bytes("image/png", b"FIRST").with_name("start.png");
-        let last = Media::from_bytes("image/jpeg", b"LAST");
+        let last = Media::from_bytes("image/jpeg; q=1", b"LAST");
         provider(&http)
             .submit(
                 VideoRequest::new("p")
@@ -291,7 +279,7 @@ mod tests {
             "name=\"first_frame\"; filename=\"start.png\"\r\nContent-Type: image/png\r\n\r\nFIRST",
         );
         let last_part = at(
-            "name=\"last_frame\"; filename=\"last_frame.jpeg\"\r\nContent-Type: image/jpeg\r\n\r\nLAST",
+            "name=\"last_frame\"; filename=\"last_frame.jpeg\"\r\nContent-Type: image/jpeg; q=1\r\n\r\nLAST",
         );
         assert!(request_part < first_part && first_part < last_part);
         assert!(body.contains("\"seed\":7") && body.contains("\"model\":\"wan\""));

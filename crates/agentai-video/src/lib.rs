@@ -30,7 +30,8 @@
 //! ```
 //!
 //! A [`VideoJob`] can be stored (serde) and given back, possibly to a new provider, after a
-//! restart: `status`, `download` and `cancel` need no model.
+//! restart: `status`, `download` and `cancel` need no model. A job does not record which provider
+//! made it, so store the provider and model name next to it.
 //!
 //! ## Inputs
 //!
@@ -66,8 +67,9 @@
 //! yourself and give it your own client:
 //!
 //! ```rust,ignore
-//! // Needs `reqwest` and `agentai-core` in your dependencies
-//! use agentai_core::ReqwestClient;
+//! // `reqwest::Client` needs `reqwest` in your dependencies; `ReqwestClient` and the other HTTP
+//! // types are re-exported from this crate
+//! use agentai_video::ReqwestClient;
 //! use agentai_video::provider::comfy_serve::ComfyServeVideoProvider;
 //!
 //! let client = reqwest::Client::builder().build().unwrap();
@@ -75,7 +77,9 @@
 //!     .with_http_client(ReqwestClient::from_client(client));
 //! ```
 //!
-//! Implement [`VideoProvider`] for another API.
+//! The HTTP types ([`HttpClient`], [`HttpRequest`], [`HttpResponse`], [`HttpError`],
+//! [`ReqwestClient`]) and [`Media`] are re-exported, so this crate is enough to use a provider
+//! with your own client or to implement [`VideoProvider`] for another API.
 //!
 //! ## Limits
 //!
@@ -98,7 +102,8 @@ compile_error!(
 
 pub mod provider;
 
-pub use agentai_core::message::Media;
+pub use agentai_core::message::{Media, MediaSource};
+pub use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse, ReqwestClient};
 pub use provider::{
     JobStatus, VideoError, VideoInputKind, VideoInputs, VideoJob, VideoModel, VideoProvider,
     VideoReferences, VideoRequest, from_model, list_models,

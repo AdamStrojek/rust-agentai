@@ -3,7 +3,9 @@
 
 use agentai_core::HttpResponse;
 use agentai_core::message::Media;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
+
+use super::VideoRequest;
 
 use super::{JobStatus, VideoError, VideoInputKind, VideoJob, VideoModel};
 
@@ -11,6 +13,26 @@ fn json_body(response: &HttpResponse) -> Result<Value, VideoError> {
     response
         .json()
         .map_err(|err| VideoError::InvalidResponse(err.to_string()))
+}
+
+/// The JSON options every request has: `model`, `prompt` and the options that are set.
+pub(crate) fn request_options(model: &str, video: &VideoRequest) -> Map<String, Value> {
+    let mut json = Map::new();
+    json.insert("model".into(), json!(model));
+    json.insert("prompt".into(), json!(video.prompt));
+    if let Some(duration) = video.duration {
+        json.insert("duration".into(), json!(duration));
+    }
+    if let Some(resolution) = &video.resolution {
+        json.insert("resolution".into(), json!(resolution));
+    }
+    if let Some(aspect_ratio) = &video.aspect_ratio {
+        json.insert("aspect_ratio".into(), json!(aspect_ratio));
+    }
+    if let Some(seed) = video.seed {
+        json.insert("seed".into(), json!(seed));
+    }
+    json
 }
 
 /// `{ "id", "polling_url" }` becomes `VideoJob { id, data: {"polling_url": ..} }`.
@@ -82,7 +104,9 @@ pub(crate) fn parse_models(
                 "video" => Some(VideoInputKind::Video),
                 "audio" => Some(VideoInputKind::Audio),
                 _ => None,
-            });
+            })
+            // A list of kinds we do not know says nothing about what the model accepts
+            .filter(|inputs| !inputs.is_empty() || entry["supported_inputs"] == json!([]));
             Some(model)
         })
         .collect())
@@ -190,6 +214,8 @@ mod tests {
                      "supported_resolutions": ["720p"], "supported_aspect_ratios": ["16:9"],
                      "supported_inputs": ["first_frame", "audio", "hologram"]},
                     {"id": "bare", "supported_durations": []},
+                    {"id": "odd", "supported_inputs": ["hologram"]},
+                    {"id": "none", "supported_inputs": []},
                 ]}),
             ),
         )
@@ -202,6 +228,9 @@ mod tests {
             Some(vec![VideoInputKind::FirstFrame, VideoInputKind::Audio])
         );
         assert_eq!(models[1].durations, Some(vec![]));
+        // Only unknown kinds say nothing; an empty list from the server accepts nothing
+        assert_eq!(models[2].inputs, None);
+        assert_eq!(models[3].inputs, Some(vec![]));
         assert_eq!(
             (
                 models[1].resolutions.clone(),

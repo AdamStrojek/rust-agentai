@@ -14,8 +14,7 @@
 
 use std::time::Duration;
 
-use agentai_core::ReqwestClient;
-use agentai_video::{JobStatus, Media, VideoInputs, VideoRequest, from_model};
+use agentai_video::{JobStatus, Media, ReqwestClient, VideoInputs, VideoRequest, from_model};
 
 fn image_type(path: &str) -> &'static str {
     match path

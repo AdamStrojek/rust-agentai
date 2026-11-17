@@ -144,7 +144,8 @@ impl VideoReferences {
 }
 
 /// A video job at a provider. Store it and give it back to follow the job, also after a
-/// restart and with a new provider instance.
+/// restart and with a new provider instance. A job does not record which provider made it, so
+/// the application stores the provider and model name next to it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct VideoJob {

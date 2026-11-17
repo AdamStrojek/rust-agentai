@@ -27,7 +27,8 @@ loop {
 let video = provider.download(&job).await?; // a `Media`, base64 or a URL
 ```
 
-- A `VideoJob` can be stored (serde) and given back, possibly to a new provider, after a restart.
+- A `VideoJob` can be stored (serde) and given back, possibly to a new provider, after a restart. A job does not
+  record which provider made it, so store the provider and model name next to it.
 - Three input modes in `VideoInputs`: none (text-to-video), `Frames { first, last }` (image-to-video) and
   `References(VideoReferences)` (reference images, videos and audio). A provider that cannot send an input
   returns `Unsupported`.
@@ -46,7 +47,8 @@ a live key.
 
 To change timeouts or the proxy, build the provider yourself (`ComfyServeVideoProvider::new(model, api_key,
 base_url)`) and give it your own client with `with_http_client(ReqwestClient::from_client(client))`.
-Implement `VideoProvider` for other APIs.
+`ReqwestClient`, `HttpClient` and the other HTTP types are re-exported from `agentai_video`, as is `Media`, so you
+need no direct `agentai-core` dependency. Implement `VideoProvider` for other APIs.
 
 Limits: files travel in memory as `Media` (base64 or a URL); there is no waiting helper, no retries and no
 timeouts of its own; there are no agent tools, the crate does not depend on `agentai`.
