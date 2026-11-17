@@ -3,8 +3,7 @@
 //! [`VideoProvider`] is the interface to a video generation API. Each submodule implements it
 //! for one API. Implement it yourself to use another API.
 
-// TODO(task 3): drop the allow once the providers use the parsing.
-#[allow(dead_code)]
+pub mod comfy_serve;
 pub(crate) mod video_api;
 
 use agentai_core::HttpError;
@@ -310,9 +309,61 @@ pub trait VideoProvider: Send + Sync + 'static {
     }
 }
 
+/// The APIs [`from_model`] knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderKind {
+    ComfyServe,
+}
+
+impl ProviderKind {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "comfy-serve" => Some(Self::ComfyServe),
+            _ => None,
+        }
+    }
+
+    fn build(self, model: &str) -> Result<Box<dyn VideoProvider>, VideoError> {
+        Ok(match self {
+            Self::ComfyServe => Box::new(comfy_serve::ComfyServeVideoProvider::from_env(model)?),
+        })
+    }
+}
+
+/// Splits `provider::model` and finds the provider. The prefix is required.
+fn resolve(model: &str) -> Result<(ProviderKind, &str), VideoError> {
+    model
+        .split_once("::")
+        .and_then(|(provider, name)| Some((ProviderKind::from_name(provider)?, name)))
+        .ok_or_else(|| VideoError::UnknownProvider(model.to_string()))
+}
+
+/// Creates the provider for a `provider::model` name, with its settings from environment
+/// variables, for example `comfy-serve::wan` (see
+/// [`ComfyServeVideoProvider::from_env`](comfy_serve::ComfyServeVideoProvider::from_env)).
+pub fn from_model(model: &str) -> Result<Box<dyn VideoProvider>, VideoError> {
+    let (kind, name) = resolve(model)?;
+    kind.build(name)
+}
+
+/// Lists the video models of a provider (`comfy-serve`), with its settings from environment
+/// variables as in [`from_model`].
+///
+/// ```rust,no_run
+/// # async fn run() -> Result<(), agentai_video::VideoError> {
+/// for model in agentai_video::provider::list_models("comfy-serve").await? {
+///     println!("{} {:?}", model.model, model.durations);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub async fn list_models(provider: &str) -> Result<Vec<VideoModel>, VideoError> {
+    let kind = ProviderKind::from_name(provider)
+        .ok_or_else(|| VideoError::UnknownProvider(provider.to_string()))?;
+    kind.build("")?.list_models().await
+}
+
 #[cfg(test)]
-// TODO(task 3): drop the allow once the provider tests use the mock.
-#[allow(dead_code)]
 pub(crate) mod tests {
     use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse};
     use async_trait::async_trait;
@@ -345,6 +396,8 @@ pub(crate) mod tests {
             self.0.requests.lock().unwrap()[index].clone()
         }
 
+        // TODO(task 4): used by the OpenRouter tests.
+        #[allow(dead_code)]
         pub(crate) fn request_count(&self) -> usize {
             self.0.requests.lock().unwrap().len()
         }
@@ -370,6 +423,17 @@ pub(crate) mod tests {
 
     pub(crate) fn body_json(request: &HttpRequest) -> Value {
         serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_prefix_selects_the_provider_and_is_required() {
+        assert_eq!(
+            resolve("comfy-serve::wan/2.2").unwrap(),
+            (ProviderKind::ComfyServe, "wan/2.2")
+        );
+        for model in ["wan", "comfy::wan", "other::wan"] {
+            assert!(matches!(resolve(model), Err(VideoError::UnknownProvider(m)) if m == model));
+        }
     }
 
     #[test]

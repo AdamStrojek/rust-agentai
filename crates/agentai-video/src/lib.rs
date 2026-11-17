@@ -25,5 +25,5 @@ pub mod provider;
 pub use agentai_core::message::Media;
 pub use provider::{
     JobStatus, VideoError, VideoInputKind, VideoInputs, VideoJob, VideoModel, VideoProvider,
-    VideoReferences, VideoRequest,
+    VideoReferences, VideoRequest, from_model, list_models,
 };
