@@ -11,6 +11,7 @@ use thiserror::Error;
 pub enum Method {
     Get,
     Post,
+    Delete,
 }
 
 /// A request sent with a [`HttpClient`]. The body is always plain bytes, so a client only
@@ -43,6 +44,11 @@ impl HttpRequest {
     /// Creates a `POST` request.
     pub fn post(url: impl Into<String>) -> Self {
         Self::new(Method::Post, url)
+    }
+
+    /// Creates a `DELETE` request.
+    pub fn delete(url: impl Into<String>) -> Self {
+        Self::new(Method::Delete, url)
     }
 
     /// Adds a header.
@@ -229,7 +235,8 @@ pub struct Multipart {
 #[derive(Debug, Clone, PartialEq)]
 struct FormPart {
     name: String,
-    file: Option<(String, String)>,
+    filename: Option<String>,
+    content_type: Option<String>,
     data: Vec<u8>,
 }
 
@@ -243,7 +250,8 @@ impl Multipart {
     pub fn with_text(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.parts.push(FormPart {
             name: name.into(),
-            file: None,
+            filename: None,
+            content_type: None,
             data: value.into().into_bytes(),
         });
         self
@@ -259,10 +267,26 @@ impl Multipart {
     ) -> Self {
         self.parts.push(FormPart {
             name: name.into(),
-            file: Some((filename.into(), content_type.into())),
+            filename: Some(filename.into()),
+            content_type: Some(content_type.into()),
             data: data.into(),
         });
         self
+    }
+
+    /// Adds a field with a JSON value (`Content-Type: application/json`, no filename).
+    pub fn with_json(
+        mut self,
+        name: impl Into<String>,
+        value: &impl Serialize,
+    ) -> Result<Self, HttpError> {
+        self.parts.push(FormPart {
+            name: name.into(),
+            filename: None,
+            content_type: Some("application/json".into()),
+            data: serde_json::to_vec(value).map_err(HttpError::Json)?,
+        });
+        Ok(self)
     }
 
     /// Returns the `Content-Type` header value and the body.
@@ -272,19 +296,16 @@ impl Multipart {
         for part in self.parts {
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             let name = escape(&part.name);
-            match part.file {
-                Some((filename, content_type)) => body.extend_from_slice(
-                    format!(
-                        "Content-Disposition: form-data; name=\"{name}\"; filename=\"{}\"\r\n\
-                         Content-Type: {content_type}\r\n\r\n",
-                        escape(&filename)
-                    )
-                    .as_bytes(),
-                ),
-                None => body.extend_from_slice(
-                    format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
-                ),
+            let mut head = format!("Content-Disposition: form-data; name=\"{name}\"");
+            if let Some(filename) = &part.filename {
+                head.push_str(&format!("; filename=\"{}\"", escape(filename)));
             }
+            head.push_str("\r\n");
+            if let Some(content_type) = &part.content_type {
+                head.push_str(&format!("Content-Type: {content_type}\r\n"));
+            }
+            head.push_str("\r\n");
+            body.extend_from_slice(head.as_bytes());
             body.extend_from_slice(&part.data);
             body.extend_from_slice(b"\r\n");
         }
@@ -329,6 +350,22 @@ pub use reqwest::ReqwestClient;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multipart_json_part_has_a_content_type_and_no_filename() {
+        let form = Multipart::new()
+            .with_json("request", &serde_json::json!({"model": "m"}))
+            .unwrap()
+            .with_file("image", "a.png", "image/png", vec![1u8]);
+        let (_, body) = form.into_body();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains(
+            "Content-Disposition: form-data; name=\"request\"\r\nContent-Type: application/json\r\n\r\n{\"model\":\"m\"}\r\n"
+        ));
+        assert!(
+            body.contains("name=\"image\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n")
+        );
+    }
 
     #[test]
     fn error_for_status_reads_every_error_shape() {
