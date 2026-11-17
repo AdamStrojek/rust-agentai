@@ -36,7 +36,7 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
-#### 0.6.1 - Video generation
+#### 0.7.0 - Video generation
 
 - **Video generation**: the new [`agentai-video`](https://docs.rs/agentai-video) crate has
   `from_model("comfy-serve::wan-2.2")?` (or `openrouter::<model>`), which gives a `VideoProvider`.
@@ -48,6 +48,11 @@ This library is under heavy development. The interface may change at any time wi
   inputs a model accepts, where the provider says so. comfy-serve jobs can be cancelled.
 - OpenRouter's request format follows its public guide and was not verified against a live key.
 - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms.
+
+**Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order.
+Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#060--070-YYYY-MM-DD)
+before upgrading.
 
 #### 0.6.0 - Text-to-speech and voice cloning
 
