@@ -4,6 +4,7 @@
 //! submodule implements it for one API.
 
 pub mod elevenlabs;
+pub mod fishaudio;
 pub mod omlx;
 pub mod openai;
 
@@ -90,9 +91,12 @@ pub(crate) fn extension_for(content_type: &str) -> &str {
 pub struct SpeechRequest {
     /// The text to speak.
     pub text: String,
-    /// The voice. Falls back to `default_voice` when `None`.
-    pub voice: Option<Voice>,
-    /// Voice used when `voice` is `None`, or when `voice` is a description on a provider that
+    /// The voices, in the order of the speakers. A provider that speaks with one voice only
+    /// returns [`AudioError::Unsupported`] for more than one. With several voices the text marks
+    /// who speaks in the provider's syntax, for example `<|speaker:0|>` for Fish Audio. Falls
+    /// back to `default_voice` when empty.
+    pub voices: Vec<Voice>,
+    /// Voice used when `voices` is empty, or when the voice is a description on a provider that
     /// needs a base voice.
     pub default_voice: Option<Voice>,
     /// Output format. Not sent when `None`.
@@ -105,6 +109,9 @@ pub struct SpeechRequest {
     pub instructions: Option<String>,
     /// File name of the audio, set as [`Media::name`]. Never sent to the provider.
     pub name: Option<String>,
+    /// Asks for the time of every word in [`SpeechResponse::timestamps`]. A provider that
+    /// cannot give them returns [`AudioError::Unsupported`].
+    pub timestamps: bool,
 }
 
 impl SpeechRequest {
@@ -112,19 +119,26 @@ impl SpeechRequest {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            voice: None,
+            voices: Vec::new(),
             default_voice: None,
             format: None,
             speed: None,
             language: None,
             instructions: None,
             name: None,
+            timestamps: false,
         }
     }
 
-    /// Sets the voice.
+    /// Adds a voice after the voices already set.
     pub fn with_voice(mut self, voice: Voice) -> Self {
-        self.voice = Some(voice);
+        self.voices.push(voice);
+        self
+    }
+
+    /// Sets the voices, in the order of the speakers.
+    pub fn with_voices(mut self, voices: Vec<Voice>) -> Self {
+        self.voices = voices;
         self
     }
 
@@ -163,6 +177,36 @@ impl SpeechRequest {
         self.name = Some(name.into());
         self
     }
+
+    /// Sets whether to ask for the time of every word.
+    pub fn with_timestamps(mut self, timestamps: bool) -> Self {
+        self.timestamps = timestamps;
+        self
+    }
+
+    /// Fails for a request with timestamps, for providers that cannot give them.
+    pub(crate) fn without_timestamps(&self) -> Result<(), AudioError> {
+        if self.timestamps {
+            Err(AudioError::Unsupported("word timestamps"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The voice of the request, for providers that speak with one voice only.
+    pub(crate) fn request_voice(&self) -> Result<Option<&Voice>, AudioError> {
+        match self.voices.as_slice() {
+            [] => Ok(None),
+            [voice] => Ok(Some(voice)),
+            _ => Err(AudioError::Unsupported("more than one voice")),
+        }
+    }
+
+    /// The voice of the request, else the default voice, for providers that speak with one
+    /// voice only.
+    pub(crate) fn single_voice(&self) -> Result<Option<&Voice>, AudioError> {
+        Ok(self.request_voice()?.or(self.default_voice.as_ref()))
+    }
 }
 
 /// The spoken audio.
@@ -175,6 +219,8 @@ pub struct SpeechResponse {
     pub id: Option<String>,
     /// Sample rate in Hz, when known. Matters for headerless PCM.
     pub sample_rate: Option<u32>,
+    /// The time of every word, when the request asked for it.
+    pub timestamps: Option<Vec<WordTimestamp>>,
 }
 
 impl SpeechResponse {
@@ -184,6 +230,7 @@ impl SpeechResponse {
             audio,
             id: None,
             sample_rate: None,
+            timestamps: None,
         }
     }
 
@@ -197,6 +244,35 @@ impl SpeechResponse {
     pub fn with_sample_rate(mut self, sample_rate: u32) -> Self {
         self.sample_rate = Some(sample_rate);
         self
+    }
+
+    /// Sets the time of every word.
+    pub fn with_timestamps(mut self, timestamps: Vec<WordTimestamp>) -> Self {
+        self.timestamps = Some(timestamps);
+        self
+    }
+}
+
+/// When a word is spoken, in seconds from the start of the audio.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct WordTimestamp {
+    /// The word, as the provider split the text.
+    pub text: String,
+    /// Start in seconds.
+    pub start: f64,
+    /// End in seconds.
+    pub end: f64,
+}
+
+impl WordTimestamp {
+    /// Creates a timestamp of a word.
+    pub fn new(text: impl Into<String>, start: f64, end: f64) -> Self {
+        Self {
+            text: text.into(),
+            start,
+            end,
+        }
     }
 }
 
@@ -386,6 +462,7 @@ pub trait SpeechProvider: Send + Sync + 'static {
 enum ProviderKind {
     OpenAi,
     ElevenLabs,
+    FishAudio,
     Omlx,
 }
 
@@ -394,6 +471,7 @@ impl ProviderKind {
         match name {
             "openai" => Some(Self::OpenAi),
             "elevenlabs" => Some(Self::ElevenLabs),
+            "fishaudio" => Some(Self::FishAudio),
             "omlx" => Some(Self::Omlx),
             _ => None,
         }
@@ -403,6 +481,7 @@ impl ProviderKind {
         Ok(match self {
             Self::OpenAi => Box::new(openai::OpenAiSpeechProvider::from_env(model)?),
             Self::ElevenLabs => Box::new(elevenlabs::ElevenLabsProvider::from_env(model)?),
+            Self::FishAudio => Box::new(fishaudio::FishAudioProvider::from_env(model)?),
             Self::Omlx => Box::new(omlx::OmlxProvider::from_env(model)?),
         })
     }
@@ -425,13 +504,14 @@ fn resolve(model: &str) -> Result<(ProviderKind, &str), AudioError> {
 
 /// Creates the provider for a model name, with its settings from environment variables.
 ///
-/// The provider comes from a `provider::` prefix (`openai::`, `elevenlabs::`, `omlx::`), for
-/// example `omlx::mlx-community/VoxCPM2-8bit`, or, for well-known names (`tts-1*`,
+/// The provider comes from a `provider::` prefix (`openai::`, `elevenlabs::`, `fishaudio::`,
+/// `omlx::`), for example `omlx::mlx-community/VoxCPM2-8bit` or `fishaudio::drama-3`, or, for well-known names (`tts-1*`,
 /// `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the prefix for other models behind
 /// an OpenAI-compatible API. See each provider's `from_env` for its variables.
 ///
 /// An `omlx::` provider made here has no voice store, so it cannot clone voices or use
-/// [`Voice::Id`] of cloned voices. Build it with [`OmlxProvider::with_voice_store`](omlx::OmlxProvider::with_voice_store)
+/// [`Voice::Id`] of cloned voices; a `fishaudio::` one uses only voices of the Fish Audio
+/// account. Build it with [`OmlxProvider::with_voice_store`](omlx::OmlxProvider::with_voice_store)
 /// and pass it to [`SpeechGenerator::from_provider`](crate::SpeechGenerator::from_provider)
 /// instead.
 pub fn from_model(model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
@@ -439,7 +519,7 @@ pub fn from_model(model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
     kind.build(name)
 }
 
-/// Lists the speech models of a provider (`openai` or `elevenlabs`; `omlx` returns
+/// Lists the speech models of a provider (`openai` or `elevenlabs`; `fishaudio` and `omlx` return
 /// [`AudioError::Unsupported`]), with its settings from environment variables as in
 /// [`from_model`].
 ///
@@ -522,6 +602,10 @@ mod tests {
             (ProviderKind::ElevenLabs, "x")
         );
         assert_eq!(
+            resolve("fishaudio::drama-3").unwrap(),
+            (ProviderKind::FishAudio, "drama-3")
+        );
+        assert_eq!(
             resolve("eleven_v4").unwrap(),
             (ProviderKind::ElevenLabs, "eleven_v4")
         );
@@ -541,6 +625,35 @@ mod tests {
             resolve("nope::x"),
             Err(AudioError::UnknownProvider(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn simple_providers_reject_several_voices_and_timestamps() {
+        use test_support::MockHttp;
+        let http = MockHttp::new(vec![]);
+        let providers: Vec<Box<dyn SpeechProvider>> = vec![
+            Box::new(
+                openai::OpenAiSpeechProvider::new("tts-1", "k", "http://x")
+                    .with_client(http.clone()),
+            ),
+            Box::new(
+                elevenlabs::ElevenLabsProvider::new("m", "k", "http://x").with_client(http.clone()),
+            ),
+            Box::new(omlx::OmlxProvider::new("m", "", "http://x").with_client(http.clone())),
+        ];
+        let several = SpeechRequest::new("hi")
+            .with_voice(Voice::id("a"))
+            .with_voice(Voice::id("b"));
+        let timestamps = SpeechRequest::new("hi")
+            .with_voice(Voice::id("a"))
+            .with_timestamps(true);
+        for provider in providers {
+            for request in [several.clone(), timestamps.clone()] {
+                let err = provider.generate(request).await.unwrap_err();
+                assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
+            }
+        }
+        assert!(http.requests.lock().unwrap().is_empty());
     }
 
     #[test]

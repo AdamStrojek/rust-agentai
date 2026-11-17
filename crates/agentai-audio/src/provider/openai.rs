@@ -150,7 +150,7 @@ impl OpenAiSpeechProvider {
 
     /// The voice field and the instructions of a request.
     fn resolve(&self, request: &SpeechRequest) -> Result<(WireVoice, Option<String>), AudioError> {
-        let description = match &request.voice {
+        let description = match request.request_voice()? {
             Some(Voice::Description(text)) => Some(text.clone()),
             Some(voice @ Voice::Auto(text)) if self.id_voice(voice).is_none() => Some(text.clone()),
             Some(voice) => {
@@ -213,6 +213,7 @@ impl SpeechProvider for OpenAiSpeechProvider {
     }
 
     async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+        request.without_timestamps()?;
         let (voice, instructions) = self.resolve(&request)?;
         let body = SpeechBody {
             model: &self.model,
