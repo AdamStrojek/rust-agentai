@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.6.0 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.6.1 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -538,6 +538,35 @@ tools.add_tool(
 - oMLX has no voice library: it clones from a sample sent with every request. The provider keeps samples in a `VoiceStore` that you set explicitly, so `omlx::` through the model name cannot clone: `SpeechGenerator::from_provider(OmlxProvider::from_env(model)?.with_voice_store(MemoryVoiceStore::new()))`. `MemoryVoiceStore` is lost when the program ends; implement `VoiceStore` to keep samples. `VoiceStore::get` receives arbitrary untrusted text (what the model wrote as a voice), so a store backed by files or a database must return `Ok(None)` for anything that is not a valid ID.
 - Listing models: `agentai_audio::provider::list_models("openai" | "elevenlabs").await?` (`fishaudio` and `omlx` return `Unsupported`) or `generator.list_models().await?`; voices: `generator.list_voices().await?`.
 
+### Video (`agentai-video` crate)
+
+Video generation is a separate crate: `cargo add agentai-video`. It has no agent tools and no waiting helper: video APIs are asynchronous, so you submit a job and poll it yourself.
+
+```rust
+use std::time::Duration;
+use agentai_video::{JobStatus, VideoRequest, from_model};
+
+let provider = from_model("comfy-serve::wan-2.2")?; // reads COMFY_SERVE_BASE_URL
+let job = provider
+    .submit(VideoRequest::new("A lighthouse at dawn").with_duration(5))
+    .await?; // VideoJob { id, data }, serializable
+loop {
+    match provider.status(&job).await? {
+        JobStatus::Completed => break,
+        JobStatus::Failed(message) => anyhow::bail!(message),
+        JobStatus::Gone => anyhow::bail!("the job is gone"),
+        _ => tokio::time::sleep(Duration::from_secs(5)).await, // Queued, Running
+    }
+}
+let video = provider.download(&job).await?; // agentai_video::Media (base64 or URL)
+```
+
+- Inputs: `VideoRequest::with_inputs(VideoInputs::..)`: `None` (text-to-video, the default), `Frames { first, last }` (image-to-video) or `References(VideoReferences::new().with_image(..).with_video(..).with_audio(..))`. Frames and references exclude each other. `Media::from_bytes("image/png", &bytes)` builds an input from a file. Options are `with_duration` (seconds), `with_resolution`, `with_aspect_ratio` and `with_seed`; unset ones are not sent and values are not checked by the crate, the API reports what it rejects.
+- A stored `VideoJob` can be given back after a restart, also to a new provider (`status`, `download` and `cancel` need no model, so an empty model name works).
+- Providers are in `agentai_video::provider`; `from_model` needs the `provider::` prefix. `comfy-serve` (`/api/v1/videos`, `ComfyServeVideoProvider::new(model, api_key, base_url)`) reads `COMFY_SERVE_BASE_URL` (required) and `COMFY_SERVE_API_KEY` (optional), uploads files as multipart, accepts first and last frames and image, video and audio references, and supports `cancel` (`supports_cancel()`). `openrouter` reads `OPENROUTER_API_KEY` and optionally `OPENROUTER_BASE_URL`, sends images as URLs or data URLs, accepts frames and image references only and has no cancel (`VideoError::Unsupported`); its request format follows OpenRouter's public guide and was not verified against a live key. Implement `provider::VideoProvider` (`submit`, `status`, `download`, optionally `model`, `cancel`, `list_models`) for other APIs. Use your own HTTP client with `with_http_client(ReqwestClient::from_client(client))`.
+- Listing models: `agentai_video::provider::list_models("comfy-serve" | "openrouter").await?` returns `Vec<VideoModel>` with `model` (ready for `from_model`), `id`, `name`, `durations`, `resolutions`, `aspect_ratios` and `inputs` (`VideoInputKind`). `None` means the provider does not say, not "unsupported"; `Some(vec![])` means nothing to choose.
+- Files travel in memory as `Media`; there are no retries and no timeouts of the crate's own.
+
 ### MCP servers (`mcp-client`)
 
 `McpToolBox` exposes all tools of an MCP server. It is built on the official MCP Rust SDK, `rmcp`. It either starts the server as a child process and talks to it over stdio, or connects to a running server over Streamable HTTP.
@@ -568,7 +597,7 @@ The server's tool list is read once, when the toolbox is created.
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.6.0
+## Limits in 0.6.1
 
 - Tool results are text only; a tool cannot return an image to the model.
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.

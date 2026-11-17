@@ -31,9 +31,23 @@ This library is under heavy development. The interface may change at any time wi
 - **Images for vision models**: Send text and images together in a `Prompt`, by URL or from bytes. Plain text prompts work as before.
 - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with `ToolOutput`.
 - **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, oMLX) and clones voices from your code.
+- **Video generation**: The [`agentai-video`](https://docs.rs/agentai-video) crate submits video jobs, follows them and downloads the result (comfy-serve, OpenRouter), from text, frames or reference files.
 - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New
+
+#### 0.6.1 - Video generation
+
+- **Video generation**: the new [`agentai-video`](https://docs.rs/agentai-video) crate has
+  `from_model("comfy-serve::wan-2.2")?` (or `openrouter::<model>`), which gives a `VideoProvider`.
+  `submit` returns a `VideoJob`, you poll `status` until `JobStatus::Completed` and `download` the
+  video as a `Media`. A `VideoJob` is serializable, so you can store it and follow it after a restart.
+- **Text, frames or references**: `VideoRequest` takes text only, a first and/or last frame, or
+  reference images, videos and audio (comfy-serve; OpenRouter takes images only).
+- **Models**: `list_models("comfy-serve")` returns the durations, resolutions, aspect ratios and
+  inputs a model accepts, where the provider says so. comfy-serve jobs can be cancelled.
+- OpenRouter's request format follows its public guide and was not verified against a live key.
+- Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms.
 
 #### 0.6.0 - Text-to-speech and voice cloning
 
