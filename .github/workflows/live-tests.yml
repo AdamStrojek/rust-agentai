@@ -6,8 +6,9 @@ name: Live Tests
 # `pull_request` from a fork gets no secrets, so this uses `pull_request_target`, which
 # has them. That means the PR's code runs with the API keys: label a PR only after
 # reading its diff. The run tests the PR merged into the current base branch (like
-# CI) and stops if its head is not the labeled commit, so later pushes need a new label (remove it and add it
-# again). It uses no cache, so the PR's code cannot poison the base branch's cache.
+# CI) and stops if its head is not the labeled commit, so later pushes need a new
+# label (remove it and add it again). It uses no cache, so the PR's code cannot poison
+# the base branch's cache.
 on:
   pull_request_target:
     types: [labeled]
