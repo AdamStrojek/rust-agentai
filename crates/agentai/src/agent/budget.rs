@@ -34,7 +34,9 @@ impl RunBudget {
 
     /// Refuses the next model call when the kill switch is on or nothing is left to spend.
     pub(super) fn check(&self) -> Result<(), AgentError> {
-        // `reserve` reports the kill switch and a cap that is already crossed
+        // `reserve` reports the kill switch and a cap that is already crossed. A zero estimate
+        // holds nothing once the reservation is dropped; the budget tests check that
+        // `reserved_usd()` stays at 0 and that the kill switch stops a run.
         self.budget
             .reserve(0.0)
             .map(drop)

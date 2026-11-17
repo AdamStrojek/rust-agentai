@@ -50,6 +50,8 @@ jobs:
         run: |
           cargo check -p agentai --no-default-features --features rustls-aws-lc,macros
           cargo check -p agentai --no-default-features --features native-tls,mcp-client,tools-web
+      - name: Clippy with the budget feature
+        run: cargo clippy -p agentai --features budget -- -D warnings
 
   test:
     name: Test
@@ -80,6 +82,8 @@ jobs:
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           RUST_BACKTRACE: 1
         run: cargo test
+      - name: Run library tests with the budget feature
+        run: cargo test -p agentai --lib --features budget
 
   run-examples:
     if:

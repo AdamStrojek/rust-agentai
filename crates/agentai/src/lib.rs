@@ -278,7 +278,7 @@ pub mod agent;
 mod convert;
 pub mod listener;
 #[doc(inline)]
-pub use agentai_core::{message, prompt, tls};
+pub use agentai_core::{history, message, prompt, tls};
 pub mod tool;
 
 // These modules will be enabled only when generating documentation.
@@ -290,6 +290,7 @@ pub mod structured_output;
 
 #[allow(unused_imports)]
 pub use agent::*;
+pub use history::{HistoryProcessor, HistoryPruning};
 pub use message::{Media, MediaSource, Message, Part, ProviderData, Role, ToolCall, ToolResponse};
 pub use prompt::{IntoPrompt, Prompt};
 

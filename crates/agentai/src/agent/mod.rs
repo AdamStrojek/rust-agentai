@@ -8,6 +8,7 @@
 //!
 //! To read more about tool look into [crate::tool]
 
+use crate::history::{HistoryError, HistoryProcessor};
 use crate::prompt::IntoPrompt;
 use crate::tool::{ToolBox, ToolError};
 use genai::Client;
@@ -69,6 +70,9 @@ pub enum AgentError {
     /// [`AgentStream::print_to`] failed.
     #[error("event listener failed: {0}")]
     Listener(#[source] crate::listener::ListenerError),
+    /// A [`HistoryProcessor`] failed, see [`Agent::with_history_processor`].
+    #[error("history processor failed: {0}")]
+    History(#[source] HistoryError),
     /// The loop ended without a final answer. Holds the number of iterations.
     #[error("no final answer after {0} iterations")]
     MaxIterationsReached(usize),
@@ -203,6 +207,9 @@ pub struct Agent {
     /// Prices used to charge the budget, `None` for the table built into `llm-budget`
     #[cfg(feature = "budget")]
     price_table: Option<Arc<llm_budget::PriceTable>>,
+
+    /// Change the messages before every model call, in order
+    history_processors: Vec<Arc<dyn HistoryProcessor>>,
 }
 
 impl Agent {
@@ -296,6 +303,7 @@ impl Agent {
             budget: None,
             #[cfg(feature = "budget")]
             price_table: None,
+            history_processors: Vec::new(),
         }
     }
 
@@ -308,6 +316,10 @@ impl Agent {
     }
 
     /// Sets the system prompt sent with every request. An empty system prompt is not sent.
+    ///
+    /// Anthropic rejects a history whose thinking was created with another system prompt:
+    /// after changing it, remove the reasoning from stored histories once with
+    /// [`Message::without_reasoning`](crate::Message::without_reasoning).
     pub fn with_system(mut self, system: impl Into<String>) -> Self {
         self.system = system.into().trim().to_string();
         self
@@ -355,8 +367,8 @@ impl Agent {
     /// at the price of the run's model in the table built into `llm-budget`, or in the table set
     /// with [`with_price_table`](Agent::with_price_table). Before every model call the run checks
     /// the budget and stops with [`AgentError::Budget`] when nothing is left or its kill switch is
-    /// on. A call that has been made is always booked, even when it crosses the limit, so the
-    /// budget matches the bill. [`AgentResult::cost_usd`] holds the cost of the run.
+    /// on. A completed call is always booked, even when it crosses the limit. A streamed
+    /// call that fails partway is not booked, because its usage is unknown. [`AgentResult::cost_usd`] holds the cost of the run.
     ///
     /// The budget is shared: keep a clone of the [`Arc`] to read the spend of all runs together,
     /// for example of a whole conversation, or to share one limit between several agents.
@@ -398,6 +410,37 @@ impl Agent {
     #[cfg(feature = "budget")]
     pub fn budget(&self) -> Option<&Arc<llm_budget::AgentBudget>> {
         self.budget.as_ref()
+    }
+
+    /// Adds a [`HistoryProcessor`] that changes the messages before every model call, for
+    /// example to stop sending images and reasoning of earlier turns again with
+    /// [`HistoryPruning`](crate::HistoryPruning). Processors run in the order they were added.
+    /// Only the request changes: your history and [`AgentResult::new_messages`] keep
+    /// everything. A failing processor stops the run with [`AgentError::History`].
+    ///
+    /// Processors get their own copy of the messages before every model call, media included,
+    /// so a long history with many images is copied once per call.
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, HistoryPruning, Message};
+    ///
+    /// # fn main() -> Result<(), agentai::AgentError> {
+    /// let agent = Agent::new("claude-haiku-5-5", "You are a useful assistant")?
+    ///     .with_history_processor(HistoryPruning::default().with_media(true).with_reasoning(true))
+    ///     // A closure works too
+    ///     .with_history_processor(|messages: Vec<Message>| messages);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_history_processor(self, processor: impl HistoryProcessor + 'static) -> Self {
+        self.with_history_processor_arc(Arc::new(processor))
+    }
+
+    /// Same as [`with_history_processor`](Agent::with_history_processor), for a processor you
+    /// already share in an [`Arc`].
+    pub fn with_history_processor_arc(mut self, processor: Arc<dyn HistoryProcessor>) -> Self {
+        self.history_processors.push(processor);
+        self
     }
 
     /// Returns the system prompt sent with every request. It is empty when none is sent.
