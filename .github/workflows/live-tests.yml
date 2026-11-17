@@ -28,6 +28,8 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           persist-credentials: false
           fetch-depth: 2
+          # Running the fork's code is the point of this workflow; the label is the review.
+          allow-unsafe-pr-checkout: true
       - name: Check that the labeled commit is tested
         env:
           LABELED_SHA: ${{ github.event.pull_request.head.sha }}
