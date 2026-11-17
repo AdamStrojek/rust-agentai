@@ -1,0 +1,41 @@
+name: Live Tests
+
+# Adding the `live-tests` label to a pull request runs the full test suite, including
+# the examples that call a live LLM (CI skips them on pull requests).
+#
+# `pull_request` from a fork gets no secrets, so this uses `pull_request_target`, which
+# has them. That means the PR's code runs with the API keys: label a PR only after
+# reading its diff. The run tests the PR merged into the current base branch (like
+# CI), as it is when labeled, so later pushes need a new label (remove it and add it
+# again). It uses no cache, so the PR's code cannot poison the base branch's cache.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (live)
+    if: github.actor == 'AdamStrojek' && github.event.label.name == 'live-tests'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false
+      - name: Run tests
+        env:
+          AGENTAI_MODEL: claude-haiku-5-5
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          RUST_BACKTRACE: 1
+        run: cargo test
