@@ -127,6 +127,10 @@ pub struct AgentResult<D> {
     /// [`AgentEvent::DeferredTask`](super::AgentEvent::DeferredTask) from the stream (for
     /// example via [`Agent::run`], [`AgentStream::finish`] or [`AgentStream::listen`]).
     pub unstarted_deferred_tasks: Vec<DeferredTask>,
+    /// Cost in USD of all model calls of the run together, as charged to the
+    /// [budget](Agent::with_budget). `None` when the agent has no budget.
+    #[cfg(feature = "budget")]
+    pub cost_usd: Option<f64>,
 }
 
 /// Mode of an [`AgentRequest`] created by [`Agent::run`]: awaiting it returns a [`AgentResult`].
@@ -229,6 +233,14 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
             .model
             .or_else(|| agent.model.clone())
             .ok_or(AgentError::MissingModel)?;
+        #[cfg(feature = "budget")]
+        let budget = agent
+            .budget
+            .clone()
+            .map(|budget| {
+                super::budget::RunBudget::new(budget, agent.price_table.as_deref(), &model)
+            })
+            .transpose()?;
         let is_answer_string = TypeId::of::<String>() == TypeId::of::<D>();
         let run = ResolvedRun {
             client: agent.client.clone(),
@@ -246,6 +258,8 @@ impl<'a, D, M> AgentRequest<'a, D, M> {
                 Some(response_format::<D>()?)
             },
             deferred_tasks: options.deferred_tasks,
+            #[cfg(feature = "budget")]
+            budget,
         };
         Ok((run, self.history.to_vec(), self.prompt))
     }

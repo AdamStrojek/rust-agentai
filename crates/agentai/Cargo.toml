@@ -14,6 +14,7 @@ exclude = ["release-plz.toml", ".github"]
 
 [package.metadata.docs.rs]
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
+features = ["budget"]
 
 [dependencies]
 agentai-macros = { path = "../agentai-macros", version = "0.6", optional = true }
@@ -49,6 +50,7 @@ time-tz = { version = "2.0.0", optional = true }
 async-stream = "0.3.6"
 base64 = "0.23"
 futures-util = { version = "0.3.34", features = ["io"] }
+llm-budget = { version = "0.3.1", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.104"
@@ -100,3 +102,6 @@ macros = ["agentai-macros"]
 tools-buildin = ["macros", "time", "time-tz"]
 ## Enables support for [web tools](crate::tool::web)
 tools-web = ["macros"]
+## Enables dollar spend limits with [`llm-budget`](https://crates.io/crates/llm-budget): every model
+## call is charged to the budget set with `Agent::with_budget`
+budget = ["dep:llm-budget"]

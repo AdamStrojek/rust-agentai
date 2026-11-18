@@ -119,11 +119,7 @@ impl ElevenLabsProvider {
 
     /// The path segment of the voice: the request voice, else the default voice.
     fn voice_id<'a>(&self, request: &'a SpeechRequest) -> Result<&'a str, AudioError> {
-        let voice = request
-            .voice
-            .as_ref()
-            .or(request.default_voice.as_ref())
-            .ok_or(AudioError::MissingVoice)?;
+        let voice = request.single_voice()?.ok_or(AudioError::MissingVoice)?;
         match voice {
             Voice::Description(_) => Err(AudioError::Unsupported(
                 "voice descriptions with ElevenLabs",
@@ -197,6 +193,7 @@ impl SpeechProvider for ElevenLabsProvider {
     }
 
     async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+        request.without_timestamps()?;
         let voice = self.voice_id(&request)?;
         let output_format = match (&self.output_format, request.format) {
             (Some(over), _) => Some(over.as_str()),

@@ -50,6 +50,8 @@ jobs:
         run: |
           cargo check -p agentai --no-default-features --features rustls-aws-lc,macros
           cargo check -p agentai --no-default-features --features native-tls,mcp-client,tools-web
+      - name: Clippy with the budget feature
+        run: cargo clippy -p agentai --features budget -- -D warnings
 
   test:
     name: Test
@@ -79,7 +81,17 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           RUST_BACKTRACE: 1
-        run: cargo test
+        # The examples are doc tests that call a live LLM. On pull requests they run
+        # only after the `live-tests` label (live-tests.yml); everything else runs here.
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            cargo test
+          else
+            cargo test -- --skip examples::
+          fi
+      - name: Run library tests with the budget feature
+        run: cargo test -p agentai --lib --features budget
+
 
   run-examples:
     if:

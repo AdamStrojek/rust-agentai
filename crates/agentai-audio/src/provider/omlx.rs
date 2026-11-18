@@ -109,7 +109,7 @@ impl OmlxProvider {
     ) -> Result<(Option<StoredVoice>, Option<String>), AudioError> {
         let mut description = None;
         let mut cloned = None;
-        match request.voice.as_ref().or(request.default_voice.as_ref()) {
+        match request.single_voice()? {
             None => {}
             Some(Voice::Description(text)) => description = Some(text.clone()),
             Some(Voice::Id(id)) => {
@@ -175,6 +175,7 @@ impl SpeechProvider for OmlxProvider {
     }
 
     async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+        request.without_timestamps()?;
         let response_format = request.format.map(format_name);
         let (cloned, instructions) = self.resolve(&request).await?;
         let ref_audio = match cloned.as_ref().map(|voice| &voice.sample.source) {
