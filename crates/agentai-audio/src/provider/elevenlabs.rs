@@ -7,8 +7,9 @@
 
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, VoiceSource, audio_media,
+    VoiceInfo, VoicePreview, VoiceSource, audio_media,
 };
+use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient, percent_encode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -212,7 +213,53 @@ impl SpeechProvider for ElevenLabsProvider {
         true
     }
 
-    /// Clones a voice from the samples with `POST /v1/voices/add` and returns its ID.
+    fn supports_voice_design(&self) -> bool {
+        true
+    }
+
+    /// Designs voices with `POST /v1/text-to-voice/design`. The API picks the number of
+    /// previews, so `count` is not used. Without `text` the API writes one itself. Keep a
+    /// preview by passing its `sample_id` to `create_voice`.
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        _count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let body = DesignBody {
+            voice_description: description,
+            text,
+            auto_generate_text: text.is_none().then_some(true),
+        };
+        let http = self
+            .authorize(HttpRequest::post(format!(
+                "{}/v1/text-to-voice/design",
+                self.base_url
+            )))
+            .with_json(&body)?;
+        let response = self.client.send(http).await?.error_for_status()?;
+        let designed: DesignResponse = response
+            .json()
+            .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
+        designed
+            .previews
+            .into_iter()
+            .map(|preview| {
+                let bytes = agentai_core::base64::decode(&preview.audio_base_64)
+                    .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
+                let audio = Media::from_bytes(preview.media_type, &bytes);
+                let result = VoicePreview::new(audio).with_sample_id(preview.generated_voice_id);
+                Ok(match designed.text.as_deref().or(text) {
+                    Some(text) => result.with_text(text),
+                    None => result,
+                })
+            })
+            .collect()
+    }
+
+    /// Clones a voice from the samples with `POST /v1/voices/add` and returns its ID. A
+    /// [`VoiceSource::SampleId`] saves a designed preview with `POST /v1/text-to-voice`; the
+    /// API requires a `description` for it.
     ///
     /// When the API replies with `requires_verification: true`, the voice exists but cannot
     /// speak until it is verified at ElevenLabs. `transcript` is not used.
@@ -222,8 +269,26 @@ impl SpeechProvider for ElevenLabsProvider {
         source: VoiceSource,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
-        let VoiceSource::Samples { samples, .. } = source else {
-            return Err(AudioError::Unsupported("saving a designed voice"));
+        let samples = match source {
+            VoiceSource::Samples { samples, .. } => samples,
+            VoiceSource::SampleId(generated_voice_id) => {
+                let body = SaveVoiceBody {
+                    voice_name: name,
+                    voice_description: description,
+                    generated_voice_id: &generated_voice_id,
+                };
+                let http = self
+                    .authorize(HttpRequest::post(format!(
+                        "{}/v1/text-to-voice",
+                        self.base_url
+                    )))
+                    .with_json(&body)?;
+                let response = self.client.send(http).await?.error_for_status()?;
+                let created: CreatedVoice = response
+                    .json()
+                    .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
+                return Ok(created.voice_id);
+            }
         };
         let samples = &samples[..];
         if samples.is_empty() {
@@ -308,6 +373,36 @@ impl SpeechProvider for ElevenLabsProvider {
             })
             .collect())
     }
+}
+
+#[derive(Serialize)]
+struct DesignBody<'a> {
+    voice_description: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_generate_text: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct DesignResponse {
+    previews: Vec<DesignPreview>,
+    text: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DesignPreview {
+    generated_voice_id: String,
+    audio_base_64: String,
+    media_type: String,
+}
+
+#[derive(Serialize)]
+struct SaveVoiceBody<'a> {
+    voice_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    voice_description: Option<&'a str>,
+    generated_voice_id: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -599,5 +694,76 @@ mod tests {
         let voices = provider(&http).list_voices().await.unwrap();
         assert_eq!(voices.len(), 2);
         assert_eq!(http.request_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn design_voice_returns_the_previews() {
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"previews": [{"generated_voice_id": "g1",
+                "audio_base_64": agentai_core::base64::encode(b"MP3"),
+                "media_type": "audio/mpeg", "duration_secs": 2.0, "language": "en"}],
+                "text": "Hello there"}),
+        )]);
+        let previews = provider(&http)
+            .design_voice("warm low voice", Some("Hello there"), 3)
+            .await
+            .unwrap();
+        let req = http.request(0);
+        assert_eq!(req.url, "https://api.test/v1/text-to-voice/design");
+        assert_eq!(req.header("xi-api-key"), Some("key"));
+        assert_eq!(
+            body_json(&req),
+            json!({"voice_description": "warm low voice", "text": "Hello there"})
+        );
+        assert_eq!(
+            previews,
+            [VoicePreview::new(Media::from_bytes("audio/mpeg", b"MP3"))
+                .with_text("Hello there")
+                .with_sample_id("g1")]
+        );
+    }
+
+    #[tokio::test]
+    async fn design_voice_without_text_auto_generates_it() {
+        let http = MockHttp::new(vec![json_response(200, json!({"previews": []}))]);
+        provider(&http).design_voice("warm", None, 1).await.unwrap();
+        assert_eq!(
+            body_json(&http.request(0)),
+            json!({"voice_description": "warm", "auto_generate_text": true})
+        );
+    }
+
+    #[tokio::test]
+    async fn create_voice_saves_a_designed_preview() {
+        let http = MockHttp::new(vec![
+            json_response(200, json!({"voice_id": "v9"})),
+            json_response(200, json!({"voice_id": "v10"})),
+        ]);
+        let id = provider(&http)
+            .create_voice(
+                "Narrator",
+                VoiceSource::SampleId("g1".into()),
+                Some("warm low voice"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(id, "v9");
+        let req = http.request(0);
+        assert_eq!(req.url, "https://api.test/v1/text-to-voice");
+        assert_eq!(req.header("xi-api-key"), Some("key"));
+        assert_eq!(
+            body_json(&req),
+            json!({"voice_name": "Narrator", "voice_description": "warm low voice",
+                   "generated_voice_id": "g1"})
+        );
+        provider(&http)
+            .create_voice("Narrator", VoiceSource::SampleId("g1".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            body_json(&http.request(1)),
+            json!({"voice_name": "Narrator", "generated_voice_id": "g1"})
+        );
     }
 }
