@@ -40,7 +40,7 @@
 //! **Breaking changes**: a voice is always an ID (voices given as a description, and the description flag of the
 //! `list_voices` tool, are removed), and `create_voice` takes a `VoiceSource`.
 //! Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
-//! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#070--071-yyyy-mm-dd)
+//! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#070--071-2026-11-18)
 //! before upgrading.
 //!
 //! #### 0.7.0 - Background tools, video generation, history processors, budgets
