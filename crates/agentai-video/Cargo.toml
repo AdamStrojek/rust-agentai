@@ -1,6 +1,6 @@
 [package]
 name = "agentai-video"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Adam Strojek <adam@strojek.info>"]
@@ -12,7 +12,7 @@ categories = ["multimedia::video"]
 keywords = ["generative-ai", "agent", "video-generation", "text-to-video"]
 
 [dependencies]
-agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+agentai-core = { path = "../agentai-core", version = "0.7", default-features = false, features = [
     "reqwest",
 ] }
 async-trait = "0.1.92"
@@ -22,7 +22,7 @@ thiserror = "2.0.21"
 document-features = { version = "0.2" }
 
 [dev-dependencies]
-agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+agentai-core = { path = "../agentai-core", version = "0.7", default-features = false, features = [
     "test-support",
 ] }
 anyhow = "1.0.104"

@@ -7,22 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.6.0...agentai-v0.7.0) - 2026-11-18
+
 ### Breaking changes
 
-See [MIGRATION.md](MIGRATION.md#060--070-yyyy-mm-dd) for migration steps from 0.6.0.
+See [MIGRATION.md](MIGRATION.md#060--070-2026-11-18) for migration steps from 0.6.0.
 
-- *(tool)* `ToolBox::call_tool` now returns `ToolResult<ToolReturn>` instead of `ToolResult<ToolOutput>`. Hand-written implementations and direct callers must handle the non-exhaustive `ToolReturn`.
-- *(agent)* Empty and whitespace-only prompts now return `AgentError::EmptyPrompt` when there are no finished deferred-task notifications; empty prompts are no longer added to `new_messages`.
+- *(tool)* `ToolBox::call_tool` returns `ToolResult<ToolReturn>` instead of `ToolResult<ToolOutput>`. Hand-written implementations and direct callers must handle the non-exhaustive `ToolReturn`; `#[toolbox]` methods need no change.
+- *(audio)* `SpeechRequest::voice: Option<Voice>` is now `voices: Vec<Voice>`, and calling `with_voice` twice adds a second voice instead of replacing the first.
+- *(agent)* An empty or whitespace-only prompt returns `AgentError::EmptyPrompt` when there are no finished deferred tasks to report, and is no longer added to `new_messages`.
+- *(image, audio)* A generated or uploaded file keeps the extension of its name only when it is a known image, audio or video extension; any other name gets the extension of its type (`my.picture` is saved as `my.picture.png`), and a type without a usable extension gives `bin`.
 
 ### New features
 
-- *(agent)* run deferred tool work in the background, receive unique task IDs, and resume runs with task handles.
-- *(tool)* add `TokioDeferredTaskToolBox` with tools to list, wait for, and retrieve deferred-task results.
+- *(agent)* run tools in the background: a tool returns `ToolReturn::deferred(message, future)`, the model gets the message and a task ID at once, and the agent tells the model when the task finishes, in the same run or a later one through `with_deferred_tasks` (by @sdi2200246)
+- *(video)* add the agentai-video crate: submit video jobs, poll their status and download the video with comfy-serve or OpenRouter, from text, first and last frames or reference images, videos and audio; `list_models` tells what a model accepts, and a serializable `VideoJob` can be followed after a restart (by @AdamStrojek)
+- *(tool)* add `TokioDeferredTaskToolBox` (feature `tokio`): spawns deferred tasks and gives the model `list_deferred_tasks`, `get_deferred_task` and `wait_deferred_task` (by @sdi2200246)
+- *(agent)* trim what is sent to the model with history processors: `Agent::with_history_processor` takes a `HistoryProcessor` or a closure, and the ready-made `HistoryPruning` drops images and reasoning from finished turns; your history stays complete (by @AdamStrojek)
+- *(agent)* send provider-specific headers and body fields with `ChatOptions::with_extra_header` and `with_extra_body` (by @AdamStrojek)
+- *(agent)* cap the dollar cost of runs with `Agent::with_budget` (feature `budget`, built on `llm-budget`); `AgentResult::cost_usd` reports what a run cost (by @Mattbusel)
+- *(audio)* add the Fish Audio provider (`fishaudio::<model>`): dialogues with several voices in one request, voice cloning, voices from a `VoiceStore`, and word timestamps with `SpeechRequest::with_timestamps` (by @AdamStrojek)
+- *(core)* add `agentai_core::mime` (MIME types to file extensions and back, re-exported by agentai-image, agentai-audio and agentai-video) and `Media::extension`, `Media::file_name` and `Media::to_url` (by @AdamStrojek)
 
 ### Changed
 
-- *(agent)* combine finished and cancelled deferred-task notifications found in one loop check into a single user message.
-- *(feature)* enable Tokio runtime, synchronization, time, and macro support through the `tokio` feature.
+- *(agent)* finished and cancelled deferred tasks found in one loop check are reported to the model in a single user message (by @sdi2200246)
+- *(feature)* the `tokio` feature now also enables Tokio's runtime, synchronization, time and macro support (by @sdi2200246)
+
+### Miscellaneous
+
+- *(core)* HTTP requests support `DELETE` and JSON parts in multipart forms; the media crates share the MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`) (by @AdamStrojek)
+- *(ci)* run LLM examples on pull requests only with the `live-tests` label, and review pull requests from forks (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+* @Mattbusel
+* @sdi2200246
 
 ## [0.6.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.5.0...agentai-v0.6.0) - 2026-11-09
 

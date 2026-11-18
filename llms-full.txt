@@ -29,10 +29,10 @@ All features are on by default, except `rustls-aws-lc`, `native-tls` and `budget
 | `tools-buildin` | `agentai::tool::buildin`: date, time, timezone and location tools (turns on `macros`) |
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
-| `tokio` | tokio integrations, such as `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
+| `tokio` | tokio integrations: `TokioDeferredTaskToolBox` for background tools and `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
 | `budget` | dollar spend limits with `llm-budget` (re-exported as `agentai::llm_budget`): `Agent::with_budget`, see Configuration |
 
-For a minimal build: `agentai = { version = "0.6", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` and `agentai-audio` have the same TLS features.
+For a minimal build: `agentai = { version = "0.7", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` and `agentai-audio` have the same TLS features.
 
 ## Creating an agent
 
@@ -117,6 +117,9 @@ pub struct AgentResult<D> {
     pub stop_reason: Option<StopReason>,   // why the model stopped writing the final answer
     pub reasoning_content: Option<String>, // reasoning returned with the final answer, if any
     pub iterations: usize,                 // number of model calls
+    pub deferred_tasks: Vec<DeferredTaskHandle>,     // background tasks still running (see Background tools)
+    pub unstarted_deferred_tasks: Vec<DeferredTask>, // background tasks nobody started yet
+    // pub cost_usd: Option<f64>,          // with the `budget` feature: cost of the run
 }
 ```
 
@@ -239,6 +242,9 @@ A run returns `AgentError` (`agentai::AgentError`, `#[non_exhaustive]`, built wi
 - `MaxTokens { raw }`: a reply was cut off by the token limit; `raw` is the truncated text (empty when the reply had only reasoning or tool calls, which are not run).
 - `MaxIterationsReached(usize)`: no final answer after that many rounds.
 - `Tool { tool, source }`: a tool failed with a fatal `ToolError`.
+- `EmptyPrompt`: the prompt is empty or only whitespace and no finished background task has to be reported.
+- `History(HistoryError)`: a history processor failed.
+- `Budget(BudgetError)` (feature `budget`): the budget is used up, its kill switch is on, or the model has no price.
 
 `AgentError::is_transient()` is true for `Llm` errors that may succeed on a retry: HTTP 408, 425, 429 and 5xx, timeouts and connection failures.
 
@@ -370,7 +376,7 @@ Rules:
 - The tool name is the method name. Override it with `#[tool(name = "...")]`. Names must be unique in the toolbox.
 - `#[tool(strict)]` (or `strict = true/false`, combinable as `#[tool(name = "x", strict)]`) marks the definition as strict: providers that support it (OpenAI and compatible APIs) make the model's arguments match the schema exactly. agentai adapts the schema for strict mode: every parameter is listed as required and `additionalProperties` is `false`, so use `Option<T>` for parameters the model may leave out (it then sends `null`). Not every provider or OpenRouter model supports strict tools, so it is opt-in.
 - The method's doc comment is the tool description. Parameter doc comments become parameter descriptions. Write them for the model: say when to use the tool and what each argument means.
-- Each tool must take `&self` and return `ToolResult` (text) or `ToolResult<ToolOutput>` (text and images, for example `Ok(ToolOutput::from_text("chart").with_media(Media::from_bytes("image/png", png)))`). Both `fn` and `async fn` work.
+- Each tool must take `&self` and return `ToolResult` (text), `ToolResult<ToolReturn>` (for background work, see Background tools) or `ToolResult<ToolOutput>` (text and images, for example `Ok(ToolOutput::from_text("chart").with_media(Media::from_bytes("image/png", png)))`). Both `fn` and `async fn` work.
 - A parameter of type `&ToolCall` (`call: &agentai::ToolCall`) gets the current call, for example `call.id`. It is not a model argument and stays out of the schema.
 - Every other parameter must implement `serde::Deserialize` and `schemars::JsonSchema`. Attributes on parameters, such as `#[serde(...)]` or `#[schemars(...)]`, are kept.
 - Methods without `#[tool]` (constructors, helpers) stay ordinary methods. An `impl` block with no `#[tool]` method does not compile.
@@ -387,7 +393,7 @@ Do this when tools are only known at run time or you need full control over erro
 
 ```rust
 use agentai::ToolCall;
-use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult};
+use agentai::tool::{Tool, ToolBox, ToolError, ToolResult, ToolReturn};
 use serde_json::json;
 
 struct EchoToolBox;
@@ -404,7 +410,7 @@ impl ToolBox for EchoToolBox {
             }))])
     }
 
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
         match call.name.as_str() {
             "echo" => match call.arguments["text"].as_str() {
                 Some(text) => Ok(text.into()),
@@ -416,7 +422,7 @@ impl ToolBox for EchoToolBox {
 }
 ```
 
-Build `Tool` with `Tool::new(name)` and its `with_*` methods (`with_description`, `with_schema`, `with_strict`); its `name` is a `String`. Return `ToolError::NotFound` for names you do not handle. `ToolBoxSet` relies on it.
+Text, `ToolOutput` and `Media` convert into `ToolReturn::Done` with `.into()`. Build `Tool` with `Tool::new(name)` and its `with_*` methods (`with_description`, `with_schema`, `with_strict`); its `name` is a `String`. Return `ToolError::NotFound` for names you do not handle. `ToolBoxSet` relies on it.
 
 ### Combining toolboxes
 
@@ -431,6 +437,40 @@ let agent = agent.with_toolbox(tools);
 ```
 
 `tools_definitions` joins the definitions of all toolboxes. `call_tool` tries the toolboxes in the order they were added and uses the first one that does not return `NotFound`. If two toolboxes define the same tool name, the first one wins.
+
+### Background tools
+
+A tool that takes long (a build, a render, a slow API) can answer at once and finish in the background. It returns `ToolReturn::deferred(message, future)`: the model gets `message` and a task ID right away, and the run goes on. The future (`Send + 'static`, output `ToolResult<ToolOutput>`) is not started by the agent, which stays runtime-neutral: you start it.
+
+```rust
+use agentai::tool::{toolbox, Tool, ToolBox, ToolError, ToolOutput, ToolResult, ToolReturn};
+use std::time::Duration;
+
+struct BuildToolBox;
+
+#[toolbox]
+impl BuildToolBox {
+    /// Starts a build in the background and returns its task ID.
+    #[tool]
+    fn start_build(
+        &self,
+        /// Target to build.
+        target: String,
+    ) -> ToolResult<ToolReturn> {
+        Ok(ToolReturn::deferred(format!("Build of {target} started."), async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(ToolOutput::from_text(format!("{target} built.")))
+        }))
+    }
+}
+```
+
+- With the `tokio` feature, `TokioDeferredTaskToolBox::new()` (`.with_default_timeout(Duration)`) spawns the tasks and gives the model `list_deferred_tasks`, `get_deferred_task(task_id)` and `wait_deferred_task(task_id, timeout_seconds)`. Add a clone of it to the agent's `ToolBoxSet` and keep another to call `spawn`; clones share one task table.
+- Streaming: `AgentEvent::DeferredTask(task)` hands you each new task; call `deferred.spawn(task)`. `RunEvent::DeferredTask { .. }` tells listeners about it.
+- `run`, `AgentStream::finish` and the listener helpers collect the tasks in `AgentResult::unstarted_deferred_tasks` instead; start them yourself (`task.run().await` on any runtime, or `spawn`).
+- Task IDs look like `<tool-call-id>-deferred-<n>` and are appended to the tool response. They are not the `ToolCall::id`.
+- When a task finishes during the run, the agent reports it to the model in a user message before the next model call (finished and cancelled tasks found together share one message). Tasks still running when the run ends are in `AgentResult::deferred_tasks` (`DeferredTaskHandle`: `is_finished()`, `is_cancelled()`, `take_result()`); pass them to the next run with `.with_deferred_tasks(handles)` so the model hears about them there. A run whose only content is such a notification can use an empty `Prompt::new()`; otherwise an empty prompt fails with `AgentError::EmptyPrompt`.
+- See the `tools_deferred` (streaming) and `tools_deferred_non_streaming` examples.
 
 ## Ready-made toolboxes
 
