@@ -21,26 +21,12 @@ use thiserror::Error;
 pub enum Voice {
     /// The ID of a preset or cloned voice, as the provider names it.
     Id(String),
-    /// A description of the voice to synthesize.
-    Description(String),
-    /// Let the provider decide whether the text is an ID or a description.
-    Auto(String),
 }
 
 impl Voice {
     /// Creates a voice from its ID.
     pub fn id(id: impl Into<String>) -> Self {
         Self::Id(id.into())
-    }
-
-    /// Creates a voice from a description.
-    pub fn description(description: impl Into<String>) -> Self {
-        Self::Description(description.into())
-    }
-
-    /// Creates a voice the provider resolves to an ID or a description.
-    pub fn auto(value: impl Into<String>) -> Self {
-        Self::Auto(value.into())
     }
 }
 
@@ -82,8 +68,7 @@ pub struct SpeechRequest {
     /// who speaks in the provider's syntax, for example `<|speaker:0|>` for Fish Audio. Falls
     /// back to `default_voice` when empty.
     pub voices: Vec<Voice>,
-    /// Voice used when `voices` is empty, or when the voice is a description on a provider that
-    /// needs a base voice.
+    /// Voice used when `voices` is empty.
     pub default_voice: Option<Voice>,
     /// Output format. Not sent when `None`.
     pub format: Option<AudioFormat>,
@@ -423,11 +408,6 @@ pub trait SpeechProvider: Send + Sync + 'static {
     ) -> Result<String, AudioError> {
         let _ = (name, samples, transcript, description);
         Err(AudioError::Unsupported("voice cloning"))
-    }
-
-    /// Returns `true` when [`Voice::Description`] works.
-    fn supports_voice_description(&self) -> bool {
-        false
     }
 
     /// Lists the voices of the API. The default implementation returns

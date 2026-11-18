@@ -135,14 +135,7 @@ impl FishAudioProvider {
         };
         let mut speakers = Vec::with_capacity(voices.len());
         for voice in voices {
-            let id = match voice {
-                Voice::Id(id) | Voice::Auto(id) => id,
-                Voice::Description(_) => {
-                    return Err(AudioError::Unsupported(
-                        "voice descriptions with Fish Audio",
-                    ));
-                }
-            };
+            let Voice::Id(id) = voice;
             let stored = match &self.store {
                 Some(store) => store.get(id).await?,
                 None => None,
@@ -659,7 +652,7 @@ mod tests {
             .generate(
                 SpeechRequest::new("<|speaker:0|>Hi<|speaker:1|>Hello")
                     .with_default_voice(Voice::id("unused"))
-                    .with_voices(vec![Voice::id("b"), Voice::auto("a")]),
+                    .with_voices(vec![Voice::id("b"), Voice::id("a")]),
             )
             .await
             .unwrap();
@@ -694,7 +687,7 @@ mod tests {
             .generate(
                 SpeechRequest::new("dialogue")
                     .with_voice(Voice::id("model-a"))
-                    .with_voice(Voice::auto("voice-1")),
+                    .with_voice(Voice::id("voice-1")),
             )
             .await
             .unwrap();
@@ -709,14 +702,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_voices_and_formats_send_nothing() {
+    async fn unsupported_formats_send_nothing() {
         let http = MockHttp::new(vec![]);
         let p = provider(&http);
-        let err = p
-            .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, AudioError::Unsupported(_)));
         for format in [AudioFormat::Flac, AudioFormat::Aac] {
             let err = p
                 .generate(SpeechRequest::new("hi").with_format(format))

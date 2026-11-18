@@ -28,8 +28,8 @@ pub enum SpeechToolOutput {
 ///
 /// The model names the audio (`name`), and the storage chooses the ID. What else the model
 /// gets is set with [`with_output`](SpeechToolBox::with_output). The voices it may use are
-/// limited with [`with_voices`](SpeechToolBox::with_voices); without it any voice ID or
-/// description goes to the provider.
+/// limited with [`with_voices`](SpeechToolBox::with_voices); without it any voice ID goes to
+/// the provider.
 ///
 /// ```rust,no_run
 /// # use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice};
@@ -58,8 +58,7 @@ impl SpeechToolBox {
     }
 
     /// Limits the voices to this list: `list_voices` returns it, and a voice the model gives
-    /// that is not in it is used as a description of the voice, or rejected when the provider
-    /// takes none. Use it whenever cloned voices exist: without it the model can use any stored
+    /// that is not in it is rejected. Use it whenever cloned voices exist: without it the model can use any stored
     /// or account voice by its ID.
     pub fn with_voices(mut self, voices: Vec<VoiceInfo>) -> Self {
         self.voices = Some(voices);
@@ -78,12 +77,10 @@ impl SpeechToolBox {
             return Ok(None);
         };
         let Some(voices) = &self.voices else {
-            return Ok(Some(Voice::auto(voice)));
+            return Ok(Some(Voice::id(voice)));
         };
         if voices.iter().any(|v| v.id == voice) {
             Ok(Some(Voice::id(voice)))
-        } else if self.generator.supports_voice_description() {
-            Ok(Some(Voice::description(voice)))
         } else {
             Err(ToolError::Failed(format!(
                 "'{voice}' is not a known voice ID; pick one from `list_voices`"
@@ -127,9 +124,7 @@ impl SpeechToolBox {
         /// Short file name for the new audio, for example `greeting`. The storage may add to it
         /// to make the ID unique.
         name: String,
-        /// A voice ID from `list_voices`, or, when `descriptions_supported` is true, a
-        /// description of the voice such as `warm low female`. Leave it out for the default
-        /// voice.
+        /// A voice ID from `list_voices`. Leave it out for the default voice.
         voice: Option<String>,
         /// How to speak, for example the tone, pace or emotion. Leave it out when not needed.
         instructions: Option<String>,
@@ -150,8 +145,7 @@ impl SpeechToolBox {
         self.output(response, voice_text)
     }
 
-    /// Lists the voices you can use in `generate_speech`, and tells whether a description of a
-    /// voice works there too.
+    /// Lists the voices you can use in `generate_speech`.
     #[tool]
     async fn list_voices(&self) -> ToolResult<String> {
         let voices = match &self.voices {
@@ -162,10 +156,7 @@ impl SpeechToolBox {
                 Err(err) => return Err(tool_error(err)),
             },
         };
-        let list = VoiceList {
-            voices: &voices,
-            descriptions_supported: self.generator.supports_voice_description(),
-        };
+        let list = VoiceList { voices: &voices };
         serde_json::to_string(&list).map_err(ToolError::fatal)
     }
 }
@@ -190,7 +181,6 @@ struct SpeechMetadata<'a> {
 #[derive(Serialize)]
 struct VoiceList<'a> {
     voices: &'a [VoiceInfo],
-    descriptions_supported: bool,
 }
 
 /// Rejected credentials cannot be fixed by the model; anything else (a missing voice, a
@@ -206,7 +196,6 @@ fn tool_error(err: AudioError) -> ToolError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::elevenlabs::ElevenLabsProvider;
     use crate::provider::omlx::OmlxProvider;
     use crate::provider::openai::OpenAiSpeechProvider;
     use agentai::tool::ToolReturn;
@@ -327,46 +316,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_voice_list_is_an_allowlist() {
-        let http = MockHttp::new(vec![audio(), audio()]);
+    async fn a_listed_voice_is_sent() {
+        let http = MockHttp::new(vec![audio()]);
         let generator =
             SpeechGenerator::from_provider(official(&http)).with_default_voice(Voice::id("nova"));
         let toolbox = SpeechToolBox::new(generator, MemoryStorage::new())
             .with_voices(vec![VoiceInfo::new("voice_ok", "OK")]);
 
-        for voice in ["voice_ok", "voice_hidden"] {
-            toolbox
-                .call_tool(&tool_call(
-                    "generate_speech",
-                    json!({"text": "hi", "name": "x", "voice": voice}),
-                ))
-                .await
-                .unwrap();
-        }
+        toolbox
+            .call_tool(&tool_call(
+                "generate_speech",
+                json!({"text": "hi", "name": "x", "voice": "voice_ok"}),
+            ))
+            .await
+            .unwrap();
 
-        let listed = body_json(&http.request(0));
-        assert_eq!(listed["voice"], json!({"id": "voice_ok"}));
-        let hidden = body_json(&http.request(1));
-        assert_eq!(hidden["voice"], json!("nova"));
-        assert_eq!(hidden["instructions"], json!("voice_hidden"));
+        assert_eq!(
+            body_json(&http.request(0))["voice"],
+            json!({"id": "voice_ok"})
+        );
     }
 
     #[tokio::test]
-    async fn an_unlisted_id_fails_without_descriptions() {
+    async fn an_unlisted_voice_fails() {
         let http = MockHttp::new(vec![]);
-        let provider = ElevenLabsProvider::new("eleven_v3", "key", "https://api.test")
-            .with_client(Arc::new(http.clone()));
-        let toolbox = toolbox(provider).with_voices(vec![VoiceInfo::new("abc", "Abc")]);
+        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("alloy", "Alloy")]);
 
         let result = toolbox
             .call_tool(&tool_call(
                 "generate_speech",
-                json!({"text": "hi", "name": "x", "voice": "hidden"}),
+                json!({"text": "hi", "name": "a", "voice": "warm low voice"}),
             ))
             .await;
 
         assert!(matches!(result, Err(ToolError::Failed(m)) if m.contains("list_voices")));
         assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn without_a_list_the_voice_is_an_id() {
+        let http = MockHttp::new(vec![audio()]);
+        let toolbox = toolbox(openai(&http, "http://local/v1"));
+
+        toolbox
+            .call_tool(&tool_call(
+                "generate_speech",
+                json!({"text": "hi", "name": "a", "voice": "af_bella"}),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(body_json(&http.request(0))["voice"], json!("af_bella"));
     }
 
     #[tokio::test]
@@ -424,7 +424,7 @@ mod tests {
         let output = call_done(&all, "list_voices", json!({})).await;
         let json = text_json(&output);
         assert_eq!(json["voices"].as_array().unwrap().len(), 13);
-        assert_eq!(json["descriptions_supported"], json!(true));
+        assert!(json.get("descriptions_supported").is_none());
 
         let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("a", "A")]);
         let output = call_done(&own, "list_voices", json!({})).await;
@@ -442,7 +442,7 @@ mod tests {
 
         let json = text_json(&output);
         assert_eq!(json["voices"], json!([]));
-        assert_eq!(json["descriptions_supported"], json!(true));
+        assert!(json.get("descriptions_supported").is_none());
     }
 
     #[test]
@@ -455,33 +455,5 @@ mod tests {
             .map(|t| t.name)
             .collect();
         assert_eq!(names, ["generate_speech", "list_voices"]);
-    }
-
-    #[tokio::test]
-    async fn an_unlisted_clone_is_a_description_not_a_reference() {
-        use crate::voice_store::{MemoryVoiceStore, StoredVoice, VoiceStore};
-        let http = MockHttp::new(vec![audio()]);
-        let store = MemoryVoiceStore::new();
-        let id = store
-            .save(StoredVoice::new(
-                "Adam",
-                agentai_core::message::Media::from_bytes("audio/wav", b"WAV"),
-            ))
-            .await
-            .unwrap();
-        let provider = OmlxProvider::new("model", "", "http://local/v1")
-            .with_client(Arc::new(http.clone()))
-            .with_voice_store(store);
-        let toolbox = toolbox(provider).with_voices(vec![VoiceInfo::new("other", "Other")]);
-        toolbox
-            .call_tool(&tool_call(
-                "generate_speech",
-                json!({"text": "hi", "name": "x", "voice": id}),
-            ))
-            .await
-            .unwrap();
-        let body = body_json(&http.request(0));
-        assert!(body.get("ref_audio").is_none());
-        assert_eq!(body["instructions"], json!(id));
     }
 }

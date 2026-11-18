@@ -112,23 +112,17 @@ impl ElevenLabsProvider {
     /// The path segment of the voice: the request voice, else the default voice.
     fn voice_id<'a>(&self, request: &'a SpeechRequest) -> Result<&'a str, AudioError> {
         let voice = request.single_voice()?.ok_or(AudioError::MissingVoice)?;
-        match voice {
-            Voice::Description(_) => Err(AudioError::Unsupported(
-                "voice descriptions with ElevenLabs",
-            )),
-            Voice::Id(id) | Voice::Auto(id) => {
-                let safe = !id.is_empty()
-                    && id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-                if safe {
-                    Ok(id)
-                } else {
-                    Err(AudioError::InvalidRequest(format!(
-                        "invalid ElevenLabs voice ID '{id}'"
-                    )))
-                }
-            }
+        let Voice::Id(id) = voice;
+        let safe = !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if safe {
+            Ok(id)
+        } else {
+            Err(AudioError::InvalidRequest(format!(
+                "invalid ElevenLabs voice ID '{id}'"
+            )))
         }
     }
 }
@@ -451,7 +445,7 @@ mod tests {
         let http = MockHttp::new(vec![]);
         for id in ["../../v1/voices/x", "a/b", "a b", "..", ""] {
             let err = provider(&http)
-                .generate(SpeechRequest::new("hi").with_voice(Voice::auto(id)))
+                .generate(SpeechRequest::new("hi").with_voice(Voice::id(id)))
                 .await
                 .unwrap_err();
             assert!(matches!(err, AudioError::InvalidRequest(_)), "{id}");
@@ -460,19 +454,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn descriptions_and_missing_voices() {
+    async fn a_missing_voice_is_an_error() {
         let http = MockHttp::new(vec![]);
-        let err = provider(&http)
-            .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, AudioError::Unsupported(_)));
         let err = provider(&http)
             .generate(SpeechRequest::new("hi"))
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::MissingVoice));
-        assert!(!provider(&http).supports_voice_description());
         assert_eq!(http.request_count(), 0);
     }
 

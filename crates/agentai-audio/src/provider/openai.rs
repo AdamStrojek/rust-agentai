@@ -122,56 +122,27 @@ impl OpenAiSpeechProvider {
         self.presets().find(|p| p.eq_ignore_ascii_case(name))
     }
 
-    /// The voice field for an ID or a text the provider routes; `None` for a description.
-    fn id_voice(&self, voice: &Voice) -> Option<WireVoice> {
-        match voice {
-            Voice::Description(_) => None,
-            Voice::Id(value) | Voice::Auto(value) if !self.official() => {
-                Some(WireVoice::Name(value.clone()))
-            }
-            Voice::Id(value) => Some(if let Some(preset) = self.preset(value) {
-                WireVoice::Name(preset.to_string())
-            } else if value.starts_with("voice_") {
-                WireVoice::Custom { id: value.clone() }
-            } else {
-                WireVoice::Name(value.clone())
-            }),
-            Voice::Auto(value) => {
-                if let Some(preset) = self.preset(value) {
-                    Some(WireVoice::Name(preset.to_string()))
-                } else if value.starts_with("voice_") {
-                    Some(WireVoice::Custom { id: value.clone() })
-                } else {
-                    None
-                }
-            }
+    /// The voice field for an ID.
+    fn id_voice(&self, voice: &Voice) -> WireVoice {
+        let Voice::Id(id) = voice;
+        if !self.official() {
+            WireVoice::Name(id.clone())
+        } else if let Some(preset) = self.preset(id) {
+            WireVoice::Name(preset.to_string())
+        } else if id.starts_with("voice_") {
+            WireVoice::Custom { id: id.clone() }
+        } else {
+            WireVoice::Name(id.clone())
         }
     }
 
     /// The voice field and the instructions of a request.
     fn resolve(&self, request: &SpeechRequest) -> Result<(WireVoice, Option<String>), AudioError> {
-        let description = match request.request_voice()? {
-            Some(Voice::Description(text)) => Some(text.clone()),
-            Some(voice @ Voice::Auto(text)) if self.id_voice(voice).is_none() => Some(text.clone()),
-            Some(voice) => {
-                let voice = self.id_voice(voice).ok_or(AudioError::MissingVoice)?;
-                return Ok((voice, request.instructions.clone()));
-            }
-            None => None,
-        };
-        let base = request
-            .default_voice
-            .as_ref()
-            .and_then(|voice| self.id_voice(voice))
+        let voice = request
+            .request_voice()?
+            .or(request.default_voice.as_ref())
             .ok_or(AudioError::MissingVoice)?;
-        let Some(description) = description else {
-            return Ok((base, request.instructions.clone()));
-        };
-        let instructions = match &request.instructions {
-            Some(extra) => format!("{description}\n{extra}"),
-            None => description,
-        };
-        Ok((base, Some(instructions)))
+        Ok((self.id_voice(voice), request.instructions.clone()))
     }
 }
 
@@ -235,12 +206,6 @@ impl SpeechProvider for OpenAiSpeechProvider {
             result = result.with_sample_rate(24000);
         }
         Ok(result)
-    }
-
-    /// Only the OpenAI API with a model after `tts-1` takes a description (sent as
-    /// instructions). On compatible servers [`Voice::Auto`] is an ID, so this is `false`.
-    fn supports_voice_description(&self) -> bool {
-        self.official() && !self.is_tts1()
     }
 
     /// The presets of the model. Only the OpenAI API has a fixed list; compatible servers
@@ -383,62 +348,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_routes_presets_ids_and_descriptions() {
-        let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi").with_voice(Voice::auto("Alloy")),
-        )
-        .await;
-        assert_eq!(body["voice"], json!("alloy"));
-
-        let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi").with_voice(Voice::auto("voice_9")),
-        )
-        .await;
-        assert_eq!(body["voice"], json!({"id": "voice_9"}));
-
-        let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi")
-                .with_voice(Voice::auto("warm low voice"))
-                .with_default_voice(Voice::id("onyx")),
-        )
-        .await;
-        assert_eq!(body["voice"], json!("onyx"));
-        assert_eq!(body["instructions"], json!("warm low voice"));
-    }
-
-    #[tokio::test]
-    async fn a_description_is_joined_with_instructions() {
-        let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi")
-                .with_voice(Voice::description("warm"))
-                .with_instructions("slowly")
-                .with_default_voice(Voice::id("onyx")),
-        )
-        .await;
-        assert_eq!(body["instructions"], json!("warm\nslowly"));
-    }
-
-    #[tokio::test]
     async fn missing_voice_cases() {
         let http = MockHttp::new(vec![]);
         let provider = official(&http);
         let err = provider.generate(SpeechRequest::new("hi")).await;
-        assert!(matches!(err, Err(AudioError::MissingVoice)));
-        let err = provider
-            .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
-            .await;
         assert!(matches!(err, Err(AudioError::MissingVoice)));
         assert_eq!(http.request_count(), 0);
     }
@@ -456,29 +369,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tts1_sends_a_description_and_only_newer_models_advertise_it() {
-        let http = MockHttp::new(vec![HttpResponse::new(200, b"audio".to_vec())]);
-        tts1(&http)
-            .generate(
-                SpeechRequest::new("hi")
-                    .with_voice(Voice::description("warm"))
-                    .with_default_voice(Voice::id("onyx")),
-            )
-            .await
-            .unwrap();
-        assert_eq!(body_json(&http.request(0))["instructions"], json!("warm"));
-        assert!(!tts1(&http).supports_voice_description());
-        assert!(official(&http).supports_voice_description());
-        assert!(!compatible(&http).supports_voice_description());
-    }
-
-    #[tokio::test]
-    async fn compatible_servers_take_auto_as_an_id() {
+    async fn compatible_servers_take_any_id() {
         let http = MockHttp::new(vec![audio()]);
         let body = voice_body(
             compatible(&http),
             &http,
-            SpeechRequest::new("hi").with_voice(Voice::auto("af_bella")),
+            SpeechRequest::new("hi").with_voice(Voice::id("af_bella")),
         )
         .await;
         assert_eq!(body["voice"], json!("af_bella"));

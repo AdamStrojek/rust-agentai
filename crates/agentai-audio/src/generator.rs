@@ -109,11 +109,6 @@ impl SpeechGenerator {
         self.provider.supports_voice_cloning()
     }
 
-    /// Returns `true` when the provider accepts [`Voice::Description`].
-    pub fn supports_voice_description(&self) -> bool {
-        self.provider.supports_voice_description()
-    }
-
     /// Speaks a text.
     pub async fn generate(&self, text: impl Into<String>) -> Result<SpeechResponse, AudioError> {
         self.generate_with(SpeechRequest::new(text)).await
