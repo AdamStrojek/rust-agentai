@@ -78,8 +78,29 @@
 //! ```
 //!
 //! The HTTP types ([`HttpClient`], [`HttpRequest`], [`HttpResponse`], [`HttpError`],
-//! [`ReqwestClient`]) and [`Media`] are re-exported, so this crate is enough to use a provider
-//! with your own client or to implement [`VideoProvider`] for another API.
+//! [`ReqwestClient`]), [`Media`] and [`mime`] are re-exported, so this crate is enough to use a
+//! provider with your own client or to implement [`VideoProvider`] for another API.
+//!
+//! ## Files
+//!
+//! [`mime::from_path`] guesses the type of an input file from its name, and
+//! [`Media::extension`] gives the file extension of a downloaded video's type:
+//!
+//! ```rust,no_run
+//! # use agentai_video::{Media, ReqwestClient, VideoInputs, VideoRequest, mime};
+//! # async fn run(video: Media) -> Result<(), Box<dyn std::error::Error>> {
+//! let path = "first.jpg";
+//! let first = Media::from_bytes(mime::from_path(path).ok_or("unknown type")?, std::fs::read(path)?);
+//! let request = VideoRequest::new("The scene comes alive").with_inputs(VideoInputs::Frames {
+//!     first: Some(first),
+//!     last: None,
+//! });
+//! // ... submit, poll, download ...
+//! let bytes = video.bytes(&ReqwestClient::new()).await?;
+//! std::fs::write(format!("video.{}", video.extension()), bytes)?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! ## Limits
 //!

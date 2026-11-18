@@ -36,8 +36,14 @@
 //!   reference images, videos and audio (comfy-serve; OpenRouter takes images only).
 //! - **Models**: `list_models("comfy-serve")` returns the durations, resolutions, aspect ratios and
 //!   inputs a model accepts, where the provider says so. comfy-serve jobs can be cancelled.
+//! - **File names and types**: `agentai_core::mime` (re-exported by `agentai-image`, `agentai-audio` and
+//!   `agentai-video`) maps MIME types to file extensions and back, and `Media` gains `extension()`,
+//!   `file_name(stem)` and `to_url()` (a data URL for bytes). Generated images and audio keep the extension
+//!   of their name only when it is a known file type, so an image named `my.picture` is saved as
+//!   `my.picture.png`.
 //! - OpenRouter's request format follows its public guide and was not verified against a live key.
-//! - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms.
+//! - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms; the
+//!   media crates share its MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`).
 //!
 //! **Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order.
 //! Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the

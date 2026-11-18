@@ -47,12 +47,16 @@ a live key.
 
 To change timeouts or the proxy, build the provider yourself (`ComfyServeVideoProvider::new(model, api_key,
 base_url)`) and give it your own client with `with_http_client(ReqwestClient::from_client(client))`.
-`ReqwestClient`, `HttpClient` and the other HTTP types are re-exported from `agentai_video`, as is `Media`, so you
-need no direct `agentai-core` dependency. Implement `VideoProvider` for other APIs.
+`ReqwestClient`, `HttpClient` and the other HTTP types are re-exported from `agentai_video`, as are `Media` and
+`mime`, so you need no direct `agentai-core` dependency. Implement `VideoProvider` for other APIs.
+
+Files: `mime::from_path("first.jpg")` guesses the type of an input file for `Media::from_bytes`, and
+`video.extension()` gives the file extension of a downloaded video's type (for example `mp4` or `webm`).
 
 Limits: files travel in memory as `Media` (base64 or a URL); there is no waiting helper, no retries and no
 timeouts of its own; there are no agent tools, the crate does not depend on `agentai`.
 
 TLS features as in `agentai`: `rustls-ring` (default), `rustls-aws-lc`, `native-tls`, `system-proxy`.
 
-See the `generate_video` example.
+See the `generate_video` example: it prints what the model accepts, takes an optional first frame and the
+optional `AGENTAI_VIDEO_RESOLUTION` and `AGENTAI_VIDEO_DURATION` (seconds), and saves the video in `video/`.
