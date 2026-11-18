@@ -1,6 +1,6 @@
 [package]
 name = "agentai-audio"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Adam Strojek <adam@strojek.info>"]
@@ -12,8 +12,8 @@ categories = ["multimedia::audio"]
 keywords = ["generative-ai", "agent", "text-to-speech", "voice-cloning"]
 
 [dependencies]
-agentai = { path = "../agentai", version = "0.6", default-features = false, optional = true }
-agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+agentai = { path = "../agentai", version = "0.7", default-features = false, optional = true }
+agentai-core = { path = "../agentai-core", version = "0.7", default-features = false, features = [
     "reqwest",
 ] }
 async-trait = "0.1.92"
@@ -26,10 +26,10 @@ rmp-serde = "1.3.1"
 serde_bytes = "0.11.19"
 
 [dev-dependencies]
-agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+agentai-core = { path = "../agentai-core", version = "0.7", default-features = false, features = [
     "test-support",
 ] }
-agentai = { path = "../agentai", version = "0.6" }
+agentai = { path = "../agentai", version = "0.7" }
 anyhow = "1.0.104"
 rmpv = "1.3.1"
 tokio = { version = "1.54.0", features = ["full"] }
