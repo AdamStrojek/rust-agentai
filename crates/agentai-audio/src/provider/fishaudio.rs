@@ -20,7 +20,7 @@
 
 use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    VoiceSource, WordTimestamp, audio_media,
+    VoicePreview, VoiceSource, WordTimestamp, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::Media;
@@ -365,6 +365,50 @@ impl SpeechProvider for FishAudioProvider {
         Ok(created.id)
     }
 
+    fn supports_voice_design(&self) -> bool {
+        true
+    }
+
+    /// Designs voices with `POST /v1/voice-design` (model `voice-design-1`). The previews have
+    /// no ID: keep one by sending its audio to `create_voice`.
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let body = VoiceDesignBody {
+            instruction: description,
+            reference_text: text,
+            n: count,
+        };
+        let http = HttpRequest::post(format!("{}/v1/voice-design", self.base_url))
+            .with_header("model", "voice-design-1")
+            .with_json(&body)?;
+        let response = self
+            .client
+            .send(self.request(http))
+            .await?
+            .error_for_status()?;
+        let designed: VoiceDesignResponse = response
+            .json()
+            .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
+        designed
+            .candidates
+            .into_iter()
+            .map(|candidate| {
+                let bytes = agentai_core::base64::decode(&candidate.audio_base64)
+                    .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
+                let audio = Media::from_bytes(audio_type(&bytes), &bytes);
+                let preview = VoicePreview::new(audio).with_sample_rate(candidate.sample_rate);
+                Ok(match candidate.text.as_deref().or(text) {
+                    Some(text) => preview.with_text(text),
+                    None => preview,
+                })
+            })
+            .collect()
+    }
+
     /// Lists the voice models of the account with `GET /model?self=true`, page by page, and
     /// then the voices of the voice store, if one is set.
     async fn list_voices(&self) -> Result<Vec<VoiceInfo>, AudioError> {
@@ -405,6 +449,38 @@ impl SpeechProvider for FishAudioProvider {
             }));
         }
         Ok(voices)
+    }
+}
+
+/// The body of `POST /v1/voice-design`.
+#[derive(Serialize)]
+struct VoiceDesignBody<'a> {
+    instruction: &'a str,
+    reference_text: Option<&'a str>,
+    n: usize,
+}
+
+#[derive(Deserialize)]
+struct VoiceDesignResponse {
+    candidates: Vec<Candidate>,
+}
+
+#[derive(Deserialize)]
+struct Candidate {
+    audio_base64: String,
+    sample_rate: u32,
+    text: Option<String>,
+}
+
+/// The response names no audio type, so it is read from the first bytes (WAV or MP3).
+fn audio_type(bytes: &[u8]) -> &'static str {
+    let wav = bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE");
+    let mp3 = bytes.starts_with(b"ID3")
+        || (bytes.first() == Some(&0xFF) && bytes.get(1).is_some_and(|b| b & 0xE0 == 0xE0));
+    if mp3 && !wav {
+        "audio/mpeg"
+    } else {
+        "audio/wav"
     }
 }
 
@@ -826,5 +902,62 @@ mod tests {
                 VoiceInfo::new("voice-1", "Ala").with_cloned(true),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn design_voice_posts_the_instruction() {
+        let enc = |b: &[u8]| agentai_core::base64::encode(b);
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"candidates": [
+                {"id": "c1", "index": 0, "audio_base64": enc(b"RIFF\0\0\0\0WAVEfmt "),
+                 "sample_rate": 44100, "duration_ms": 900, "text": "Hello"},
+                {"id": "c2", "index": 1, "audio_base64": enc(b"ID3\x04rest"),
+                 "sample_rate": 44100, "duration_ms": 800}
+            ]}),
+        )]);
+        let previews = provider(&http)
+            .design_voice("warm low voice", Some("Hello"), 2)
+            .await
+            .unwrap();
+        let req = http.request(0);
+        assert_eq!(req.url, "https://api.test/v1/voice-design");
+        assert_eq!(req.header("model"), Some("voice-design-1"));
+        assert_eq!(req.header("authorization"), Some("Bearer key"));
+        assert_eq!(
+            body_json(&req),
+            json!({"instruction": "warm low voice", "reference_text": "Hello", "n": 2})
+        );
+        assert_eq!(previews[0].audio.content_type, "audio/wav");
+        assert_eq!(
+            previews[0].audio.bytes(&http).await.unwrap(),
+            b"RIFF\0\0\0\0WAVEfmt "
+        );
+        assert_eq!(previews[0].text.as_deref(), Some("Hello"));
+        assert_eq!(previews[0].sample_rate, Some(44_100));
+        assert_eq!(previews[0].sample_id, None);
+        assert_eq!(previews[1].audio.content_type, "audio/mpeg");
+        assert_eq!(previews[1].text.as_deref(), Some("Hello"));
+    }
+
+    #[tokio::test]
+    async fn design_voice_detects_the_audio_type() {
+        let enc = |b: &[u8]| agentai_core::base64::encode(b);
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"candidates": [
+                {"audio_base64": enc(b"\xff\xfb\x90\x00"), "sample_rate": 24000},
+                {"audio_base64": enc(b"OggS\0\0\0\0\0\0\0\0"), "sample_rate": 24000}
+            ]}),
+        )]);
+        let previews = provider(&http).design_voice("x", None, 1).await.unwrap();
+        assert_eq!(
+            body_json(&http.request(0)),
+            json!({"instruction": "x", "reference_text": null, "n": 1})
+        );
+        assert_eq!(previews[0].audio.content_type, "audio/mpeg");
+        assert_eq!(previews[1].audio.content_type, "audio/wav");
+        assert_eq!(previews[1].sample_rate, Some(24_000));
+        assert_eq!(previews[1].text, None);
     }
 }
