@@ -7,14 +7,14 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
-- [0.7.0 → 0.7.1 (YYYY-MM-DD)](#070--071-yyyy-mm-dd)
+- [0.7.0 → 0.7.1 (2026-11-18)](#070--071-2026-11-18)
 - [0.6.0 → 0.7.0 (2026-11-18)](#060--070-2026-11-18)
 - [0.4.0 → 0.5.0 (2026-11-04)](#040--050-2026-11-04)
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
 
-## 0.7.0 → 0.7.1 (YYYY-MM-DD)
+## 0.7.0 → 0.7.1 (2026-11-18)
 
 These changes are in `agentai-audio`.
 
