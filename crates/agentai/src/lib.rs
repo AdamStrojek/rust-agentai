@@ -324,6 +324,12 @@ pub use prompt::{IntoPrompt, Prompt};
 /// custom endpoint.
 pub use genai;
 
+/// The [`llm-budget`](https://crates.io/crates/llm-budget) crate in the version `agentai` uses
+/// (feature `budget`). Build an [`AgentBudget`](llm_budget::AgentBudget) with it for
+/// [`Agent::with_budget`].
+#[cfg(feature = "budget")]
+pub use llm_budget;
+
 /// Compile-fail checks for the `#[tool(...)]` options. Only built for doc tests.
 ///
 /// An unknown option is rejected:

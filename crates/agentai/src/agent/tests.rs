@@ -1,7 +1,7 @@
 use super::*;
 use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
 use crate::message::{Message, ToolCall};
-use crate::tool::{Tool, ToolOutput, ToolResult};
+use crate::tool::{Tool, ToolOutput, ToolResult, ToolReturn};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -16,6 +16,7 @@ struct MockLlm {
     base_url: String,
     /// Bodies of the requests
     requests: Arc<Mutex<Vec<String>>>,
+    responses: Arc<Mutex<VecDeque<(u16, String)>>>,
     /// Request line and headers of the requests
     heads: Arc<Mutex<Vec<String>>>,
 }
@@ -24,9 +25,10 @@ impl MockLlm {
     async fn start(responses: Vec<(u16, String)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1/", listener.local_addr().unwrap());
-        let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
+        let responses = Arc::new(Mutex::new(VecDeque::from(responses)));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
+        let queue = responses.clone();
         let heads = Arc::new(Mutex::new(Vec::new()));
         let recorded_heads = heads.clone();
         tokio::spawn(async move {
@@ -83,6 +85,7 @@ impl MockLlm {
         Self {
             base_url,
             requests,
+            responses,
             heads,
         }
     }
@@ -93,6 +96,10 @@ impl MockLlm {
 
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
+    }
+
+    fn push_response(&self, response: (u16, String)) {
+        self.responses.lock().unwrap().push_back(response);
     }
 
     /// Request line and headers of the request at `index`, header names in lower case.
@@ -164,7 +171,7 @@ impl ToolBox for FailingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Err((self.make_error)())
     }
 }
@@ -425,7 +432,7 @@ impl ToolBox for EchoToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Ok("echoed".into())
     }
 }
@@ -439,9 +446,10 @@ impl ToolBox for ImageToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, _call: &ToolCall) -> ToolResult<ToolReturn> {
         Ok(ToolOutput::from_text("image-1.png")
-            .with_media(crate::Media::from_base64("image/png", "aGk=")))
+            .with_media(crate::Media::from_base64("image/png", "aGk="))
+            .into())
     }
 }
 
@@ -833,7 +841,7 @@ impl ToolBox for RecordingToolBox {
         Ok(vec![Tool::new("echo")])
     }
 
-    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
         self.0.lock().unwrap().push(call.clone());
         Ok("echoed".into())
     }
@@ -1209,6 +1217,481 @@ async fn images_in_the_prompt_are_sent_and_kept_in_the_messages() {
     }
 }
 
+fn named_tool_call_reply(id: &str, name: &str, arguments: Value) -> (u16, String) {
+    let body = json!({
+        "id": "1", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": arguments.to_string() }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }],
+        "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+    });
+    (200, body.to_string())
+}
+
+fn streamed_named_tool_call_reply(id: &str, name: &str, arguments: Value) -> (u16, String) {
+    sse(vec![
+        sse_chunk(
+            json!({ "role": "assistant", "tool_calls": [{
+                "index": 0, "id": id, "type": "function",
+                "function": { "name": name, "arguments": arguments.to_string() }
+            }]}),
+            None,
+        ),
+        sse_chunk(json!({}), Some("tool_calls")),
+        sse_usage(),
+    ])
+}
+
+/// Toolbox with one tool, `slow_job`, that returns a deferred task waiting on `gate`.
+struct GatedDeferredToolBox {
+    gate: Arc<tokio::sync::Notify>,
+}
+
+#[crate::tool::toolbox]
+impl GatedDeferredToolBox {
+    /// Starts a background job that finishes once `gate` is notified.
+    #[tool]
+    fn slow_job(&self) -> ToolResult<ToolReturn> {
+        let gate = self.gate.clone();
+        Ok(ToolReturn::deferred("job started", async move {
+            gate.notified().await;
+            Ok(ToolOutput::from_text("job finished"))
+        }))
+    }
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn deferred_task_can_be_awaited_during_a_streamed_run() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBoxSet};
+    use futures_util::StreamExt;
+    use std::time::Duration;
+
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let deferred = TokioDeferredTaskToolBox::new().with_default_timeout(Duration::from_millis(10));
+    let mut tools = ToolBoxSet::new();
+    tools.add_tool(GatedDeferredToolBox { gate: gate.clone() });
+    tools.add_tool(deferred.clone());
+
+    let llm = MockLlm::start(vec![streamed_named_tool_call_reply(
+        "call_1",
+        "slow_job",
+        json!({}),
+    )])
+    .await;
+
+    let mut stream = llm
+        .agent()
+        .with_toolbox(tools)
+        .run_stream::<String>("run job")
+        .await
+        .unwrap();
+
+    let mut final_result = None;
+    let mut wait_results = 0;
+    let mut deferred_id = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            AgentEvent::DeferredTask(task) => {
+                let task_id = task.id.clone();
+                deferred_id = Some(task_id.clone());
+                deferred.spawn(task);
+                llm.push_response(streamed_named_tool_call_reply(
+                    "call_2",
+                    "wait_deferred_task",
+                    json!({"task_id": task_id}),
+                ));
+            }
+            AgentEvent::ToolResult { tool, content, .. } if tool == "wait_deferred_task" => {
+                wait_results += 1;
+                if wait_results == 1 {
+                    let task_id = deferred_id.as_ref().unwrap();
+                    assert_eq!(
+                        content.text().unwrap(),
+                        format!("Task '{task_id}' is still running.")
+                    );
+                    // Unblock the background task before the second wait_deferred_task call
+                    gate.notify_one();
+                    llm.push_response(streamed_named_tool_call_reply(
+                        "call_3",
+                        "wait_deferred_task",
+                        json!({"task_id": task_id}),
+                    ));
+                } else {
+                    assert_eq!(content.text().as_deref(), Some("job finished"));
+                    llm.push_response(streamed_text_reply(&["All done"]));
+                }
+            }
+            AgentEvent::Finished(result) => final_result = Some(result),
+            _ => {}
+        }
+    }
+
+    let result = final_result.unwrap();
+    assert_eq!(result.answer, "All done");
+    assert!(result.deferred_tasks.is_empty());
+    assert!(result.unstarted_deferred_tasks.is_empty());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn deferred_task_outlives_run_and_notifies_next_run_without_prompt() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBoxSet};
+    use futures_util::StreamExt;
+
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let deferred = TokioDeferredTaskToolBox::new();
+    let mut tools = ToolBoxSet::new();
+    tools.add_tool(GatedDeferredToolBox { gate: gate.clone() });
+    tools.add_tool(deferred.clone());
+
+    let llm = MockLlm::start(vec![
+        // Run 1: starts the deferred task and answers while it is still running
+        streamed_named_tool_call_reply("call_1", "slow_job", json!({})),
+        streamed_text_reply(&["Working in the background"]),
+    ])
+    .await;
+
+    let agent = llm.agent().with_toolbox(tools);
+    let mut history = Vec::new();
+
+    // Run 1
+    let mut stream = agent.run_stream::<String>("start it").await.unwrap();
+    let mut run1_result = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            AgentEvent::DeferredTask(task) => deferred.spawn(task),
+            AgentEvent::Finished(result) => run1_result = Some(result),
+            _ => {}
+        }
+    }
+    let run1 = run1_result.unwrap();
+    assert_eq!(run1.answer, "Working in the background");
+    assert_eq!(run1.deferred_tasks.len(), 1);
+    assert!(!run1.deferred_tasks[0].is_finished());
+    let task_id = run1.deferred_tasks[0].id.clone();
+    assert!(request_json(&llm, 1).to_string().contains(&task_id));
+    history.extend(run1.new_messages);
+
+    // Task completes between runs
+    gate.notify_one();
+    while !run1.deferred_tasks[0].is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    // Run 2 starts with an empty prompt and the deferred task handles from Run 1
+    llm.push_response(named_tool_call_reply(
+        "call_2",
+        "get_deferred_task",
+        json!({"task_id": task_id}),
+    ));
+    llm.push_response(text_reply("Background result: job finished"));
+    let run2: AgentResult<String> = agent
+        .run(crate::Prompt::new())
+        .with_history(&history)
+        .with_deferred_tasks(run1.deferred_tasks)
+        .await
+        .unwrap();
+
+    assert_eq!(run2.answer, "Background result: job finished");
+    assert!(run2.deferred_tasks.is_empty());
+    // The first new message of Run 2 is the user notification for the unique task ID.
+    assert_eq!(
+        run2.new_messages[0],
+        Message::user(format!("Deferred task {task_id} (slow_job) has finished."))
+    );
+    // And the tool result of get_deferred_task was sent to the model in request #3
+    let last_request = request_json(&llm, 3);
+    assert!(last_request.to_string().contains("job finished"));
+}
+
+#[tokio::test]
+async fn multiple_deferred_task_notifications_share_one_message() {
+    use crate::tool::DeferredTask;
+
+    let (completed_task_1, completed_handle_1) = DeferredTask::new(
+        &ToolCall::new("call_1", "first_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("first result")) }),
+    );
+    let completed_id_1 = completed_task_1.id.clone();
+    completed_task_1.run().await;
+
+    let (cancelled_task, cancelled_handle) = DeferredTask::new(
+        &ToolCall::new("call_2", "cancelled_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("unused")) }),
+    );
+    let cancelled_id = cancelled_task.id.clone();
+    drop(cancelled_task);
+
+    let (completed_task_3, completed_handle_3) = DeferredTask::new(
+        &ToolCall::new("call_3", "third_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("third result")) }),
+    );
+    let completed_id_3 = completed_task_3.id.clone();
+    completed_task_3.run().await;
+
+    let llm = MockLlm::start(vec![text_reply("Acknowledged notifications")]).await;
+    let result: AgentResult<String> = llm
+        .agent()
+        .run(crate::Prompt::new())
+        .with_deferred_tasks(vec![
+            completed_handle_1,
+            cancelled_handle,
+            completed_handle_3,
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.new_messages[0],
+        Message::user(format!(
+            "Deferred task {completed_id_1} (first_job) has finished.\n\
+             Deferred task {cancelled_id} (cancelled_job) was cancelled before completing.\n\
+             Deferred task {completed_id_3} (third_job) has finished."
+        ))
+    );
+    assert_eq!(result.new_messages.len(), 2);
+}
+
+#[tokio::test]
+async fn non_streaming_run_returns_unstarted_deferred_tasks() {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let llm = MockLlm::start(vec![
+        named_tool_call_reply("call_1", "slow_job", json!({})),
+        text_reply("started"),
+    ])
+    .await;
+
+    let mut result: AgentResult<String> = llm
+        .agent()
+        .with_toolbox(GatedDeferredToolBox { gate: gate.clone() })
+        .run("start")
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "started");
+    assert_eq!(result.unstarted_deferred_tasks.len(), 1);
+    assert_eq!(result.deferred_tasks.len(), 1);
+    assert!(!result.deferred_tasks[0].is_finished());
+
+    let task = result.unstarted_deferred_tasks.pop().unwrap();
+    assert!(task.id.starts_with("call_1-deferred-"));
+    assert_eq!(result.deferred_tasks[0].id, task.id);
+    assert_eq!(task.tool, "slow_job");
+
+    let run_fut = tokio::spawn(task.run());
+    gate.notify_one();
+    run_fut.await.unwrap();
+    assert!(result.deferred_tasks[0].is_finished());
+    let output = result.deferred_tasks[0].take_result().unwrap().unwrap();
+    assert_eq!(output.text().as_deref(), Some("job finished"));
+    assert!(result.deferred_tasks[0].is_consumed());
+}
+
+#[tokio::test]
+async fn empty_prompt_without_finished_deferred_tasks_returns_error() {
+    let llm = MockLlm::start(vec![]).await;
+    let agent = llm.agent();
+
+    // 1. Empty prompt with no deferred tasks
+    let err = agent.run::<String>(crate::Prompt::new()).await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 2. Empty string prompt with no deferred tasks
+    let err = agent.run::<String>("").await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 3. Whitespace-only prompt with no deferred tasks
+    let err = agent.run::<String>("   ").await.unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 4. Empty prompt with an unfinished deferred task
+    let (_task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("c1", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("done")) }),
+    );
+    let err = agent
+        .run::<String>(crate::Prompt::new())
+        .with_deferred_tasks(vec![handle])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AgentError::EmptyPrompt));
+
+    // 5. Streamed empty prompt also yields EmptyPrompt error
+    use futures_util::StreamExt;
+    let mut stream = agent
+        .run_stream::<String>(crate::Prompt::new())
+        .await
+        .unwrap();
+    let stream_err = stream.next().await.unwrap().unwrap_err();
+    assert!(matches!(stream_err, AgentError::EmptyPrompt));
+
+    // Ensure the model was never called
+    assert!(llm.requests().is_empty());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn failed_deferred_tasks_always_reach_the_model_as_recoverable_errors() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let errors = [
+        ToolError::NotFound("x".into()),
+        ToolError::InvalidArguments("bad".into()),
+        ToolError::Failed("boom".into()),
+        ToolError::Configuration("no key".into()),
+        ToolError::fatal(std::io::Error::other("io")),
+    ];
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    for (index, error) in errors.into_iter().enumerate() {
+        let id = format!("call_{index}");
+        let (task, _handle) = crate::tool::DeferredTask::new(
+            &ToolCall::new(&id, "slow_job", json!({})),
+            Box::pin(async move { Err(error) }),
+        );
+        let task_id = task.id.clone();
+        deferred.spawn(task);
+
+        let call = ToolCall::new(
+            "fetch",
+            "wait_deferred_task",
+            json!({"task_id": task_id, "timeout_seconds": 5}),
+        );
+        let err = tokio::time::timeout(Duration::from_secs(10), deferred.call_tool(&call))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            matches!(err, ToolError::Failed(_)),
+            "task {id} failed with {err:?}, expected a recoverable ToolError::Failed"
+        );
+        assert!(err.is_recoverable());
+    }
+}
+
+#[tokio::test]
+async fn dropped_deferred_task_marks_handle_cancelled_and_notifies_model() {
+    let llm = MockLlm::start(vec![text_reply("Acknowledged cancellation")]).await;
+    let agent = llm.agent();
+
+    let (task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("c1", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("done")) }),
+    );
+    let task_id = handle.id.clone();
+    assert!(!handle.is_finished());
+    assert!(!handle.is_cancelled());
+
+    // Dropping the task without running it marks the shared state as cancelled
+    drop(task);
+    assert!(handle.is_finished());
+    assert!(handle.is_cancelled());
+    assert!(handle.take_result().is_none());
+
+    // A run with an empty prompt and a cancelled handle sends a cancellation notification
+    let result: AgentResult<String> = agent
+        .run(crate::Prompt::new())
+        .with_deferred_tasks(vec![handle])
+        .await
+        .unwrap();
+
+    assert_eq!(result.answer, "Acknowledged cancellation");
+    assert!(result.deferred_tasks.is_empty());
+    assert_eq!(
+        result.new_messages[0],
+        Message::user(format!(
+            "Deferred task {task_id} (slow_job) was cancelled before completing."
+        ))
+    );
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn panicking_deferred_task_cancels_handle_and_wakes_waiters_with_recoverable_error() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    let (task, handle) = crate::tool::DeferredTask::new(
+        &ToolCall::new("panic_1", "slow_job", json!({})),
+        Box::pin(async {
+            panic!("boom inside background task");
+        }),
+    );
+    let task_id = task.id.clone();
+    deferred.spawn(task);
+
+    let call = ToolCall::new(
+        "fetch",
+        "wait_deferred_task",
+        json!({"task_id": task_id, "timeout_seconds": 5}),
+    );
+    let err = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
+        .await
+        .expect("wait_deferred_task should be woken when task panics, not time out")
+        .unwrap_err();
+    assert!(matches!(err, ToolError::Failed(_)));
+    assert!(err.is_recoverable());
+    assert!(handle.is_cancelled());
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn repeated_call_ids_produce_distinct_deferred_task_ids() {
+    use crate::tool::{TokioDeferredTaskToolBox, ToolBox};
+    use std::time::Duration;
+
+    let deferred = TokioDeferredTaskToolBox::new();
+    let (task1, handle1) = crate::tool::DeferredTask::new(
+        &ToolCall::new("dup_id", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("first result")) }),
+    );
+    let (task2, handle2) = crate::tool::DeferredTask::new(
+        &ToolCall::new("dup_id", "slow_job", json!({})),
+        Box::pin(async { Ok(ToolOutput::from_text("second result")) }),
+    );
+    let task_id1 = task1.id.clone();
+    let task_id2 = task2.id.clone();
+    assert_ne!(task_id1, task_id2);
+    assert_eq!(handle1.id, task_id1);
+    assert_eq!(handle2.id, task_id2);
+
+    deferred.spawn(task1);
+    deferred.spawn(task2);
+
+    for (task_id, expected) in [(task_id1, "first result"), (task_id2, "second result")] {
+        let call = ToolCall::new(
+            "fetch",
+            "wait_deferred_task",
+            json!({"task_id": task_id, "timeout_seconds": 5}),
+        );
+        let ret = tokio::time::timeout(Duration::from_secs(2), deferred.call_tool(&call))
+            .await
+            .unwrap()
+            .unwrap();
+        let output = match ret {
+            ToolReturn::Done(output) => output,
+            ToolReturn::Deferred { .. } => unreachable!("expected ToolReturn::Done"),
+        };
+        assert_eq!(output.text().as_deref(), Some(expected));
+    }
+
+    assert!(handle1.is_consumed());
+    assert!(handle2.is_consumed());
+}
+
 #[tokio::test]
 async fn history_processors_change_every_request_but_keep_the_current_tool_loop() {
     let llm = MockLlm::start(vec![tool_call_reply(), text_reply("done")]).await;
@@ -1294,4 +1777,137 @@ async fn extra_headers_and_body_fields_are_sent() {
 
     assert_eq!(request_json(&llm, 0)["x_test"], json!({"nested": 1}));
     assert!(llm.head(0).contains("\r\nx-test: yes"), "{}", llm.head(0));
+}
+
+/// Budget with a `limit_usd` cap and an agent that charges it, pricing the mock model `m` at
+/// $1 per input token and $2 per output token, so every mock reply costs $3.
+#[cfg(feature = "budget")]
+fn budget_agent(llm: &MockLlm, limit_usd: f64) -> (Agent, Arc<llm_budget::AgentBudget>) {
+    let budget = Arc::new(
+        llm_budget::AgentBudget::builder("test", limit_usd)
+            .build()
+            .unwrap(),
+    );
+    let mut prices = llm_budget::PriceTable::new();
+    prices.insert(llm_budget::ModelPrice {
+        model: "m".to_string(),
+        provider: "openai".to_string(),
+        input_per_million: 1_000_000.0,
+        output_per_million: 2_000_000.0,
+        cache_read_per_million: None,
+        cache_write_per_million: None,
+        max_input_tokens: None,
+    });
+    let agent = llm
+        .agent()
+        .with_budget(budget.clone())
+        .with_price_table(prices);
+    (agent, budget)
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn budget_is_charged_for_every_model_call() {
+    let llm = MockLlm::start(vec![
+        tool_call_reply(),
+        text_reply("done"),
+        streamed_tool_call_reply(),
+        streamed_text_reply(&["done"]),
+    ])
+    .await;
+    let (agent, budget) = budget_agent(&llm, 100.0);
+    let toolbox = Arc::new(FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    });
+
+    let result: AgentResult<String> = agent
+        .run("question")
+        .with_toolbox_arc(toolbox.clone())
+        .await
+        .unwrap();
+    assert_eq!(result.cost_usd, Some(6.0));
+
+    // Streamed runs are charged too, and genai's `provider::` prefix finds the price of `m`
+    let streamed = agent
+        .run_stream::<String>("question")
+        .with_model("openai::m")
+        .with_toolbox_arc(toolbox)
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    assert_eq!(streamed.cost_usd, Some(6.0));
+    assert_eq!(budget.spent_usd(), 12.0);
+    // The check before each call (`reserve(0.0)`) leaves nothing reserved behind
+    assert_eq!(budget.reserved_usd(), 0.0);
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn kill_switch_stops_the_run_before_the_first_call() {
+    let llm = MockLlm::start(vec![text_reply("done")]).await;
+    let (agent, budget) = budget_agent(&llm, 100.0);
+    budget.kill("stopped by the operator");
+
+    let err = agent.run::<String>("question").await.unwrap_err();
+
+    assert!(matches!(err, AgentError::Budget(_)), "{err:?}");
+    assert!(llm.requests().is_empty());
+    assert_eq!(budget.spent_usd(), 0.0);
+    assert_eq!(budget.reserved_usd(), 0.0);
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn crossed_budget_stops_the_run_before_the_next_call() {
+    let llm = MockLlm::start(vec![tool_call_reply()]).await;
+    let (agent, budget) = budget_agent(&llm, 2.0);
+    let toolbox = FailingToolBox {
+        make_error: || ToolError::Failed("still broken".to_string()),
+    };
+
+    let err = agent
+        .with_toolbox(toolbox)
+        .run::<String>("question")
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            AgentError::Budget(llm_budget::BudgetError::AgentExhausted { .. })
+        ),
+        "{err:?}"
+    );
+    // The call that crossed the limit was made, so it is booked
+    assert_eq!(budget.spent_usd(), 3.0);
+    assert_eq!(llm.requests().len(), 1);
+}
+
+#[cfg(feature = "budget")]
+#[tokio::test]
+async fn a_model_without_a_price_fails_before_calling_the_model() {
+    let llm = MockLlm::start(vec![]).await;
+    let budget = Arc::new(
+        llm_budget::AgentBudget::builder("test", 1.0)
+            .build()
+            .unwrap(),
+    );
+
+    let err = llm
+        .agent()
+        .with_budget(budget)
+        .run::<String>("question")
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            AgentError::Budget(llm_budget::BudgetError::UnknownModel(ref model)) if model == "m"
+        ),
+        "{err:?}"
+    );
+    assert!(llm.requests().is_empty());
 }

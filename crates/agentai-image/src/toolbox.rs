@@ -251,6 +251,7 @@ impl ReadMediaToolBox {
 mod tests {
     use super::*;
     use crate::provider::openai::tests::provider;
+    use agentai::tool::ToolReturn;
     use agentai_core::message::{Media, Part};
     use agentai_core::mock::{MockHttp, json_response};
     use agentai_core::storage::{MediaSave, MemoryStorage};
@@ -258,6 +259,17 @@ mod tests {
 
     fn tool_call(name: &str, arguments: Value) -> agentai::ToolCall {
         agentai::ToolCall::new("call_1", name, arguments)
+    }
+
+    async fn call_done(toolbox: &impl ToolBox, name: &str, arguments: Value) -> ToolOutput {
+        match toolbox
+            .call_tool(&tool_call(name, arguments))
+            .await
+            .unwrap()
+        {
+            ToolReturn::Done(output) => output,
+            other => panic!("expected ToolReturn::Done, got {other:?}"),
+        }
     }
 
     fn image_reply() -> agentai_core::HttpResponse {
@@ -279,13 +291,12 @@ mod tests {
         let storage = MemoryStorage::new();
         let toolbox = toolbox(&http).with_storage(storage.clone());
 
-        let output = toolbox
-            .call_tool(&tool_call(
-                "generate_image",
-                json!({"prompt": "a cat", "name": "image"}),
-            ))
-            .await
-            .unwrap();
+        let output = call_done(
+            &toolbox,
+            "generate_image",
+            json!({"prompt": "a cat", "name": "image"}),
+        )
+        .await;
 
         let image = Media::from_base64("image/png", "aGk=").with_name("image.png");
         assert_eq!(
@@ -331,13 +342,12 @@ mod tests {
             .with_storage(MemoryStorage::new())
             .with_output(ImageToolOutput::Metadata);
 
-        let output = toolbox
-            .call_tool(&tool_call(
-                "generate_image",
-                json!({"prompt": "a cat", "name": "image"}),
-            ))
-            .await
-            .unwrap();
+        let output = call_done(
+            &toolbox,
+            "generate_image",
+            json!({"prompt": "a cat", "name": "image"}),
+        )
+        .await;
 
         assert!(output.media().is_empty());
         let metadata: Value = serde_json::from_str(&output.text().unwrap()).unwrap();
@@ -382,13 +392,12 @@ mod tests {
             ))
             .await;
         assert!(matches!(unknown, Err(ToolError::InvalidArguments(_))));
-        let output = toolbox
-            .call_tool(&tool_call(
-                "edit_image",
-                json!({"prompt": "add a hat", "images": [id], "name": "hat"}),
-            ))
-            .await
-            .unwrap();
+        let output = call_done(
+            &toolbox,
+            "edit_image",
+            json!({"prompt": "add a hat", "images": [id], "name": "hat"}),
+        )
+        .await;
 
         assert_eq!(output.media().len(), 1);
         let request = http.request(0);
@@ -417,10 +426,7 @@ mod tests {
         let id = storage.save(&pdf).await.unwrap();
         let toolbox = ReadMediaToolBox::new(storage);
 
-        let output = toolbox
-            .call_tool(&tool_call("read_media", json!({ "id": id })))
-            .await
-            .unwrap();
+        let output = call_done(&toolbox, "read_media", json!({ "id": id })).await;
         assert_eq!(output.media(), vec![&pdf]);
         assert!(matches!(
             toolbox

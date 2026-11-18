@@ -209,6 +209,7 @@ mod tests {
     use crate::provider::elevenlabs::ElevenLabsProvider;
     use crate::provider::omlx::OmlxProvider;
     use crate::provider::openai::OpenAiSpeechProvider;
+    use agentai::tool::ToolReturn;
     use agentai_core::HttpResponse;
     use agentai_core::message::Part;
     use agentai_core::mock::{MockHttp, body_json, json_response};
@@ -240,6 +241,17 @@ mod tests {
         )
     }
 
+    async fn call_done(toolbox: &impl ToolBox, name: &str, arguments: Value) -> ToolOutput {
+        match toolbox
+            .call_tool(&tool_call(name, arguments))
+            .await
+            .unwrap()
+        {
+            ToolReturn::Done(output) => output,
+            other => panic!("expected ToolReturn::Done, got {other:?}"),
+        }
+    }
+
     fn text_json(output: &ToolOutput) -> Value {
         serde_json::from_str(&output.text().unwrap()).unwrap()
     }
@@ -249,13 +261,12 @@ mod tests {
         let http = MockHttp::new(vec![audio()]);
         let toolbox = toolbox(official(&http));
 
-        let output = toolbox
-            .call_tool(&tool_call(
-                "generate_speech",
-                json!({"text": "hi", "name": "greeting", "voice": "alloy"}),
-            ))
-            .await
-            .unwrap();
+        let output = call_done(
+            &toolbox,
+            "generate_speech",
+            json!({"text": "hi", "name": "greeting", "voice": "alloy"}),
+        )
+        .await;
 
         assert!(output.media().is_empty());
         assert_eq!(output.parts.len(), 1);
@@ -276,13 +287,12 @@ mod tests {
         let http = MockHttp::new(vec![audio()]);
         let toolbox = toolbox(official(&http)).with_output(SpeechToolOutput::Media);
 
-        let output = toolbox
-            .call_tool(&tool_call(
-                "generate_speech",
-                json!({"text": "hi", "name": "greeting", "voice": "alloy"}),
-            ))
-            .await
-            .unwrap();
+        let output = call_done(
+            &toolbox,
+            "generate_speech",
+            json!({"text": "hi", "name": "greeting", "voice": "alloy"}),
+        )
+        .await;
 
         assert!(output.text().unwrap().contains("1-greeting.mp3"));
         assert!(matches!(output.parts.last(), Some(Part::Media(_))));
@@ -411,19 +421,13 @@ mod tests {
     async fn list_voices_prefers_the_app_list() {
         let http = MockHttp::new(vec![]);
         let all = toolbox(official(&http));
-        let output = all
-            .call_tool(&tool_call("list_voices", json!({})))
-            .await
-            .unwrap();
+        let output = call_done(&all, "list_voices", json!({})).await;
         let json = text_json(&output);
         assert_eq!(json["voices"].as_array().unwrap().len(), 13);
         assert_eq!(json["descriptions_supported"], json!(true));
 
         let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("a", "A")]);
-        let output = own
-            .call_tool(&tool_call("list_voices", json!({})))
-            .await
-            .unwrap();
+        let output = call_done(&own, "list_voices", json!({})).await;
         let voices = text_json(&output)["voices"].clone();
         assert_eq!(voices.as_array().unwrap().len(), 1);
         assert_eq!(voices[0]["id"], json!("a"));
@@ -434,10 +438,7 @@ mod tests {
         let http = MockHttp::new(vec![]);
         let provider =
             OmlxProvider::new("model", "", "http://local/v1").with_client(Arc::new(http));
-        let output = toolbox(provider)
-            .call_tool(&tool_call("list_voices", json!({})))
-            .await
-            .unwrap();
+        let output = call_done(&toolbox(provider), "list_voices", json!({})).await;
 
         let json = text_json(&output);
         assert_eq!(json["voices"], json!([]));

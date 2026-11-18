@@ -15,6 +15,66 @@ in your code.
 
 ## 0.6.0 → 0.7.0 (YYYY-MM-DD)
 
+### `ToolBox::call_tool` returns `ToolReturn`
+
+Hand-written `ToolBox` implementations now return `ToolResult<ToolReturn>`. Wrap an immediate
+`ToolOutput` in `ToolReturn` (or use `.map(Into::into)`). Methods using `#[toolbox]` that return
+`ToolResult` or `ToolResult<ToolOutput>` need no change.
+
+```rust
+// 0.6.0
+async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolOutput> {
+    Ok(ToolOutput::from_text("done"))
+}
+
+// 0.7.0
+async fn call_tool(&self, call: &ToolCall) -> ToolResult<ToolReturn> {
+    Ok(ToolOutput::from_text("done").into())
+}
+```
+
+Code that calls `call_tool` directly must handle `ToolReturn::Done` and may also receive
+`ToolReturn::Deferred`. Because `ToolReturn` is `#[non_exhaustive]`, include a wildcard arm:
+
+```rust,ignore
+match toolbox.call_tool(&call).await? {
+    ToolReturn::Done(output) => use_output(output),
+    ToolReturn::Deferred { message, task } => handle_deferred(message, task),
+    _ => handle_future_tool_return(),
+}
+```
+
+### Empty prompts are rejected
+
+An empty or whitespace-only prompt now returns `AgentError::EmptyPrompt` unless the run has a
+finished or cancelled deferred task to notify the model. The empty prompt is also omitted from
+`AgentResult::new_messages`. Send non-empty text when you want a normal model response. For a
+notification-only run, pass deferred task handles:
+
+```rust,ignore
+let result = agent
+    .run(Prompt::new())
+    .with_history(&history)
+    .with_deferred_tasks(handles)
+    .await?;
+```
+
+### Handle deferred tasks
+
+`ToolReturn::Deferred` is new in 0.7.0. The agent assigns IDs in the
+`<tool-call-id>-deferred-<sequence>` format, then appends the ID to the immediate tool response.
+Use that ID—not `ToolCall::id`—with deferred-task management tools. Streaming consumers should
+start tasks received in `AgentEvent::DeferredTask`; `Agent::run`, `AgentStream::finish` and the
+listener helpers return unstarted tasks in `AgentResult::unstarted_deferred_tasks`.
+
+The `tokio` feature now enables Tokio macros, runtime, synchronization, and time support. No code
+changes are needed unless you depend on the exact dependency feature set.
+
+`AgentResult` and `RunOptions` remain `#[non_exhaustive]`; their new deferred-task fields do not
+require changes to code that uses the existing constructors and builders. New `AgentEvent`,
+`RunEvent` and `AgentError` variants likewise do not require changes to exhaustive matches that
+already include a wildcard arm.
+
 ### `agentai-audio`: `SpeechRequest::voice` is now `voices`
 
 A request can carry several voices, in speaker order, for dialogue models such as Fish Audio

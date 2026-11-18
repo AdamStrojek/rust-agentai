@@ -75,6 +75,13 @@ pub enum RunEvent<'a> {
         /// `true` when the tool failed.
         is_error: bool,
     },
+    /// A tool started a background task.
+    DeferredTask {
+        /// Id of the tool call that created the task.
+        id: &'a str,
+        /// Name of the tool that created the task.
+        tool: &'a str,
+    },
     /// The run finished. Always the last event of a successful run.
     Finished {
         /// The messages added in this run.
