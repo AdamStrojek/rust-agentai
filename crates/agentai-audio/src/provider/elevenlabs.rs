@@ -7,9 +7,8 @@
 
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, audio_media,
+    VoiceInfo, VoiceSource, audio_media,
 };
-use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient, percent_encode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -220,10 +219,13 @@ impl SpeechProvider for ElevenLabsProvider {
     async fn create_voice(
         &self,
         name: &str,
-        samples: &[Media],
-        _transcript: Option<&str>,
+        source: VoiceSource,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
+        let VoiceSource::Samples { samples, .. } = source else {
+            return Err(AudioError::Unsupported("saving a designed voice"));
+        };
+        let samples = &samples[..];
         if samples.is_empty() {
             return Err(AudioError::InvalidRequest(
                 "voice cloning needs at least one sample".to_string(),
@@ -343,6 +345,7 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::VoiceSource;
     use agentai_core::HttpResponse;
     use agentai_core::message::Media;
     use agentai_core::mock::{MockHttp, body_json, json_response};
@@ -475,7 +478,11 @@ mod tests {
             Media::from_bytes("audio/mpeg", b"TWO"),
         ];
         let id = provider(&http)
-            .create_voice("Adam", &samples, None, Some("my voice"))
+            .create_voice(
+                "Adam",
+                VoiceSource::samples(samples.clone(), None::<&str>),
+                Some("my voice"),
+            )
             .await
             .unwrap();
         assert_eq!(id, "new1");
@@ -516,7 +523,7 @@ mod tests {
 
         let http = MockHttp::new(vec![]);
         let err = provider(&http)
-            .create_voice("Adam", &[], None, None)
+            .create_voice("Adam", VoiceSource::samples(vec![], None::<&str>), None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));

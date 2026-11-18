@@ -20,7 +20,7 @@
 
 use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    WordTimestamp, audio_media,
+    VoiceSource, WordTimestamp, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::Media;
@@ -321,10 +321,18 @@ impl SpeechProvider for FishAudioProvider {
     async fn create_voice(
         &self,
         name: &str,
-        samples: &[Media],
-        transcript: Option<&str>,
+        source: VoiceSource,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
+        let VoiceSource::Samples {
+            samples,
+            transcript,
+        } = source
+        else {
+            return Err(AudioError::Unsupported("saving a designed voice"));
+        };
+        let samples = &samples[..];
+        let transcript = transcript.as_deref();
         if samples.is_empty() {
             return Err(AudioError::InvalidRequest(
                 "voice cloning needs at least one sample".to_string(),
@@ -491,6 +499,7 @@ struct ModelEntry {
 mod tests {
     use super::*;
     use crate::MemoryVoiceStore;
+    use crate::provider::VoiceSource;
     use agentai_core::HttpResponse;
     use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::{Value, json};
@@ -534,6 +543,17 @@ mod tests {
 
     fn bytes(data: &[u8]) -> Value {
         json!({ "bin": data })
+    }
+
+    #[tokio::test]
+    async fn sample_id_is_unsupported_without_a_store_of_previews() {
+        let http = MockHttp::new(vec![]);
+        let err = provider(&http)
+            .create_voice("a", VoiceSource::SampleId("g1".into()), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Unsupported(_)));
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -726,7 +746,11 @@ mod tests {
             Media::from_bytes("audio/mpeg", b"TWO"),
         ];
         let id = provider(&http)
-            .create_voice("Adam", &samples, Some("Said text."), Some("my voice"))
+            .create_voice(
+                "Adam",
+                VoiceSource::samples(samples.clone(), Some("Said text.")),
+                Some("my voice"),
+            )
             .await
             .unwrap();
         assert_eq!(id, "m1");

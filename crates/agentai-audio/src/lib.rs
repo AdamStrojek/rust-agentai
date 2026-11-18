@@ -40,7 +40,7 @@
 //!
 //! ```rust,no_run
 //! use agentai_audio::provider::fishaudio::FishAudioProvider;
-//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
+//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, VoiceSource};
 //!
 //! # async fn run() -> Result<(), agentai_audio::AudioError> {
 //! // Settings from `FISH_API_KEY` and `FISH_BASE_URL`. IDs found in the voice store are sent
@@ -68,7 +68,7 @@
 //!
 //! ```rust,no_run
 //! use agentai_audio::provider::omlx::OmlxProvider;
-//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
+//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, VoiceSource};
 //! use agentai::Media;
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,7 +78,11 @@
 //! let generator = SpeechGenerator::from_provider(provider);
 //! let sample = Media::from_bytes("audio/wav", std::fs::read("sample.wav")?);
 //! let voice = generator
-//!     .create_voice("me", &[sample], Some("What is said in the sample."), None)
+//!     .create_voice(
+//!         "me",
+//!         VoiceSource::samples(vec![sample], Some("What is said in the sample.")),
+//!         None,
+//!     )
 //!     .await?;
 //! let response = generator
 //!     .generate_with(SpeechRequest::new("Hello").with_voice(Voice::id(voice)))
@@ -144,7 +148,7 @@ pub use agentai_core::{base64, mime, storage};
 pub use generator::SpeechGenerator;
 pub use provider::{
     AudioError, AudioFormat, AudioModel, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    WordTimestamp,
+    VoicePreview, VoiceSource, WordTimestamp,
 };
 #[cfg(feature = "toolbox")]
 pub use toolbox::{SpeechToolBox, SpeechToolOutput};
