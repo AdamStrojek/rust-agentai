@@ -4,7 +4,7 @@ use super::core::finish;
 use super::{AgentError, AgentResult};
 use crate::listener::{AsyncEventListener, EventListener, Printer, RunEvent};
 use crate::message::ToolCall;
-use crate::tool::ToolOutput;
+use crate::tool::{DeferredTask, ToolOutput};
 use futures_util::{Stream, StreamExt};
 use std::io::Write;
 use std::pin::Pin;
@@ -37,6 +37,9 @@ pub enum AgentEvent<D> {
         /// try again; a fatal error ends the stream with [`AgentError::Tool`] after this event.
         is_error: bool,
     },
+    /// A tool started a background task. Pass the [`DeferredTask`] to a runner such as
+    /// `TokioDeferredTaskToolBox::spawn`.
+    DeferredTask(DeferredTask),
     /// The run finished. Holds the same [`AgentResult`] that awaiting the run returns.
     Finished(AgentResult<D>),
 }
@@ -92,13 +95,19 @@ impl<D> AgentStream<D> {
         mut self,
         mut listener: impl EventListener,
     ) -> Result<AgentResult<D>, AgentError> {
+        let mut unstarted_deferred_tasks = Vec::new();
         while let Some(event) = self.inner.next().await {
             let event = event?;
             listener
                 .on_event(&event.as_run_event())
                 .map_err(AgentError::Listener)?;
-            if let AgentEvent::Finished(result) = event {
-                return Ok(result);
+            match event {
+                AgentEvent::DeferredTask(task) => unstarted_deferred_tasks.push(task),
+                AgentEvent::Finished(mut result) => {
+                    result.unstarted_deferred_tasks = unstarted_deferred_tasks;
+                    return Ok(result);
+                }
+                _ => {}
             }
         }
         unreachable!("the agent loop ends with a result or an error")
@@ -109,14 +118,20 @@ impl<D> AgentStream<D> {
         mut self,
         mut listener: impl AsyncEventListener,
     ) -> Result<AgentResult<D>, AgentError> {
+        let mut unstarted_deferred_tasks = Vec::new();
         while let Some(event) = self.inner.next().await {
             let event = event?;
             listener
                 .on_event(&event.as_run_event())
                 .await
                 .map_err(AgentError::Listener)?;
-            if let AgentEvent::Finished(result) = event {
-                return Ok(result);
+            match event {
+                AgentEvent::DeferredTask(task) => unstarted_deferred_tasks.push(task),
+                AgentEvent::Finished(mut result) => {
+                    result.unstarted_deferred_tasks = unstarted_deferred_tasks;
+                    return Ok(result);
+                }
+                _ => {}
             }
         }
         unreachable!("the agent loop ends with a result or an error")
@@ -205,6 +220,10 @@ impl<D> AgentEvent<D> {
                 tool,
                 content,
                 is_error: *is_error,
+            },
+            AgentEvent::DeferredTask(task) => RunEvent::DeferredTask {
+                id: &task.id,
+                tool: &task.tool,
             },
             AgentEvent::Finished(result) => RunEvent::Finished {
                 new_messages: &result.new_messages,

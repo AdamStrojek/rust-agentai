@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+See [MIGRATION.md](MIGRATION.md#060--070-yyyy-mm-dd) for migration steps from 0.6.0.
+
+- *(tool)* `ToolBox::call_tool` now returns `ToolResult<ToolReturn>` instead of `ToolResult<ToolOutput>`. Hand-written implementations and direct callers must handle the non-exhaustive `ToolReturn`.
+- *(agent)* Empty and whitespace-only prompts now return `AgentError::EmptyPrompt` when there are no finished deferred-task notifications; empty prompts are no longer added to `new_messages`.
+
+### New features
+
+- *(agent)* run deferred tool work in the background, receive unique task IDs, and resume runs with task handles.
+- *(tool)* add `TokioDeferredTaskToolBox` with tools to list, wait for, and retrieve deferred-task results.
+
+### Changed
+
+- *(agent)* combine finished and cancelled deferred-task notifications found in one loop check into a single user message.
+- *(feature)* enable Tokio runtime, synchronization, time, and macro support through the `tokio` feature.
+
 ## [0.6.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.5.0...agentai-v0.6.0) - 2026-11-09
 
 ### New features

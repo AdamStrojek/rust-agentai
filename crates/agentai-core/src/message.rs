@@ -58,6 +58,22 @@ impl Message {
         Self::new(Role::Tool, vec![Part::ToolResponse(response)])
     }
 
+    /// Creates one user message from deferred task notification lines.
+    ///
+    /// Returns `None` when there are no notifications.
+    pub fn deferred_task_notifications(
+        notifications: impl IntoIterator<Item = String>,
+    ) -> Option<Self> {
+        let mut text = String::new();
+        for notification in notifications {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&notification);
+        }
+        (!text.is_empty()).then(|| Self::user(text))
+    }
+
     /// Returns the text parts joined together, or `None` when the message has no text.
     pub fn text(&self) -> Option<String> {
         joined_text(&self.parts)
