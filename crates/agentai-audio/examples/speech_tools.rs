@@ -17,9 +17,8 @@
 use agentai::tool::ToolBoxSet;
 use agentai::{Agent, Media, MediaSource};
 use agentai_audio::storage::{MediaRead, MediaSave, StorageError};
-use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice};
+use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice, base64, mime};
 use async_trait::async_trait;
-use base64::Engine;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,9 +33,7 @@ struct DirStorage {
 impl MediaSave for DirStorage {
     async fn save(&self, media: &Media) -> Result<String, StorageError> {
         let bytes = match &media.source {
-            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .map_err(StorageError::other)?,
+            MediaSource::Base64(data) => base64::decode(data).map_err(StorageError::other)?,
             MediaSource::Url(_) => return Err(StorageError::other("only stores bytes")),
         };
         let number = self.count.fetch_add(1, Ordering::Relaxed) + 1;
@@ -58,12 +55,7 @@ impl MediaRead for DirStorage {
         }
         let bytes =
             std::fs::read(self.dir.join(id)).map_err(|_| StorageError::NotFound(id.to_string()))?;
-        let content_type = match id.rsplit('.').next() {
-            Some("mp3") => "audio/mpeg",
-            Some("flac") => "audio/flac",
-            Some("ogg" | "opus") => "audio/ogg",
-            _ => "audio/wav",
-        };
+        let content_type = mime::from_path(id).unwrap_or("audio/wav");
         Ok(Media::from_bytes(content_type, bytes).with_name(id))
     }
 }

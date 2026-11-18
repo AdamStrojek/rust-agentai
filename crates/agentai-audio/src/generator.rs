@@ -2,14 +2,11 @@
 
 use crate::provider::{
     self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
-    Voice, VoiceInfo, extension_for,
+    Voice, VoiceInfo,
 };
 use agentai_core::message::Media;
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
-
-/// File extensions that count as audio extensions of a name.
-const AUDIO_EXTENSIONS: [&str; 7] = ["mp3", "wav", "opus", "ogg", "flac", "aac", "pcm"];
 
 /// Speaks texts and clones voices with a [`SpeechProvider`].
 ///
@@ -133,8 +130,10 @@ impl SpeechGenerator {
         request.language = request.language.or_else(|| self.language.clone());
         let name = request.name.take();
         let mut response = self.provider.generate(request).await?;
-        let name = name.or_else(|| response.audio.name.take());
-        response.audio.name = Some(audio_name(name, &response.audio.content_type));
+        if name.is_some() {
+            response.audio.name = name;
+        }
+        response.audio.name = Some(response.audio.file_name("speech"));
         if let Some(storage) = &self.storage {
             response.id = Some(storage.save(&response.audio).await?);
         }
@@ -167,27 +166,13 @@ impl SpeechGenerator {
     }
 }
 
-/// The name of the audio: the requested one (else `speech`), with the extension of the content
-/// type unless it already ends in an audio extension.
-fn audio_name(name: Option<String>, content_type: &str) -> String {
-    let name = name.unwrap_or_else(|| "speech".to_string());
-    let has_extension = name
-        .rsplit_once('.')
-        .is_some_and(|(_, ext)| AUDIO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()));
-    if has_extension {
-        name
-    } else {
-        format!("{name}.{}", extension_for(content_type))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::openai::OpenAiSpeechProvider;
-    use crate::provider::test_support::{MockHttp, body_json};
     use crate::provider::{AudioFormat, SpeechRequest, Voice};
     use agentai_core::HttpResponse;
+    use agentai_core::mock::{MockHttp, body_json};
     use agentai_core::storage::{MediaRead, MemoryStorage};
     use serde_json::json;
     use std::sync::Arc;
@@ -196,9 +181,9 @@ mod tests {
         HttpResponse::new(200, b"audio".to_vec())
     }
 
-    fn openai(http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
+    fn openai(http: &MockHttp) -> OpenAiSpeechProvider {
         OpenAiSpeechProvider::new("gpt-4o-mini-tts", "key", "https://api.openai.com/v1")
-            .with_client(http.clone())
+            .with_client(Arc::new(http.clone()))
     }
 
     #[tokio::test]
@@ -228,18 +213,6 @@ mod tests {
         assert_eq!(second["voice"], json!("onyx"));
         assert_eq!(second["response_format"], json!("mp3"));
         assert_eq!(second["speed"], json!(1.5));
-    }
-
-    #[test]
-    fn the_name_gets_a_real_extension() {
-        for (name, content_type, expected) in [
-            (Some("intro"), "audio/mpeg", "intro.mp3"),
-            (Some("intro.v2"), "audio/mpeg", "intro.v2.mp3"),
-            (Some("intro.wav"), "audio/mpeg", "intro.wav"),
-            (None, "audio/mpeg", "speech.mp3"),
-        ] {
-            assert_eq!(audio_name(name.map(String::from), content_type), expected);
-        }
     }
 
     #[tokio::test]

@@ -209,9 +209,9 @@ mod tests {
     use crate::provider::elevenlabs::ElevenLabsProvider;
     use crate::provider::omlx::OmlxProvider;
     use crate::provider::openai::OpenAiSpeechProvider;
-    use crate::provider::test_support::{MockHttp, body_json, json_response};
     use agentai_core::HttpResponse;
     use agentai_core::message::Part;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
     use agentai_core::storage::MemoryStorage;
     use serde_json::{Value, json};
     use std::sync::Arc;
@@ -224,11 +224,12 @@ mod tests {
         HttpResponse::new(200, b"audio".to_vec())
     }
 
-    fn openai(http: &Arc<MockHttp>, base_url: &str) -> OpenAiSpeechProvider {
-        OpenAiSpeechProvider::new("gpt-4o-mini-tts", "key", base_url).with_client(http.clone())
+    fn openai(http: &MockHttp, base_url: &str) -> OpenAiSpeechProvider {
+        OpenAiSpeechProvider::new("gpt-4o-mini-tts", "key", base_url)
+            .with_client(Arc::new(http.clone()))
     }
 
-    fn official(http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
+    fn official(http: &MockHttp) -> OpenAiSpeechProvider {
         openai(http, "https://api.openai.com/v1")
     }
 
@@ -344,7 +345,7 @@ mod tests {
     async fn an_unlisted_id_fails_without_descriptions() {
         let http = MockHttp::new(vec![]);
         let provider = ElevenLabsProvider::new("eleven_v3", "key", "https://api.test")
-            .with_client(http.clone());
+            .with_client(Arc::new(http.clone()));
         let toolbox = toolbox(provider).with_voices(vec![VoiceInfo::new("abc", "Abc")]);
 
         let result = toolbox
@@ -355,7 +356,7 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(ToolError::Failed(m)) if m.contains("list_voices")));
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -431,7 +432,8 @@ mod tests {
     #[tokio::test]
     async fn list_voices_without_support_is_empty_not_an_error() {
         let http = MockHttp::new(vec![]);
-        let provider = OmlxProvider::new("model", "", "http://local/v1").with_client(http);
+        let provider =
+            OmlxProvider::new("model", "", "http://local/v1").with_client(Arc::new(http));
         let output = toolbox(provider)
             .call_tool(&tool_call("list_voices", json!({})))
             .await
@@ -467,7 +469,7 @@ mod tests {
             .await
             .unwrap();
         let provider = OmlxProvider::new("model", "", "http://local/v1")
-            .with_client(http.clone())
+            .with_client(Arc::new(http.clone()))
             .with_voice_store(store);
         let toolbox = toolbox(provider).with_voices(vec![VoiceInfo::new("other", "Other")]);
         toolbox

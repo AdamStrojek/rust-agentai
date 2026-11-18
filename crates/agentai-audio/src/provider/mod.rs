@@ -71,20 +71,6 @@ impl AudioFormat {
     }
 }
 
-/// File extension for an audio MIME type, for names of uploads.
-pub(crate) fn extension_for(content_type: &str) -> &str {
-    let content_type = content_type.split(';').next().unwrap_or("").trim();
-    match content_type {
-        "audio/mpeg" => "mp3",
-        "audio/wav" => "wav",
-        "audio/ogg" => "opus",
-        "audio/flac" => "flac",
-        "audio/aac" => "aac",
-        "audio/pcm" => "pcm",
-        other => other.rsplit('/').next().unwrap_or(other),
-    }
-}
-
 /// A request to speak a text.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -538,56 +524,6 @@ pub async fn list_models(provider: &str) -> Result<Vec<AudioModel>, AudioError> 
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
-    use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse};
-    use async_trait::async_trait;
-    use serde_json::Value;
-    use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex};
-
-    /// Records the requests and answers with the prepared responses, in order.
-    #[derive(Default)]
-    pub(crate) struct MockHttp {
-        pub(crate) requests: Mutex<Vec<HttpRequest>>,
-        responses: Mutex<VecDeque<HttpResponse>>,
-    }
-
-    impl MockHttp {
-        pub(crate) fn new(responses: Vec<HttpResponse>) -> Arc<Self> {
-            Arc::new(Self {
-                requests: Mutex::default(),
-                responses: Mutex::new(responses.into()),
-            })
-        }
-
-        pub(crate) fn request(&self, index: usize) -> HttpRequest {
-            self.requests.lock().unwrap()[index].clone()
-        }
-    }
-
-    #[async_trait]
-    impl HttpClient for MockHttp {
-        async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
-            self.requests.lock().unwrap().push(request);
-            Ok(self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("no response left"))
-        }
-    }
-
-    pub(crate) fn json_response(status: u16, body: Value) -> HttpResponse {
-        HttpResponse::new(status, body.to_string())
-    }
-
-    pub(crate) fn body_json(request: &HttpRequest) -> Value {
-        serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -629,17 +565,21 @@ mod tests {
 
     #[tokio::test]
     async fn simple_providers_reject_several_voices_and_timestamps() {
-        use test_support::MockHttp;
+        use agentai_core::mock::MockHttp;
+        use std::sync::Arc;
         let http = MockHttp::new(vec![]);
         let providers: Vec<Box<dyn SpeechProvider>> = vec![
             Box::new(
                 openai::OpenAiSpeechProvider::new("tts-1", "k", "http://x")
-                    .with_client(http.clone()),
+                    .with_client(Arc::new(http.clone())),
             ),
             Box::new(
-                elevenlabs::ElevenLabsProvider::new("m", "k", "http://x").with_client(http.clone()),
+                elevenlabs::ElevenLabsProvider::new("m", "k", "http://x")
+                    .with_client(Arc::new(http.clone())),
             ),
-            Box::new(omlx::OmlxProvider::new("m", "", "http://x").with_client(http.clone())),
+            Box::new(
+                omlx::OmlxProvider::new("m", "", "http://x").with_client(Arc::new(http.clone())),
+            ),
         ];
         let several = SpeechRequest::new("hi")
             .with_voice(Voice::id("a"))
@@ -653,12 +593,6 @@ mod tests {
                 assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
             }
         }
-        assert!(http.requests.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn extension_ignores_mime_parameters() {
-        assert_eq!(extension_for("audio/webm;codecs=opus"), "webm");
-        assert_eq!(extension_for("audio/mpeg; charset=x"), "mp3");
+        assert_eq!(http.request_count(), 0);
     }
 }

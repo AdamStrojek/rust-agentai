@@ -140,7 +140,7 @@ mod toolbox;
 mod voice_store;
 
 #[doc(inline)]
-pub use agentai_core::storage;
+pub use agentai_core::{base64, mime, storage};
 pub use generator::SpeechGenerator;
 pub use provider::{
     AudioError, AudioFormat, AudioModel, SpeechRequest, SpeechResponse, Voice, VoiceInfo,

@@ -272,11 +272,11 @@ impl SpeechProvider for OmlxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::test_support::{MockHttp, body_json};
     use crate::provider::{AudioError, SpeechProvider, SpeechRequest, Voice, VoiceInfo};
     use crate::{MemoryVoiceStore, VoiceStore};
     use agentai_core::HttpResponse;
     use agentai_core::message::{Media, MediaSource};
+    use agentai_core::mock::{MockHttp, body_json};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -284,15 +284,15 @@ mod tests {
         HttpResponse::new(200, b"audio".to_vec())
     }
 
-    fn provider(http: &Arc<MockHttp>) -> OmlxProvider {
-        OmlxProvider::new("m", "", "http://local/v1").with_client(http.clone())
+    fn provider(http: &MockHttp) -> OmlxProvider {
+        OmlxProvider::new("m", "", "http://local/v1").with_client(Arc::new(http.clone()))
     }
 
     fn sample() -> Media {
         Media::from_bytes("audio/wav", b"WAV")
     }
 
-    async fn cloned(http: &Arc<MockHttp>, transcript: Option<&str>) -> OmlxProvider {
+    async fn cloned(http: &MockHttp, transcript: Option<&str>) -> OmlxProvider {
         let p = provider(http).with_voice_store(MemoryVoiceStore::new());
         let id = p
             .create_voice("Adam", &[sample()], transcript, None)
@@ -323,7 +323,7 @@ mod tests {
         let p = OmlxProvider::from_lookup("m", |name| {
             (name == ENDPOINT_ENV).then(|| "http://mini:8000/v1/".to_string())
         })
-        .with_client(MockHttp::new(vec![audio()]));
+        .with_client(Arc::new(MockHttp::new(vec![audio()])));
         assert_eq!(p.base_url, "http://mini:8000/v1");
         assert_eq!(
             OmlxProvider::from_lookup("m", |_| None).base_url,
@@ -342,7 +342,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(id, "voice-1");
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
         p.generate(SpeechRequest::new("hi").with_voice(Voice::id(&id)))
             .await
             .unwrap();
@@ -427,7 +427,7 @@ mod tests {
             p.list_voices().await,
             Err(AudioError::Unsupported(_))
         ));
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
         p.generate(SpeechRequest::new("hi").with_voice(Voice::auto("x")))
             .await
             .unwrap();
@@ -443,7 +443,7 @@ mod tests {
                 .await,
             Err(AudioError::InvalidRequest(_))
         ));
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -478,10 +478,9 @@ mod tests {
         p.generate(SpeechRequest::new("hi").with_voice(Voice::id(&id)))
             .await
             .unwrap();
-        let requests = http.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].url, "http://x/a.wav");
-        assert_eq!(requests[1].url, "http://local/v1/audio/speech");
+        assert_eq!(http.request_count(), 2);
+        assert_eq!(http.request(0).url, "http://x/a.wav");
+        assert_eq!(http.request(1).url, "http://local/v1/audio/speech");
     }
 
     #[tokio::test]

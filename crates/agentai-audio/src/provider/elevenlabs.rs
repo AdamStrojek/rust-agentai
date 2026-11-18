@@ -7,7 +7,7 @@
 
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, audio_media, extension_for,
+    VoiceInfo, audio_media,
 };
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
@@ -249,13 +249,7 @@ impl SpeechProvider for ElevenLabsProvider {
         }
         for (index, sample) in samples.iter().enumerate() {
             let bytes = sample.bytes(&*self.client).await?;
-            let filename = sample.name.clone().unwrap_or_else(|| {
-                format!(
-                    "sample-{}.{}",
-                    index + 1,
-                    extension_for(&sample.content_type)
-                )
-            });
+            let filename = sample.file_name(&format!("sample-{}", index + 1));
             form = form.with_file("files", filename, sample.content_type.as_str(), bytes);
         }
         let http = self
@@ -363,13 +357,14 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::test_support::{MockHttp, body_json, json_response};
     use agentai_core::HttpResponse;
     use agentai_core::message::Media;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::json;
 
-    fn provider(http: &Arc<MockHttp>) -> ElevenLabsProvider {
-        ElevenLabsProvider::new("eleven_v4", "key", "https://api.test").with_client(http.clone())
+    fn provider(http: &MockHttp) -> ElevenLabsProvider {
+        ElevenLabsProvider::new("eleven_v4", "key", "https://api.test")
+            .with_client(Arc::new(http.clone()))
     }
 
     fn audio() -> HttpResponse {
@@ -438,7 +433,7 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(matches!(err, AudioError::Unsupported(_)));
-            assert!(http.requests.lock().unwrap().is_empty());
+            assert_eq!(http.request_count(), 0);
         }
     }
 
@@ -469,7 +464,7 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(err, AudioError::InvalidRequest(_)), "{id}");
         }
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -486,7 +481,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, AudioError::MissingVoice));
         assert!(!provider(&http).supports_voice_description());
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -545,7 +540,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -616,6 +611,6 @@ mod tests {
         let http = MockHttp::new(vec![page(), page(), page(), page()]);
         let voices = provider(&http).list_voices().await.unwrap();
         assert_eq!(voices.len(), 2);
-        assert_eq!(http.requests.lock().unwrap().len(), 2);
+        assert_eq!(http.request_count(), 2);
     }
 }
