@@ -24,13 +24,45 @@
 //!
 //! OpenAI and ElevenLabs need a voice: set a default one with
 //! [`with_default_voice`](SpeechGenerator::with_default_voice) or send `Voice` with each request,
-//! or the request fails with `MissingVoice`. oMLX uses its own voice when none is set.
+//! or the request fails with `MissingVoice`. oMLX and Fish Audio use their own voice when none
+//! is set.
+//!
+//! ## Several voices
+//!
+//! [`SpeechRequest::with_voices`] sets several voices, in the order of the speakers, for models
+//! that speak a dialogue, such as Fish Audio `drama-3`. Who speaks when is marked in the text in
+//! the provider's syntax (Fish Audio: `<|speaker:0|>`, `<|speaker:1|>`, ...); writing it is up to
+//! you. Providers that speak with one voice return `Unsupported` for more than one.
+//!
+//! [`SpeechRequest::with_timestamps`] asks for the time of every word, returned in
+//! [`SpeechResponse::timestamps`] as [`WordTimestamp`]s (Fish Audio; other providers return
+//! `Unsupported`).
+//!
+//! ```rust,no_run
+//! use agentai_audio::provider::fishaudio::FishAudioProvider;
+//! use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
+//!
+//! # async fn run() -> Result<(), agentai_audio::AudioError> {
+//! // Settings from `FISH_API_KEY` and `FISH_BASE_URL`. IDs found in the voice store are sent
+//! // as their samples, other IDs are voice models of the Fish Audio account.
+//! let provider = FishAudioProvider::from_env("drama-3")?.with_voice_store(MemoryVoiceStore::new());
+//! let generator = SpeechGenerator::from_provider(provider);
+//! let response = generator
+//!     .generate_with(
+//!         SpeechRequest::new("<|speaker:0|>Ready?<|speaker:1|>Always.")
+//!             .with_voices(vec![Voice::id("fish-model-id"), Voice::id("voice-1")]),
+//!     )
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! ## Cloning voices
 //!
 //! [`SpeechGenerator::create_voice`] clones a voice from samples and returns an ID for
 //! [`Voice::id`]. It works with providers that can clone
-//! ([`supports_voice_cloning`](SpeechGenerator::supports_voice_cloning)): ElevenLabs and oMLX.
+//! ([`supports_voice_cloning`](SpeechGenerator::supports_voice_cloning)): ElevenLabs, Fish Audio
+//! (a voice model in the account) and oMLX.
 //! oMLX has no voice library, it clones from a sample sent with every request, so you give the
 //! provider a [`VoiceStore`] explicitly (`SpeechGenerator::new` builds it without one):
 //!
@@ -90,9 +122,10 @@
 //!
 //! The speech APIs live in [`provider`]: [`openai`](provider::openai) (OpenAI and compatible
 //! servers; OpenAI shuts its speech models down on 2027-01-06),
-//! [`elevenlabs`](provider::elevenlabs) and [`omlx`](provider::omlx).
-//! [`SpeechGenerator::new`] picks one from the model name (`openai::gpt-4o-mini-tts`,
-//! `elevenlabs::eleven_multilingual_v2`, `omlx::mlx-community/VoxCPM2-8bit`) with its settings
+//! [`elevenlabs`](provider::elevenlabs), [`fishaudio`](provider::fishaudio) and
+//! [`omlx`](provider::omlx). [`SpeechGenerator::new`] picks one from the model name
+//! (`openai::gpt-4o-mini-tts`, `elevenlabs::eleven_multilingual_v2`, `fishaudio::drama-3`,
+//! `omlx::mlx-community/VoxCPM2-8bit`) with its settings
 //! from environment variables. [`provider::list_models`] lists the speech models of a provider.
 //! To set the API key or base URL in code, build the provider and pass it to
 //! [`SpeechGenerator::from_provider`]. Implement [`provider::SpeechProvider`] to use another API.
@@ -111,6 +144,7 @@ pub use agentai_core::storage;
 pub use generator::SpeechGenerator;
 pub use provider::{
     AudioError, AudioFormat, AudioModel, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
+    WordTimestamp,
 };
 #[cfg(feature = "toolbox")]
 pub use toolbox::{SpeechToolBox, SpeechToolOutput};
