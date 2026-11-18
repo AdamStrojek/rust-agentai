@@ -20,15 +20,20 @@ const TYPES: &[(&str, &str)] = &[
     ("flac", "audio/flac"),
     ("aac", "audio/aac"),
     ("pcm", "audio/pcm"),
+    ("m4a", "audio/mp4"),
     ("mp4", "video/mp4"),
     ("webm", "video/webm"),
     ("mov", "video/quicktime"),
+    ("mkv", "video/x-matroska"),
+    ("avi", "video/x-msvideo"),
 ];
 
 /// File extension for a MIME type, without the dot. Parameters (`; codecs=...`) are ignored.
 ///
-/// `audio/mpeg` is `mp3`, `audio/ogg` is `opus`, `video/quicktime` is `mov` and
-/// `image/svg+xml` is `svg`; any other type gives its subtype when that is only ASCII letters
+/// `audio/mpeg` is `mp3`, `audio/ogg` is `opus`, `video/quicktime` is `mov`,
+/// `image/svg+xml` is `svg`, and the common aliases have their usual names (`audio/x-wav` is
+/// `wav`, `audio/mp4` is `m4a`, `video/x-matroska` is `mkv`, `video/x-msvideo` is `avi`); any
+/// other type gives its subtype when that is only ASCII letters
 /// and digits (`image/png` is `png`), and `bin` otherwise.
 ///
 /// ```rust
@@ -42,6 +47,10 @@ pub fn extension(content_type: &str) -> &str {
     match essence.to_ascii_lowercase().as_str() {
         "audio/mpeg" => return "mp3",
         "audio/ogg" => return "opus",
+        "audio/x-wav" | "audio/wave" | "audio/vnd.wave" => return "wav",
+        "audio/mp4" | "audio/x-m4a" => return "m4a",
+        "video/x-matroska" => return "mkv",
+        "video/x-msvideo" => return "avi",
         "video/quicktime" => return "mov",
         "image/svg+xml" => return "svg",
         _ => {}
@@ -104,7 +113,9 @@ mod tests {
             ("video/quicktime", "mov"),
             ("image/svg+xml", "svg"),
             ("application/octet-stream", "bin"),
-            ("audio/x-wav", "bin"),
+            ("audio/x-wav", "wav"),
+            ("video/x-matroska", "mkv"),
+            ("application/x-unknown", "bin"),
             ("video", "bin"),
             ("", "bin"),
         ] {
