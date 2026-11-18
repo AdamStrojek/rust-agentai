@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.6.0...agentai-v0.6.1) - 2026-11-18
+
+### New features
+- *(video)* add agentai-video with Comfy Serve and OpenRouter providers ([#94](https://github.com/AdamStrojek/rust-agentai/pull/94)) (by @AdamStrojek)
+- *(agentai)* Background tasks ([#86](https://github.com/AdamStrojek/rust-agentai/pull/86)) (by @sdi2200246)
+- *(agent)* add optional dollar budget for runs with llm-budget ([#87](https://github.com/AdamStrojek/rust-agentai/pull/87)) (by @Mattbusel)
+- *(agent)* history processors and provider-specific chat options ([#88](https://github.com/AdamStrojek/rust-agentai/pull/88)) (by @AdamStrojek)
+- *(audio)* Fish Audio provider with multiple voices and word timestamps ([#91](https://github.com/AdamStrojek/rust-agentai/pull/91)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+* @sdi2200246
+* @Mattbusel
+
 ### Breaking changes
 
 See [MIGRATION.md](MIGRATION.md#060--070-yyyy-mm-dd) for migration steps from 0.6.0.
