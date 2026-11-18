@@ -17,6 +17,8 @@
 //! - HTTP: the [`HttpClient`] trait hides the HTTP stack, so crates such as `agentai-image` send
 //! their requests without depending on a particular client. [`ReqwestClient`] implements it
 //! with `reqwest`; another environment (for example WebAssembly) can provide its own.
+//!   With the `test-support` feature, `mock::MockHttp` records requests and answers with
+//!   prepared responses, for tests of providers.
 //! - [`tls`]: the TLS backend is chosen with the `rustls-ring` (default), `rustls-aws-lc` and
 //!   `native-tls` features.
 //!

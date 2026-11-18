@@ -350,6 +350,8 @@ fn escape(value: &str) -> String {
         .replace('\n', "%0A")
 }
 
+#[cfg(feature = "test-support")]
+pub mod mock;
 #[cfg(feature = "reqwest")]
 mod reqwest;
 #[cfg(feature = "reqwest")]
