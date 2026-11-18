@@ -1,14 +1,15 @@
 //! # oMLX speech API
 //!
-//! [`OmlxProvider`] speaks text with `POST /audio/speech` of an oMLX
-//! server, for example with `mlx-community/VoxCPM2-8bit`. The server has no voice list: a voice
-//! is a cloned voice; without one the model's own voice is used, styled by `instructions`. oMLX clones from a sample
+//! [`OmlxProvider`] speaks text with `POST /audio/speech` of an oMLX server, for example with
+//! `mlx-community/VoxCPM2-8bit`. The server has no voice list: a voice is a cloned voice; without
+//! one the model's own voice is used, styled by `instructions`. oMLX clones from a sample
 //! sent with every request (`ref_audio` and `ref_text`), so the provider keeps the samples in a
 //! [`VoiceStore`] set with [`with_voice_store`](OmlxProvider::with_voice_store).
 //!
 //! There is no design endpoint: [`design_voice`](SpeechProvider::design_voice) speaks the text
 //! once per candidate with the description as `instructions`, which models with a designable
-//! voice (VoxCPM2 and alike) turn into a voice. Keep a preview with `create_voice`.
+//! voice (VoxCPM2 and alike) turn into a voice. Keep a preview with `create_voice`, which needs
+//! a `VoiceStore` like any cloned voice.
 //!
 //! Every field of a request has an equivalent, so none is left out. What the server does not
 //! accept comes back as [`AudioError::Api`].

@@ -20,13 +20,28 @@
 //! - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
 //! - **Images for vision models**: Send text and images together in a [`Prompt`](crate::Prompt), by URL or from bytes. Plain text prompts work as before.
 //! - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with [`ToolOutput`](crate::tool::ToolOutput).
-//! - **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, Fish Audio, oMLX), including dialogues of several voices, and clones voices from your code.
+//! - **Speech, voice cloning and voice design**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, Fish Audio, oMLX), including dialogues of several voices, and clones or designs voices from your code.
 //! - **Video generation**: The [`agentai-video`](https://docs.rs/agentai-video) crate submits video jobs, follows them and downloads the result (comfy-serve, OpenRouter), from text, frames or reference files.
 //! - **Background tools**: A tool can start slow work in the background and answer at once; the agent tells the model when the work is done.
 //! - **Cost and context control**: Cap the dollar cost of runs with a budget, and trim images and reasoning from what is sent to the model with history processors.
 //! - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 //!
 //! ## What's New
+//!
+//! #### 0.7.1 - Voice design
+//!
+//! - **Design voices from a description**: `SpeechGenerator::design_voice(description, text, count)` in
+//!   `agentai-audio` returns `VoicePreview`s to listen to, and `create_voice` keeps one as a voice you use
+//!   with `Voice::id`. Fish Audio, ElevenLabs and oMLX can design voices; `supports_voice_design()` tells
+//!   whether yours can. The new `design_voice` example shows the whole flow.
+//! - **Cloning and designing share `create_voice`**: it takes a `VoiceSource`, either
+//!   `VoiceSource::samples(samples, transcript)` or a preview from `design_voice`.
+//!
+//! **Breaking changes**: a voice is always an ID (voices given as a description, and the description flag of the
+//! `list_voices` tool, are removed), and `create_voice` takes a `VoiceSource`.
+//! Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+//! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#070--071-yyyy-mm-dd)
+//! before upgrading.
 //!
 //! #### 0.7.0 - Background tools, video generation, history processors, budgets
 //!

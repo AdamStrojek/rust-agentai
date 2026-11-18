@@ -1,8 +1,9 @@
 # agentai-audio
 
-Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai).
+Text-to-speech, voice cloning and voice design for [AgentAI](https://crates.io/crates/agentai).
 
-- `SpeechGenerator` speaks texts and clones voices from your code. OpenAI and ElevenLabs need a voice
+- `SpeechGenerator` speaks texts, clones voices from samples and designs voices from a description
+  (`design_voice` returns previews, `create_voice` keeps one; Fish Audio, ElevenLabs and oMLX), from your code. OpenAI and ElevenLabs need a voice
   (a default one or one per request), or the request fails with `MissingVoice`.
 - With the `toolbox` feature (on by default), `SpeechToolBox` gives an agent the `generate_speech` and
   `list_voices` tools. The model gets only the metadata of the audio as JSON by default
@@ -29,4 +30,4 @@ let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
 let response = generator.generate("Good morning").await?;
 ```
 
-See the `speech_generator`, `speech_tools`, `clone_voice` and `dialogue` examples.
+See the `speech_generator`, `speech_tools`, `clone_voice`, `design_voice` and `dialogue` examples.

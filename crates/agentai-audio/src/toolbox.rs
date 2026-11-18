@@ -58,8 +58,8 @@ impl SpeechToolBox {
     }
 
     /// Limits the voices to this list: `list_voices` returns it, and a voice the model gives
-    /// that is not in it is rejected. Use it whenever cloned voices exist: without it the model can use any stored
-    /// or account voice by its ID.
+    /// that is not in it is rejected. Use it whenever cloned voices exist: without it the model
+    /// can use any stored or account voice by its ID.
     pub fn with_voices(mut self, voices: Vec<VoiceInfo>) -> Self {
         self.voices = Some(voices);
         self
@@ -424,7 +424,6 @@ mod tests {
         let output = call_done(&all, "list_voices", json!({})).await;
         let json = text_json(&output);
         assert_eq!(json["voices"].as_array().unwrap().len(), 13);
-        assert!(json.get("descriptions_supported").is_none());
 
         let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("a", "A")]);
         let output = call_done(&own, "list_voices", json!({})).await;
@@ -442,7 +441,6 @@ mod tests {
 
         let json = text_json(&output);
         assert_eq!(json["voices"], json!([]));
-        assert!(json.get("descriptions_supported").is_none());
     }
 
     #[test]

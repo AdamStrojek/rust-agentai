@@ -7,11 +7,78 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.7.0 → 0.7.1 (YYYY-MM-DD)](#070--071-yyyy-mm-dd)
 - [0.6.0 → 0.7.0 (2026-11-18)](#060--070-2026-11-18)
 - [0.4.0 → 0.5.0 (2026-11-04)](#040--050-2026-11-04)
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.7.0 → 0.7.1 (YYYY-MM-DD)
+
+These changes are in `agentai-audio`.
+
+### Voices are IDs only
+
+`Voice::description(..)` and `Voice::auto(..)` are gone, and so are
+`SpeechGenerator::supports_voice_description()` and the `descriptions_supported` field in the
+answer of the `list_voices` tool. A voice is now always an ID, `Voice::id(..)`.
+
+To get a voice from a description, design it once, keep a preview and use its ID. Fish Audio,
+ElevenLabs and oMLX can design voices (`supports_voice_design()`).
+
+```rust,ignore
+// 0.7.0
+let request = SpeechRequest::new("Hello")
+    .with_voice(Voice::description("A warm, calm woman with a low voice"));
+
+// 0.7.1
+let description = "A warm, calm woman with a low voice";
+let previews = generator.design_voice(description, Some("Hello"), 2).await?;
+let id = generator.create_voice("narrator", &previews[0], Some(description)).await?;
+let request = SpeechRequest::new("Hello").with_voice(Voice::id(id));
+```
+
+OpenAI cannot design voices: put the style in `instructions` instead, with
+`SpeechRequest::with_instructions` (or the `instructions` argument of `generate_speech`).
+
+`Voice::auto(x)` was a plain ID with a fallback to a description, and is now `Voice::id(x)`:
+
+```rust,ignore
+// 0.7.0
+let voice = Voice::auto("nova");
+
+// 0.7.1
+let voice = Voice::id("nova");
+```
+
+With `SpeechToolBox`, a `voice` the model gives is now always sent as an ID. With `with_voices`, a
+voice that is not in the list fails with a tool error the model can read, as before for providers
+without descriptions.
+
+### `create_voice` takes a `VoiceSource`
+
+The samples and their transcript are one `VoiceSource`. A preview from `design_voice` is another
+source, so `create_voice` also keeps a designed voice.
+
+```rust,ignore
+// 0.7.0
+let id = generator
+    .create_voice("me", &[sample], Some("What is said in the sample"), None)
+    .await?;
+
+// 0.7.1
+let id = generator
+    .create_voice(
+        "me",
+        VoiceSource::samples(vec![sample], Some("What is said in the sample")),
+        None,
+    )
+    .await?;
+```
+
+Code that implements `SpeechProvider::create_voice` gets the same `VoiceSource` instead of
+`samples` and `transcript`.
 
 ## 0.6.0 → 0.7.0 (2026-11-18)
 

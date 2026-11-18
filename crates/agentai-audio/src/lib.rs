@@ -1,6 +1,6 @@
 //! # AgentAI Audio
 //!
-//! Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai): from your
+//! Text-to-speech, voice cloning and voice design for [AgentAI](https://crates.io/crates/agentai): from your
 //! code with [`SpeechGenerator`], or by an agent with [`SpeechToolBox`] (feature `toolbox`).
 //!
 //! ## Speaking texts
@@ -86,6 +86,36 @@
 //!     .await?;
 //! let response = generator
 //!     .generate_with(SpeechRequest::new("Hello").with_voice(Voice::id(voice)))
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Designing voices
+//!
+//! [`SpeechGenerator::design_voice`] makes voices from a description, for providers that can
+//! ([`supports_voice_design`](SpeechGenerator::supports_voice_design)): Fish Audio, ElevenLabs and
+//! oMLX (with a model that turns `instructions` into a voice). It returns previews to listen to;
+//! [`create_voice`](SpeechGenerator::create_voice) keeps one as a voice, and its ID goes to
+//! [`Voice::id`] like any other. Fish Audio returns `count` previews and ElevenLabs its own number;
+//! oMLX needs the text and a [`VoiceStore`] to keep a preview.
+//! ElevenLabs needs the description again to save a preview.
+//!
+//! ```rust,no_run
+//! use agentai_audio::{SpeechGenerator, SpeechRequest, Voice};
+//!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let generator = SpeechGenerator::new("fishaudio::s2-pro")?;
+//! let description = "A warm, calm woman with a low voice";
+//! let previews = generator
+//!     .design_voice(description, Some("Welcome back."), 2)
+//!     .await?;
+//! // Listen to `previews[n].audio`, then keep the one you like
+//! let voice = generator
+//!     .create_voice("narrator", &previews[0], Some(description))
+//!     .await?;
+//! let response = generator
+//!     .generate_with(SpeechRequest::new("Good evening").with_voice(Voice::id(voice)))
 //!     .await?;
 //! # Ok(())
 //! # }
