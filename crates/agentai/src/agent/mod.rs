@@ -15,6 +15,8 @@ use genai::Client;
 use std::sync::Arc;
 use thiserror::Error;
 
+#[cfg(feature = "budget")]
+mod budget;
 mod core;
 mod model;
 mod request;
@@ -84,6 +86,12 @@ pub enum AgentError {
         #[source]
         source: ToolError,
     },
+    /// The [budget](Agent::with_budget) refused the next model call: its dollar limit is used up
+    /// or its kill switch is on. Also returned before the first call when the model has no price
+    /// ([`BudgetError::UnknownModel`](llm_budget::BudgetError::UnknownModel)).
+    #[cfg(feature = "budget")]
+    #[error("the budget refused the model call: {0}")]
+    Budget(#[source] llm_budget::BudgetError),
 }
 
 impl AgentError {
@@ -192,6 +200,14 @@ pub struct Agent {
     /// Options sent with every request
     chat_options: ChatOptions,
 
+    /// Dollar limit that every model call is charged to
+    #[cfg(feature = "budget")]
+    budget: Option<Arc<llm_budget::AgentBudget>>,
+
+    /// Prices used to charge the budget, `None` for the table built into `llm-budget`
+    #[cfg(feature = "budget")]
+    price_table: Option<Arc<llm_budget::PriceTable>>,
+
     /// Change the messages before every model call, in order
     history_processors: Vec<Arc<dyn HistoryProcessor>>,
 }
@@ -283,6 +299,10 @@ impl Agent {
             toolbox: None,
             max_iterations: DEFAULT_MAX_ITERATIONS,
             chat_options: ChatOptions::default(),
+            #[cfg(feature = "budget")]
+            budget: None,
+            #[cfg(feature = "budget")]
+            price_table: None,
             history_processors: Vec::new(),
         }
     }
@@ -338,6 +358,58 @@ impl Agent {
     pub fn with_chat_options(mut self, chat_options: ChatOptions) -> Self {
         self.chat_options = chat_options;
         self
+    }
+
+    /// Charges every model call of every run to `budget`, a dollar limit from the
+    /// [`llm_budget`] crate (feature `budget`).
+    ///
+    /// Each call is priced from the token usage the provider reports, with prompt-cache prices,
+    /// at the price of the run's model in the table built into `llm-budget`, or in the table set
+    /// with [`with_price_table`](Agent::with_price_table). Before every model call the run checks
+    /// the budget and stops with [`AgentError::Budget`] when nothing is left or its kill switch is
+    /// on. A completed call is always booked, even when it crosses the limit. A streamed
+    /// call that fails partway is not booked, because its usage is unknown. [`AgentResult::cost_usd`] holds the cost of the run.
+    ///
+    /// The budget is shared: keep a clone of the [`Arc`] to read the spend of all runs together,
+    /// for example of a whole conversation, or to share one limit between several agents.
+    ///
+    /// ```no_run
+    /// use agentai::{Agent, AgentResult};
+    /// use agentai::llm_budget::AgentBudget;
+    /// use std::sync::Arc;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let budget = Arc::new(AgentBudget::builder("support-bot", 5.0).build()?);
+    /// let agent = Agent::new("gpt-4o", "You are a useful assistant")?.with_budget(budget.clone());
+    ///
+    /// let result: AgentResult<String> = agent.run("Why is the sky blue?").await?;
+    /// println!("{} tokens, ${:.4}", result.usage.total_tokens, result.cost_usd.unwrap_or_default());
+    /// println!("${:.4} of ${} spent", budget.spent_usd(), budget.limit_usd());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// A run whose model has no price fails with [`AgentError::Budget`] before calling it: add the
+    /// price with [`with_price_table`](Agent::with_price_table).
+    #[cfg(feature = "budget")]
+    pub fn with_budget(mut self, budget: Arc<llm_budget::AgentBudget>) -> Self {
+        self.budget = Some(budget);
+        self
+    }
+
+    /// Prices the calls charged to the [budget](Agent::with_budget) with `prices` instead of the
+    /// table built into `llm-budget`, for example to add a local or fine-tuned model, or a newer
+    /// copy of LiteLLM's price list ([`PriceTable::from_litellm_json`](llm_budget::PriceTable::from_litellm_json)).
+    #[cfg(feature = "budget")]
+    pub fn with_price_table(mut self, prices: llm_budget::PriceTable) -> Self {
+        self.price_table = Some(Arc::new(prices));
+        self
+    }
+
+    /// Returns the budget set with [`with_budget`](Agent::with_budget).
+    #[cfg(feature = "budget")]
+    pub fn budget(&self) -> Option<&Arc<llm_budget::AgentBudget>> {
+        self.budget.as_ref()
     }
 
     /// Adds a [`HistoryProcessor`] that changes the messages before every model call, for

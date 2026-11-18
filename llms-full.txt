@@ -17,7 +17,7 @@ Add `serde` (with `derive`) and `schemars` 1.x (with `derive`) for structured ou
 
 ### Feature flags
 
-All features are on by default, except `rustls-aws-lc` and `native-tls`.
+All features are on by default, except `rustls-aws-lc`, `native-tls` and `budget`.
 
 | Feature | Enables |
 |---|---|
@@ -30,6 +30,7 @@ All features are on by default, except `rustls-aws-lc` and `native-tls`.
 | `tools-web` | `agentai::tool::web`: Brave web search and URL fetch (turns on `macros`) |
 | `mcp-client` | `agentai::tool::mcp`: tools served by an MCP server, over stdio or Streamable HTTP (built on `rmcp`) |
 | `tokio` | tokio integrations, such as `AgentStream::print_to_tokio` for writing a stream to a tokio writer |
+| `budget` | dollar spend limits with `llm-budget` (re-exported as `agentai::llm_budget`): `Agent::with_budget`, see Configuration |
 
 For a minimal build: `agentai = { version = "0.6", default-features = false, features = ["macros", "rustls-ring"] }`. Without a TLS feature HTTPS requests fail. `agentai-image` and `agentai-audio` have the same TLS features.
 
@@ -274,6 +275,7 @@ let agent = Agent::new("gpt-4o", "You are a useful assistant")?
 - Provider-specific options `agentai` has no field for: `with_extra_header(name, value)` adds an HTTP header (same name replaces, so join several `anthropic-beta` values with commas) and `with_extra_body(json!({..}))` merges fields into the request body. The merge is shallow: a top-level field replaces the whole field agentai would send, so give the complete object. Example: Anthropic rejects thinking blocks created before the system prompt, tools or earlier messages changed (400 "bound to a different conversation"); to have them dropped instead, send `.with_extra_header("anthropic-beta", "thinking-binding-controls-2026-08-01").with_extra_body(json!({"thinking": {"type": "adaptive", "display": "summarized", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}}))` (this `thinking` replaces the one built from `reasoning_effort`). For a stored history whose system prompt changed, removing its reasoning parts once and saving it also works.
 - `max_iterations()` and `chat_options()` return the current values.
 - Any of these can be replaced for a single run, see Asking a question.
+- `with_budget(Arc<llm_budget::AgentBudget>)` (feature `budget`): charges every model call to a dollar limit, priced from the reported token usage (with prompt-cache prices) at the model's price in `llm-budget`'s built-in table, or in your own `with_price_table(PriceTable)`. Before each call the run checks the budget and stops with `AgentError::Budget` when nothing is left or its kill switch is on; a completed call is always booked (a streamed call that fails partway is not, because its usage is unknown). `AgentResult::cost_usd` is the cost of the run (`None` without a budget). Keep a clone of the `Arc` to read `spent_usd()` across runs. A model with no price fails with `AgentError::Budget(BudgetError::UnknownModel(..))` before the first call.
 
 ## Structured output
 
