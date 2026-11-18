@@ -321,7 +321,9 @@ pub trait VideoProvider: Send + Sync + 'static {
         false
     }
 
-    /// Cancels the job. Default: [`VideoError::Unsupported`].
+    /// Cancels the job. A running job stops a moment later: [`status`](VideoProvider::status) may
+    /// still say [`JobStatus::Running`] right after, and then [`JobStatus::Gone`]. Default:
+    /// [`VideoError::Unsupported`].
     async fn cancel(&self, _job: &VideoJob) -> Result<(), VideoError> {
         Err(VideoError::Unsupported("cancelling a job"))
     }
