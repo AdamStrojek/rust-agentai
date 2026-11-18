@@ -1,9 +1,11 @@
 # agentai-audio
 
-Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai).
+Text-to-speech, voice cloning and voice design for [AgentAI](https://crates.io/crates/agentai).
 
-- `SpeechGenerator` speaks texts and clones voices from your code. OpenAI and ElevenLabs need a voice
-  (a default one or one per request), or the request fails with `MissingVoice`.
+- `SpeechGenerator` speaks texts, clones voices from samples and designs voices from a description
+  (`design_voice` returns previews, `create_voice` keeps one; Fish Audio, ElevenLabs and oMLX), from
+  your code. OpenAI and ElevenLabs need a voice (a default one or one per request), or the request
+  fails with `MissingVoice`.
 - With the `toolbox` feature (on by default), `SpeechToolBox` gives an agent the `generate_speech` and
   `list_voices` tools. The model gets only the metadata of the audio as JSON by default
   (`SpeechToolOutput::Metadata`), or the audio itself (`SpeechToolOutput::Media`); `with_voices` limits
@@ -17,7 +19,8 @@ Text-to-speech and voice cloning for [AgentAI](https://crates.io/crates/agentai)
   return `Unsupported` for more.
 - `SpeechRequest::with_timestamps(true)` returns the time of every word in `SpeechResponse::timestamps`
   (Fish Audio, through its timestamp stream; other providers return `Unsupported`).
-- Audio is returned as an `agentai` `Media` and can be saved in any `MediaStorage` from `agentai_audio::storage`, re-exported from `agentai-core`.
+- Audio is returned as an `agentai` `Media` and can be saved in any `MediaStorage` from
+  `agentai_audio::storage`, re-exported from `agentai-core`.
 - TLS features as in `agentai`: `rustls-ring` (default), `rustls-aws-lc`, `native-tls`, `system-proxy`.
 
 ```rust,ignore
@@ -29,4 +32,4 @@ let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
 let response = generator.generate("Good morning").await?;
 ```
 
-See the `speech_generator`, `speech_tools`, `clone_voice` and `dialogue` examples.
+See the `speech_generator`, `speech_tools`, `clone_voice`, `design_voice` and `dialogue` examples.

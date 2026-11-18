@@ -13,7 +13,7 @@
 
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, base64};
+use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, VoiceSource, base64};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,7 +32,11 @@ async fn main() -> anyhow::Result<()> {
 
     let sample = Media::from_bytes("audio/wav", std::fs::read(&sample_path)?);
     let voice_id = generator
-        .create_voice("sample", &[sample], Some(&transcript), None)
+        .create_voice(
+            "sample",
+            VoiceSource::samples(vec![sample], Some(&transcript)),
+            None,
+        )
         .await?;
     println!("Cloned voice {voice_id}");
 

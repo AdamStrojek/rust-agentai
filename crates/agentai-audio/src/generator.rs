@@ -1,14 +1,13 @@
-//! [`SpeechGenerator`]: speak texts and clone voices from your code.
+//! [`SpeechGenerator`]: speak texts, clone voices and design voices from your code.
 
 use crate::provider::{
     self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
-    Voice, VoiceInfo,
+    Voice, VoiceInfo, VoicePreview, VoiceSource,
 };
-use agentai_core::message::Media;
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
 
-/// Speaks texts and clones voices with a [`SpeechProvider`].
+/// Speaks texts, clones voices and designs voices with a [`SpeechProvider`].
 ///
 /// It is cheap to clone: clones share the provider and the storage.
 ///
@@ -109,11 +108,6 @@ impl SpeechGenerator {
         self.provider.supports_voice_cloning()
     }
 
-    /// Returns `true` when the provider accepts [`Voice::Description`].
-    pub fn supports_voice_description(&self) -> bool {
-        self.provider.supports_voice_description()
-    }
-
     /// Speaks a text.
     pub async fn generate(&self, text: impl Into<String>) -> Result<SpeechResponse, AudioError> {
         self.generate_with(SpeechRequest::new(text)).await
@@ -140,19 +134,35 @@ impl SpeechGenerator {
         Ok(response)
     }
 
-    /// Clones a voice from recordings (`samples`) and returns the ID to use with [`Voice::id`].
-    /// `transcript` is what is said in the sample; oMLX rejects a cloned voice without it when
-    /// the voice speaks. Fails with [`AudioError::Unsupported`] when the provider cannot clone voices.
+    /// Creates a voice and returns the ID to use with [`Voice::id`]: from recordings to clone
+    /// ([`VoiceSource::samples`]) or by keeping a designed [`VoicePreview`](crate::VoicePreview) (passed as is).
+    /// Fails with [`AudioError::Unsupported`] when the provider cannot do that.
     pub async fn create_voice(
         &self,
         name: &str,
-        samples: &[Media],
-        transcript: Option<&str>,
+        source: impl Into<VoiceSource>,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
         self.provider
-            .create_voice(name, samples, transcript, description)
+            .create_voice(name, source.into(), description)
             .await
+    }
+
+    /// Returns `true` when the provider can design voices.
+    pub fn supports_voice_design(&self) -> bool {
+        self.provider.supports_voice_design()
+    }
+
+    /// Designs voices from a text description and returns previews to choose from, see
+    /// [`SpeechProvider::design_voice`]. Keep one with [`create_voice`](Self::create_voice).
+    /// Fails with [`AudioError::Unsupported`] when the provider cannot design voices.
+    pub async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        self.provider.design_voice(description, text, count).await
     }
 
     /// Lists the voices of the provider.

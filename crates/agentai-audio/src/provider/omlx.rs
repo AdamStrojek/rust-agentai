@@ -1,17 +1,22 @@
 //! # oMLX speech API
 //!
-//! [`OmlxProvider`] speaks text with `POST /audio/speech` of an oMLX
-//! server, for example with `mlx-community/VoxCPM2-8bit`. The server has no voice list: a voice
-//! is a text description (sent as `instructions`) or a cloned voice. oMLX clones from a sample
+//! [`OmlxProvider`] speaks text with `POST /audio/speech` of an oMLX server, for example with
+//! `mlx-community/VoxCPM2-8bit`. The server has no voice list: a voice is a cloned voice; without
+//! one the model's own voice is used, styled by `instructions`. oMLX clones from a sample
 //! sent with every request (`ref_audio` and `ref_text`), so the provider keeps the samples in a
 //! [`VoiceStore`] set with [`with_voice_store`](OmlxProvider::with_voice_store).
+//!
+//! There is no design endpoint: [`design_voice`](SpeechProvider::design_voice) speaks the text
+//! once per candidate with the description as `instructions`, which models with a designable
+//! voice (VoxCPM2 and alike) turn into a voice. Keep a preview with `create_voice`, which needs
+//! a `VoiceStore` like any cloned voice.
 //!
 //! Every field of a request has an equivalent, so none is left out. What the server does not
 //! accept comes back as [`AudioError::Api`].
 
 use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    audio_media,
+    VoicePreview, VoiceSource, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::{Media, MediaSource};
@@ -102,40 +107,20 @@ impl OmlxProvider {
         self
     }
 
-    /// The cloned voice and the instructions of a request.
-    async fn resolve(
-        &self,
-        request: &SpeechRequest,
-    ) -> Result<(Option<StoredVoice>, Option<String>), AudioError> {
-        let mut description = None;
-        let mut cloned = None;
-        match request.single_voice()? {
-            None => {}
-            Some(Voice::Description(text)) => description = Some(text.clone()),
-            Some(Voice::Id(id)) => {
-                let store = self
-                    .store
-                    .as_ref()
-                    .ok_or(AudioError::Unsupported("voice IDs without a voice store"))?;
-                cloned = Some(store.get(id).await?.ok_or_else(|| {
-                    AudioError::InvalidRequest(format!("no cloned voice with id '{id}'"))
-                })?);
-            }
-            Some(Voice::Auto(text)) => {
-                if let Some(store) = &self.store {
-                    cloned = store.get(text).await?;
-                }
-                if cloned.is_none() {
-                    description = Some(text.clone());
-                }
-            }
-        }
-        let instructions = match (description, &request.instructions) {
-            (Some(description), Some(extra)) => Some(format!("{description}\n{extra}")),
-            (Some(description), None) => Some(description),
-            (None, extra) => extra.clone(),
+    /// The cloned voice of a request.
+    async fn resolve(&self, request: &SpeechRequest) -> Result<Option<StoredVoice>, AudioError> {
+        let Some(Voice::Id(id)) = request.single_voice()? else {
+            return Ok(None);
         };
-        Ok((cloned, instructions))
+        let store = self
+            .store
+            .as_ref()
+            .ok_or(AudioError::Unsupported("voice IDs without a voice store"))?;
+        let voice = store
+            .get(id)
+            .await?
+            .ok_or_else(|| AudioError::InvalidRequest(format!("no cloned voice with id '{id}'")))?;
+        Ok(Some(voice))
     }
 }
 
@@ -177,7 +162,8 @@ impl SpeechProvider for OmlxProvider {
     async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
         request.without_timestamps()?;
         let response_format = request.format.map(format_name);
-        let (cloned, instructions) = self.resolve(&request).await?;
+        let cloned = self.resolve(&request).await?;
+        let instructions = request.instructions.clone();
         let ref_audio = match cloned.as_ref().map(|voice| &voice.sample.source) {
             Some(MediaSource::Base64(data)) => Some(data.as_str()),
             // `create_voice` stores base64, but a custom store may hold anything
@@ -221,14 +207,21 @@ impl SpeechProvider for OmlxProvider {
     async fn create_voice(
         &self,
         name: &str,
-        samples: &[Media],
-        transcript: Option<&str>,
+        source: VoiceSource,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
+        let VoiceSource::Samples {
+            samples,
+            transcript,
+        } = source
+        else {
+            return Err(AudioError::Unsupported("saving a designed voice"));
+        };
+        let transcript = transcript.as_deref();
         let store = self.store.as_ref().ok_or(AudioError::Unsupported(
             "voice cloning without a voice store",
         ))?;
-        let [sample] = samples else {
+        let [sample] = samples.as_slice() else {
             return Err(AudioError::InvalidRequest(format!(
                 "oMLX clones from exactly one sample, got {}",
                 samples.len()
@@ -247,8 +240,36 @@ impl SpeechProvider for OmlxProvider {
         Ok(store.save(voice).await?)
     }
 
-    fn supports_voice_description(&self) -> bool {
+    fn supports_voice_design(&self) -> bool {
         true
+    }
+
+    /// Emulates voice design: speaks `text` `count` times with `description` as `instructions`,
+    /// one request after another. `text` is required. The previews have no ID: keep one by
+    /// sending it to `create_voice` (needs a voice store).
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let text = text.ok_or_else(|| {
+            AudioError::InvalidRequest(
+                "oMLX designs a voice by speaking a text; give one".to_string(),
+            )
+        })?;
+        let mut previews = Vec::with_capacity(count);
+        for _ in 0..count {
+            let response = self
+                .generate(SpeechRequest::new(text).with_instructions(description))
+                .await?;
+            let mut preview = VoicePreview::new(response.audio).with_text(text);
+            if let Some(rate) = response.sample_rate {
+                preview = preview.with_sample_rate(rate);
+            }
+            previews.push(preview);
+        }
+        Ok(previews)
     }
 
     /// The cloned voices of the voice store.
@@ -295,11 +316,27 @@ mod tests {
     async fn cloned(http: &MockHttp, transcript: Option<&str>) -> OmlxProvider {
         let p = provider(http).with_voice_store(MemoryVoiceStore::new());
         let id = p
-            .create_voice("Adam", &[sample()], transcript, None)
+            .create_voice(
+                "Adam",
+                VoiceSource::samples(vec![sample()], transcript),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(id, "voice-1");
         p
+    }
+
+    #[tokio::test]
+    async fn a_sample_id_is_unsupported() {
+        let http = MockHttp::new(vec![]);
+        let err = cloned(&http, None)
+            .await
+            .create_voice("a", VoiceSource::SampleId("g1".into()), None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Unsupported(_)));
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
@@ -338,7 +375,11 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         assert!(p.supports_voice_cloning());
         let id = p
-            .create_voice("Adam", &[sample()], Some("hello"), None)
+            .create_voice(
+                "Adam",
+                VoiceSource::samples(vec![sample()], Some("hello")),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(id, "voice-1");
@@ -365,41 +406,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_is_a_clone_only_when_stored() {
-        let http = MockHttp::new(vec![audio(), audio()]);
-        let p = cloned(&http, Some("hello")).await;
-        p.generate(SpeechRequest::new("hi").with_voice(Voice::auto("voice-1")))
-            .await
-            .unwrap();
-        let body = body_json(&http.request(0));
-        assert_eq!(body["ref_audio"], json!("V0FW"));
-        assert!(body.get("instructions").is_none());
-        p.generate(SpeechRequest::new("hi").with_voice(Voice::auto("deep male voice")))
-            .await
-            .unwrap();
-        let body = body_json(&http.request(1));
-        assert_eq!(body["instructions"], json!("deep male voice"));
-        assert!(body.get("ref_audio").is_none());
-    }
-
-    #[tokio::test]
-    async fn description_joins_instructions() {
-        let http = MockHttp::new(vec![audio()]);
-        provider(&http)
-            .generate(
-                SpeechRequest::new("hi")
-                    .with_voice(Voice::description("warm"))
-                    .with_instructions("slowly"),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            body_json(&http.request(0))["instructions"],
-            json!("warm\nslowly")
-        );
-    }
-
-    #[tokio::test]
     async fn the_default_voice_resolves_like_a_voice() {
         let http = MockHttp::new(vec![audio()]);
         let p = cloned(&http, Some("hello")).await;
@@ -415,7 +421,8 @@ mod tests {
         let p = provider(&http);
         assert!(!p.supports_voice_cloning());
         assert!(matches!(
-            p.create_voice("A", &[sample()], None, None).await,
+            p.create_voice("A", VoiceSource::samples(vec![sample()], None), None)
+                .await,
             Err(AudioError::Unsupported(_))
         ));
         assert!(matches!(
@@ -428,7 +435,7 @@ mod tests {
             Err(AudioError::Unsupported(_))
         ));
         assert_eq!(http.request_count(), 0);
-        p.generate(SpeechRequest::new("hi").with_voice(Voice::auto("x")))
+        p.generate(SpeechRequest::new("hi").with_instructions("x"))
             .await
             .unwrap();
         assert_eq!(body_json(&http.request(0))["instructions"], json!("x"));
@@ -453,7 +460,8 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         for samples in [vec![], vec![sample(), sample()]] {
             assert!(matches!(
-                p.create_voice("A", &samples, None, None).await,
+                p.create_voice("A", VoiceSource::samples(samples.clone(), None), None)
+                    .await,
                 Err(AudioError::InvalidRequest(_))
             ));
         }
@@ -467,7 +475,7 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
         let id = p
-            .create_voice("A", &[url_sample], None, None)
+            .create_voice("A", VoiceSource::samples(vec![url_sample], None), None)
             .await
             .unwrap();
         let stored = store.get(&id).await.unwrap().unwrap();
@@ -489,7 +497,9 @@ mod tests {
         let store = MemoryVoiceStore::new();
         let p = provider(&http).with_voice_store(store.clone());
         let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
-        let result = p.create_voice("A", &[url_sample], None, None).await;
+        let result = p
+            .create_voice("A", VoiceSource::samples(vec![url_sample], None), None)
+            .await;
         assert!(matches!(result, Err(AudioError::Api { status: 404, .. })));
         assert!(store.list().await.unwrap().is_empty());
     }
@@ -498,10 +508,13 @@ mod tests {
     async fn list_voices_reads_the_store() {
         let http = MockHttp::new(vec![]);
         let p = provider(&http).with_voice_store(MemoryVoiceStore::new());
-        assert!(p.supports_voice_description());
-        p.create_voice("Adam", &[sample()], None, Some("calm"))
-            .await
-            .unwrap();
+        p.create_voice(
+            "Adam",
+            VoiceSource::samples(vec![sample()], None),
+            Some("calm"),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             p.list_voices().await.unwrap(),
             vec![
@@ -517,9 +530,59 @@ mod tests {
         let p = provider(&MockHttp::new(vec![])).with_voice_store(MemoryVoiceStore::new());
         let sample = Media::from_base64("audio/wav", "data:audio/wav;base64,V0FW");
         let err = p
-            .create_voice("A", &[sample], None, None)
+            .create_voice("A", VoiceSource::samples(vec![sample], None), None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn design_voice_speaks_the_text_once_per_candidate() {
+        let http = MockHttp::new(vec![audio(), audio()]);
+        let previews = provider(&http)
+            .design_voice("deep calm voice", Some("Hello"), 2)
+            .await
+            .unwrap();
+        assert_eq!(previews.len(), 2);
+        for (i, preview) in previews.iter().enumerate() {
+            let req = http.request(i);
+            assert_eq!(req.url, "http://local/v1/audio/speech");
+            assert_eq!(
+                body_json(&req),
+                json!({"model": "m", "input": "Hello", "instructions": "deep calm voice"})
+            );
+            assert_eq!(preview.audio.content_type, "audio/wav");
+            assert_eq!(preview.audio.bytes(&http).await.unwrap(), b"audio");
+            assert_eq!(preview.text.as_deref(), Some("Hello"));
+            assert_eq!(preview.sample_id, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn design_voice_needs_a_text() {
+        let http = MockHttp::new(vec![]);
+        let err = provider(&http)
+            .design_voice("x", None, 1)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::InvalidRequest(_)));
+        assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_designed_voice_can_be_saved_and_spoken() {
+        let http = MockHttp::new(vec![audio(), audio()]);
+        let p = provider(&http).with_voice_store(MemoryVoiceStore::new());
+        let previews = p.design_voice("calm", Some("Hello"), 1).await.unwrap();
+        let id = p
+            .create_voice("calm", VoiceSource::from(&previews[0]), None)
+            .await
+            .unwrap();
+        p.generate(SpeechRequest::new("hi").with_voice(Voice::id(&id)))
+            .await
+            .unwrap();
+        let body = body_json(&http.request(1));
+        assert_eq!(body["ref_text"], json!("Hello"));
+        assert_eq!(body["ref_audio"], json!("YXVkaW8="));
     }
 }

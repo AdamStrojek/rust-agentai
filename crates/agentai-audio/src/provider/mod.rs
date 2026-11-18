@@ -12,7 +12,7 @@ use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
 use agentai_core::{HttpError, HttpResponse};
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// The voice that speaks.
@@ -21,10 +21,6 @@ use thiserror::Error;
 pub enum Voice {
     /// The ID of a preset or cloned voice, as the provider names it.
     Id(String),
-    /// A description of the voice to synthesize.
-    Description(String),
-    /// Let the provider decide whether the text is an ID or a description.
-    Auto(String),
 }
 
 impl Voice {
@@ -32,15 +28,91 @@ impl Voice {
     pub fn id(id: impl Into<String>) -> Self {
         Self::Id(id.into())
     }
+}
 
-    /// Creates a voice from a description.
-    pub fn description(description: impl Into<String>) -> Self {
-        Self::Description(description.into())
+/// What a voice is created from, see [`create_voice`](SpeechProvider::create_voice).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum VoiceSource {
+    /// Recordings to clone. `transcript` is what is said in them.
+    Samples {
+        samples: Vec<Media>,
+        transcript: Option<String>,
+    },
+    /// The ID of a designed voice preview, see [`VoicePreview::sample_id`].
+    SampleId(String),
+}
+
+impl VoiceSource {
+    /// Recordings to clone, with the text said in them if known.
+    pub fn samples(samples: Vec<Media>, transcript: Option<&str>) -> Self {
+        Self::Samples {
+            samples,
+            transcript: transcript.map(str::to_string),
+        }
+    }
+}
+
+/// A sample of a designed voice: listen to it, and keep it with
+/// [`create_voice`](SpeechProvider::create_voice) if you like it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct VoicePreview {
+    /// The audio of the preview.
+    pub audio: Media,
+    /// The text spoken in the preview, if the provider reports it.
+    pub text: Option<String>,
+    /// The ID that saves the preview as a voice, for providers that keep previews.
+    pub sample_id: Option<String>,
+    /// Sample rate of the audio in Hz, if known.
+    pub sample_rate: Option<u32>,
+}
+
+impl VoicePreview {
+    /// Creates a preview from its audio; the other fields are empty.
+    pub fn new(audio: Media) -> Self {
+        Self {
+            audio,
+            text: None,
+            sample_id: None,
+            sample_rate: None,
+        }
     }
 
-    /// Creates a voice the provider resolves to an ID or a description.
-    pub fn auto(value: impl Into<String>) -> Self {
-        Self::Auto(value.into())
+    /// Sets the text spoken in the preview.
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+
+    /// Sets the ID that saves the preview as a voice.
+    pub fn with_sample_id(mut self, id: impl Into<String>) -> Self {
+        self.sample_id = Some(id.into());
+        self
+    }
+
+    /// Sets the sample rate in Hz.
+    pub fn with_sample_rate(mut self, rate: u32) -> Self {
+        self.sample_rate = Some(rate);
+        self
+    }
+}
+
+impl From<VoicePreview> for VoiceSource {
+    fn from(preview: VoicePreview) -> Self {
+        match preview.sample_id {
+            Some(id) => Self::SampleId(id),
+            None => Self::Samples {
+                samples: vec![preview.audio],
+                transcript: preview.text,
+            },
+        }
+    }
+}
+
+impl From<&VoicePreview> for VoiceSource {
+    fn from(preview: &VoicePreview) -> Self {
+        preview.clone().into()
     }
 }
 
@@ -82,8 +154,7 @@ pub struct SpeechRequest {
     /// who speaks in the provider's syntax, for example `<|speaker:0|>` for Fish Audio. Falls
     /// back to `default_voice` when empty.
     pub voices: Vec<Voice>,
-    /// Voice used when `voices` is empty, or when the voice is a description on a provider that
-    /// needs a base voice.
+    /// Voice used when `voices` is empty.
     pub default_voice: Option<Voice>,
     /// Output format. Not sent when `None`.
     pub format: Option<AudioFormat>,
@@ -411,23 +482,40 @@ pub trait SpeechProvider: Send + Sync + 'static {
         false
     }
 
-    /// Clones a voice from recordings (`samples`) and returns the ID to use with [`Voice::id`].
-    /// `transcript` is what is said in the sample; oMLX rejects a cloned voice without it when
-    /// the voice speaks. The default implementation returns [`AudioError::Unsupported`].
+    /// Creates a voice and returns the ID to use with [`Voice::id`]: from recordings to clone
+    /// ([`VoiceSource::Samples`]; `transcript` is what is said in them, and oMLX rejects a
+    /// cloned voice without it when the voice speaks) or by keeping a designed
+    /// [`VoicePreview`] ([`VoiceSource::SampleId`]). The default implementation returns
+    /// [`AudioError::Unsupported`].
     async fn create_voice(
         &self,
         name: &str,
-        samples: &[Media],
-        transcript: Option<&str>,
+        source: VoiceSource,
         description: Option<&str>,
     ) -> Result<String, AudioError> {
-        let _ = (name, samples, transcript, description);
+        let _ = (name, source, description);
         Err(AudioError::Unsupported("voice cloning"))
     }
 
-    /// Returns `true` when [`Voice::Description`] works.
-    fn supports_voice_description(&self) -> bool {
+    /// Returns `true` when the provider implements [`design_voice`](SpeechProvider::design_voice).
+    fn supports_voice_design(&self) -> bool {
         false
+    }
+
+    /// Designs voices from a text description and returns previews to listen to and choose
+    /// from. Keep one with [`create_voice`](SpeechProvider::create_voice) (its
+    /// [`VoiceSource::SampleId`] when the preview has one). `text` is what the previews say,
+    /// if the provider lets you choose, and `count` is how many candidates to ask for; a
+    /// provider may return its own number. The default implementation returns
+    /// [`AudioError::Unsupported`].
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let _ = (description, text, count);
+        Err(AudioError::Unsupported("voice design"))
     }
 
     /// Lists the voices of the API. The default implementation returns
@@ -526,6 +614,30 @@ pub async fn list_models(provider: &str) -> Result<Vec<AudioModel>, AudioError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_preview_with_sample_id_is_a_sample_id() {
+        let preview = VoicePreview::new(Media::from_bytes("audio/mpeg", b"A"))
+            .with_sample_id("g1")
+            .with_text("Hi");
+        assert_eq!(
+            VoiceSource::from(&preview),
+            VoiceSource::SampleId("g1".into())
+        );
+    }
+
+    #[test]
+    fn a_preview_without_sample_id_is_samples() {
+        let audio = Media::from_bytes("audio/wav", b"A");
+        let preview = VoicePreview::new(audio.clone()).with_text("Hi");
+        assert_eq!(
+            VoiceSource::from(preview),
+            VoiceSource::Samples {
+                samples: vec![audio],
+                transcript: Some("Hi".into())
+            }
+        );
+    }
 
     #[test]
     fn model_names_select_the_provider() {
