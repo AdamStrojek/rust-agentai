@@ -159,6 +159,14 @@ impl HttpResponse {
         find_header(&self.headers, name)
     }
 
+    /// The `Content-Type` header without its parameters, `None` when it is missing or empty.
+    pub fn content_type(&self) -> Option<&str> {
+        self.header("content-type")
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
     /// Parses the body as JSON.
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, HttpError> {
         serde_json::from_slice(&self.body).map_err(HttpError::Json)
