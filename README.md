@@ -55,7 +55,8 @@ This library is under heavy development. The interface may change at any time wi
 - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms; the
   media crates share its MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`).
 
-**Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order.
+**Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order;
+in `agentai-image` and `agentai-audio` a file name keeps only a known media extension.
 Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
 [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#060--070-YYYY-MM-DD)
 before upgrading.

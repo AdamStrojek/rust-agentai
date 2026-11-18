@@ -75,6 +75,24 @@ require changes to code that uses the existing constructors and builders. New `A
 `RunEvent` and `AgentError` variants likewise do not require changes to exhaustive matches that
 already include a wildcard arm.
 
+### `agentai-image`, `agentai-audio`: one rule for file names
+
+The name of a generated image or audio file, and of a file uploaded to a provider, keeps its
+extension only when that is a known image, audio or video extension. Any other name gets the
+extension of its type. Before, `agentai-image` kept every name that had a dot. A type without a
+usable name, such as `application/octet-stream`, now gives `bin`.
+
+```rust
+// 0.6.0: saved as `my.picture`
+// 0.7.0: saved as `my.picture.png`
+let response = generator
+    .generate_with(ImageRequest::new("A cat").with_name("my.picture"))
+    .await?;
+
+// To choose the name yourself, end it with a known extension
+let request = ImageRequest::new("A cat").with_name("my-picture.png");
+```
+
 ### `agentai-audio`: `SpeechRequest::voice` is now `voices`
 
 A request can carry several voices, in speaker order, for dialogue models such as Fish Audio
