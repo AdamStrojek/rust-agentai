@@ -12,8 +12,7 @@
 //! ```
 
 use agentai::MediaSource;
-use agentai_image::{ImageGenerator, ImageResponse};
-use base64::Engine;
+use agentai_image::{ImageGenerator, ImageResponse, base64};
 
 fn save(response: &ImageResponse, name: &str) -> anyhow::Result<()> {
     if let Some(prompt) = &response.revised_prompt {
@@ -22,17 +21,8 @@ fn save(response: &ImageResponse, name: &str) -> anyhow::Result<()> {
     match &response.image.source {
         MediaSource::Base64(data) => {
             std::fs::create_dir_all("images")?;
-            let extension = response
-                .image
-                .content_type
-                .rsplit('/')
-                .next()
-                .unwrap_or("png");
-            let path = format!("images/{name}.{extension}");
-            std::fs::write(
-                &path,
-                base64::engine::general_purpose::STANDARD.decode(data)?,
-            )?;
+            let path = format!("images/{name}.{}", response.image.extension());
+            std::fs::write(&path, base64::decode(data)?)?;
             println!("Saved {path}");
         }
         MediaSource::Url(url) => println!("The image is at {url}"),

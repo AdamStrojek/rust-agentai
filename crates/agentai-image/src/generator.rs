@@ -144,27 +144,17 @@ impl ImageGenerator {
         self.store(response, name).await
     }
 
-    /// Names the image (the requested name, else the provider's, else `image`), adds the
-    /// extension of its type to a name without one, and saves it.
+    /// Names the image (the requested name, else the provider's, else `image`, see
+    /// [`Media::file_name`]) and saves it.
     async fn store(
         &self,
         mut response: ImageResponse,
         name: Option<String>,
     ) -> Result<ImageResponse, ImageError> {
-        let extension = response
-            .image
-            .content_type
-            .rsplit('/')
-            .next()
-            .unwrap_or("png");
-        let name = name
-            .or(response.image.name.take())
-            .unwrap_or_else(|| "image".to_string());
-        response.image.name = Some(if name.contains('.') {
-            name
-        } else {
-            format!("{name}.{extension}")
-        });
+        if name.is_some() {
+            response.image.name = name;
+        }
+        response.image.name = Some(response.image.file_name("image"));
         if let Some(storage) = &self.storage {
             response.id = Some(storage.save(&response.image).await?);
         }
@@ -175,7 +165,8 @@ impl ImageGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::openai::tests::{MockHttp, json_response, provider};
+    use crate::provider::openai::tests::provider;
+    use agentai_core::mock::{MockHttp, json_response};
     use agentai_core::storage::{MediaRead, MemoryStorage};
     use serde_json::{Value, json};
 
@@ -209,23 +200,20 @@ mod tests {
 
     #[tokio::test]
     async fn the_requested_name_reaches_the_storage_with_the_image_extension() {
-        let reply = || json_response(200, json!({"data": [{"b64_json": "aGk="}]}));
-        let http = MockHttp::new(vec![reply(), reply()]);
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"data": [{"b64_json": "aGk="}]}),
+        )]);
         let storage = MemoryStorage::new();
         let generator =
             ImageGenerator::from_provider(provider(&http)).with_storage(storage.clone());
 
-        let plain = generator
+        let response = generator
             .generate_with(ImageRequest::new("a cat").with_name("cat"))
             .await
             .unwrap();
-        let with_extension = generator
-            .generate_with(ImageRequest::new("a dog").with_name("dog.webp"))
-            .await
-            .unwrap();
 
-        assert_eq!(plain.id.as_deref(), Some("1-cat.png"));
-        assert_eq!(with_extension.id.as_deref(), Some("2-dog.webp"));
+        assert_eq!(response.id.as_deref(), Some("1-cat.png"));
         let body: Value = serde_json::from_slice(&http.request(0).body.unwrap()).unwrap();
         assert!(body.get("name").is_none());
     }

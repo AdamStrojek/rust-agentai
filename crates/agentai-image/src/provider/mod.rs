@@ -34,7 +34,8 @@ pub struct ImageRequest {
     /// Quality, in the format of the provider (for example `high`). Not sent when `None`.
     pub quality: Option<String>,
     /// File name of the image, set as [`Media::name`] and so passed to the storage. Not sent
-    /// to the provider. Without an extension, the one of the image type is added.
+    /// to the provider. Unless it ends in a known extension, the one of the image type is added
+    /// (see [`Media::file_name`]).
     pub name: Option<String>,
 }
 

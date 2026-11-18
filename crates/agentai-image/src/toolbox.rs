@@ -250,8 +250,9 @@ impl ReadMediaToolBox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::openai::tests::{MockHttp, json_response, provider};
+    use crate::provider::openai::tests::provider;
     use agentai_core::message::{Media, Part};
+    use agentai_core::mock::{MockHttp, json_response};
     use agentai_core::storage::{MediaSave, MemoryStorage};
     use serde_json::{Value, json};
 
@@ -266,7 +267,7 @@ mod tests {
         )
     }
 
-    fn toolbox(http: &Arc<MockHttp>) -> GenerateImageToolBox {
+    fn toolbox(http: &MockHttp) -> GenerateImageToolBox {
         GenerateImageToolBox::new(
             ImageGenerator::from_provider(provider(http)).with_size("512x512"),
         )

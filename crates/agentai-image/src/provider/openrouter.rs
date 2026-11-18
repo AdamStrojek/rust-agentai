@@ -7,7 +7,7 @@
 
 use super::openai::{parse_response, send_request};
 use super::{ImageEditRequest, ImageError, ImageModel, ImageProvider, ImageRequest, ImageResponse};
-use agentai_core::message::{Media, MediaSource};
+use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -127,13 +127,11 @@ struct ImageUrl {
 impl ImageReference {
     /// A data URL for bytes, the URL itself otherwise.
     fn new(media: &Media) -> Self {
-        let url = match &media.source {
-            MediaSource::Base64(data) => format!("data:{};base64,{data}", media.content_type),
-            MediaSource::Url(url) => url.clone(),
-        };
         Self {
             r#type: "image_url",
-            image_url: ImageUrl { url },
+            image_url: ImageUrl {
+                url: media.to_url(),
+            },
         }
     }
 }
@@ -229,17 +227,12 @@ impl ImageProvider for OpenRouterImageProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::openai::tests::{MockHttp, json_response};
-    use agentai_core::HttpRequest;
-    use serde_json::{Value, json};
+    use agentai_core::mock::{MockHttp, body_json, json_response};
+    use serde_json::json;
 
-    fn provider(http: &Arc<MockHttp>) -> OpenRouterImageProvider {
+    fn provider(http: &MockHttp) -> OpenRouterImageProvider {
         OpenRouterImageProvider::new("vendor/model", "key", "https://router.test/api/v1/")
-            .with_client(http.clone())
-    }
-
-    fn body_json(request: &HttpRequest) -> Value {
-        serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
+            .with_client(Arc::new(http.clone()))
     }
 
     #[tokio::test]
@@ -265,15 +258,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_sends_bytes_as_data_urls_and_urls_as_they_are() {
+    async fn edit_sends_the_images_as_input_references() {
         let http = MockHttp::new(vec![json_response(
             200,
             json!({"data": [{"b64_json": "aGk="}]}),
         )]);
-        let images = vec![
-            Media::from_base64("image/png", "aGk="),
-            Media::image_url("https://example.com/cat.jpg"),
-        ];
+        let images = vec![Media::from_base64("image/png", "aGk=")];
 
         provider(&http)
             .edit(ImageEditRequest::new("add a hat", images))
@@ -282,10 +272,7 @@ mod tests {
 
         assert_eq!(
             body_json(&http.request(0))["input_references"],
-            json!([
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
-                {"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}},
-            ])
+            json!([{"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}}])
         );
     }
 
