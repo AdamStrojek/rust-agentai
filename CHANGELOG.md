@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.0...agentai-v0.7.1) - 2026-11-18
+
+### New features
+- *(audio)* design voices from a description and speak only with voice IDs ([#96](https://github.com/AdamStrojek/rust-agentai/pull/96)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ### Breaking changes
 
 See [MIGRATION.md](MIGRATION.md#070--071-yyyy-mm-dd) for migration steps from 0.7.0.
