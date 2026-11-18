@@ -1,4 +1,4 @@
-//! [`SpeechGenerator`]: speak texts and clone voices from your code.
+//! [`SpeechGenerator`]: speak texts, clone voices and design voices from your code.
 
 use crate::provider::{
     self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
@@ -7,7 +7,7 @@ use crate::provider::{
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
 
-/// Speaks texts and clones voices with a [`SpeechProvider`].
+/// Speaks texts, clones voices and designs voices with a [`SpeechProvider`].
 ///
 /// It is cheap to clone: clones share the provider and the storage.
 ///

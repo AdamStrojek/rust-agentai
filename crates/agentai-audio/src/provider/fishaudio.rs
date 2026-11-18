@@ -2,7 +2,8 @@
 //!
 //! [`FishAudioProvider`] speaks text with `POST /v1/tts`, creates voices in the Fish Audio
 //! account with `POST /model` and lists them with `GET /model`. The model (`s1`, `s2-pro`,
-//! `drama-3`, ...) goes in the `model` header.
+//! `drama-3`, ...) goes in the `model` header. It designs voices from a description with
+//! `POST /v1/voice-design`; a preview is kept with `create_voice`, which saves it as a sample.
 //!
 //! A request may have several voices ([`SpeechRequest::with_voices`]), for models that speak a
 //! dialogue (`drama-3` and the S2 family). Their order is the speaker index, and the text marks
@@ -331,7 +332,6 @@ impl SpeechProvider for FishAudioProvider {
         else {
             return Err(AudioError::Unsupported("saving a designed voice"));
         };
-        let samples = &samples[..];
         let transcript = transcript.as_deref();
         if samples.is_empty() {
             return Err(AudioError::InvalidRequest(
@@ -474,14 +474,9 @@ struct Candidate {
 
 /// The response names no audio type, so it is read from the first bytes (WAV or MP3).
 fn audio_type(bytes: &[u8]) -> &'static str {
-    let wav = bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE");
     let mp3 = bytes.starts_with(b"ID3")
         || (bytes.first() == Some(&0xFF) && bytes.get(1).is_some_and(|b| b & 0xE0 == 0xE0));
-    if mp3 && !wav {
-        "audio/mpeg"
-    } else {
-        "audio/wav"
-    }
+    if mp3 { "audio/mpeg" } else { "audio/wav" }
 }
 
 /// An event of `/v1/tts/stream/with-timestamp`.
@@ -575,7 +570,6 @@ struct ModelEntry {
 mod tests {
     use super::*;
     use crate::MemoryVoiceStore;
-    use crate::provider::VoiceSource;
     use agentai_core::HttpResponse;
     use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::{Value, json};
@@ -622,7 +616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sample_id_is_unsupported_without_a_store_of_previews() {
+    async fn a_sample_id_is_unsupported() {
         let http = MockHttp::new(vec![]);
         let err = provider(&http)
             .create_voice("a", VoiceSource::SampleId("g1".into()), None)

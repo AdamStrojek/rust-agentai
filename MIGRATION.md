@@ -80,6 +80,9 @@ let id = generator
 Code that implements `SpeechProvider::create_voice` gets the same `VoiceSource` instead of
 `samples` and `transcript`.
 
+An override of `SpeechProvider::supports_voice_description` no longer compiles: remove it. If the
+provider can design voices, implement `supports_voice_design` and `design_voice`.
+
 ## 0.6.0 → 0.7.0 (2026-11-18)
 
 ### `ToolBox::call_tool` returns `ToolReturn`

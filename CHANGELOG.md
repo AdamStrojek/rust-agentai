@@ -16,7 +16,7 @@ See [MIGRATION.md](MIGRATION.md#070--071-yyyy-mm-dd) for migration steps from 0.
 
 ### New features
 
-- *(audio)* design voices from a description with `SpeechGenerator::design_voice`, which returns `VoicePreview`s to listen to; `create_voice` keeps one as a voice. Works with Fish Audio, ElevenLabs and oMLX; `supports_voice_design()` tells whether the provider can
+- *(audio)* design voices from a description with `SpeechGenerator::design_voice`, which returns `VoicePreview`s to listen to; `create_voice` keeps one as a voice. Works with Fish Audio, ElevenLabs and oMLX; `supports_voice_design()` tells whether the provider can.
 
 ## [0.7.0](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.6.0...agentai-v0.7.0) - 2026-11-18
 

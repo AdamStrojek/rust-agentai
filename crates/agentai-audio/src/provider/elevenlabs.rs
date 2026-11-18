@@ -1,7 +1,8 @@
 //! # ElevenLabs speech API
 //!
 //! [`ElevenLabsProvider`] speaks text with `POST /v1/text-to-speech/{voice_id}`, clones voices
-//! with `POST /v1/voices/add` and lists voices and models.
+//! with `POST /v1/voices/add` and lists voices and models. It designs voices from a description
+//! with `POST /v1/text-to-voice/design` and saves a chosen preview with `POST /v1/text-to-voice`.
 //!
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
@@ -290,7 +291,6 @@ impl SpeechProvider for ElevenLabsProvider {
                 return Ok(created.voice_id);
             }
         };
-        let samples = &samples[..];
         if samples.is_empty() {
             return Err(AudioError::InvalidRequest(
                 "voice cloning needs at least one sample".to_string(),
@@ -440,7 +440,6 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::VoiceSource;
     use agentai_core::HttpResponse;
     use agentai_core::message::Media;
     use agentai_core::mock::{MockHttp, body_json, json_response};
@@ -575,7 +574,7 @@ mod tests {
         let id = provider(&http)
             .create_voice(
                 "Adam",
-                VoiceSource::samples(samples.clone(), None::<&str>),
+                VoiceSource::samples(samples.clone(), None),
                 Some("my voice"),
             )
             .await
@@ -618,7 +617,7 @@ mod tests {
 
         let http = MockHttp::new(vec![]);
         let err = provider(&http)
-            .create_voice("Adam", VoiceSource::samples(vec![], None::<&str>), None)
+            .create_voice("Adam", VoiceSource::samples(vec![], None), None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));

@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let voice_id = generator
         .create_voice(
             "sample",
-            VoiceSource::samples(vec![sample], Some(transcript)),
+            VoiceSource::samples(vec![sample], Some(&transcript)),
             None,
         )
         .await?;

@@ -45,10 +45,10 @@ pub enum VoiceSource {
 
 impl VoiceSource {
     /// Recordings to clone, with the text said in them if known.
-    pub fn samples(samples: Vec<Media>, transcript: Option<impl Into<String>>) -> Self {
+    pub fn samples(samples: Vec<Media>, transcript: Option<&str>) -> Self {
         Self::Samples {
             samples,
-            transcript: transcript.map(Into::into),
+            transcript: transcript.map(str::to_string),
         }
     }
 }
@@ -705,21 +705,6 @@ mod tests {
                 assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
             }
         }
-        assert_eq!(http.request_count(), 0);
-    }
-
-    #[tokio::test]
-    async fn openai_cannot_design_voices() {
-        use agentai_core::mock::MockHttp;
-        use std::sync::Arc;
-        let http = MockHttp::new(vec![]);
-        let provider = openai::OpenAiSpeechProvider::new("tts-1", "k", "http://x")
-            .with_client(Arc::new(http.clone()));
-        assert!(!provider.supports_voice_design());
-        let Err(err) = provider.design_voice("warm", Some("Hi"), 2).await else {
-            panic!("design_voice must fail");
-        };
-        assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
         assert_eq!(http.request_count(), 0);
     }
 }

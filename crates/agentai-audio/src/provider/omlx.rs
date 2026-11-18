@@ -217,12 +217,11 @@ impl SpeechProvider for OmlxProvider {
         else {
             return Err(AudioError::Unsupported("saving a designed voice"));
         };
-        let samples = &samples[..];
         let transcript = transcript.as_deref();
         let store = self.store.as_ref().ok_or(AudioError::Unsupported(
             "voice cloning without a voice store",
         ))?;
-        let [sample] = samples else {
+        let [sample] = samples.as_slice() else {
             return Err(AudioError::InvalidRequest(format!(
                 "oMLX clones from exactly one sample, got {}",
                 samples.len()
@@ -294,7 +293,6 @@ impl SpeechProvider for OmlxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::VoiceSource;
     use crate::provider::{AudioError, SpeechProvider, SpeechRequest, Voice, VoiceInfo};
     use crate::{MemoryVoiceStore, VoiceStore};
     use agentai_core::HttpResponse;
@@ -330,7 +328,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sample_id_is_unsupported_without_a_store_of_previews() {
+    async fn a_sample_id_is_unsupported() {
         let http = MockHttp::new(vec![]);
         let err = cloned(&http, None)
             .await
@@ -423,12 +421,8 @@ mod tests {
         let p = provider(&http);
         assert!(!p.supports_voice_cloning());
         assert!(matches!(
-            p.create_voice(
-                "A",
-                VoiceSource::samples(vec![sample()], None::<&str>),
-                None
-            )
-            .await,
+            p.create_voice("A", VoiceSource::samples(vec![sample()], None), None)
+                .await,
             Err(AudioError::Unsupported(_))
         ));
         assert!(matches!(
@@ -466,12 +460,8 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         for samples in [vec![], vec![sample(), sample()]] {
             assert!(matches!(
-                p.create_voice(
-                    "A",
-                    VoiceSource::samples(samples.clone(), None::<&str>),
-                    None
-                )
-                .await,
+                p.create_voice("A", VoiceSource::samples(samples.clone(), None), None)
+                    .await,
                 Err(AudioError::InvalidRequest(_))
             ));
         }
@@ -485,11 +475,7 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
         let id = p
-            .create_voice(
-                "A",
-                VoiceSource::samples(vec![url_sample], None::<&str>),
-                None,
-            )
+            .create_voice("A", VoiceSource::samples(vec![url_sample], None), None)
             .await
             .unwrap();
         let stored = store.get(&id).await.unwrap().unwrap();
@@ -512,11 +498,7 @@ mod tests {
         let p = provider(&http).with_voice_store(store.clone());
         let url_sample = Media::from_url("audio/wav", "http://x/a.wav");
         let result = p
-            .create_voice(
-                "A",
-                VoiceSource::samples(vec![url_sample], None::<&str>),
-                None,
-            )
+            .create_voice("A", VoiceSource::samples(vec![url_sample], None), None)
             .await;
         assert!(matches!(result, Err(AudioError::Api { status: 404, .. })));
         assert!(store.list().await.unwrap().is_empty());
@@ -528,7 +510,7 @@ mod tests {
         let p = provider(&http).with_voice_store(MemoryVoiceStore::new());
         p.create_voice(
             "Adam",
-            VoiceSource::samples(vec![sample()], None::<&str>),
+            VoiceSource::samples(vec![sample()], None),
             Some("calm"),
         )
         .await
@@ -548,7 +530,7 @@ mod tests {
         let p = provider(&MockHttp::new(vec![])).with_voice_store(MemoryVoiceStore::new());
         let sample = Media::from_base64("audio/wav", "data:audio/wav;base64,V0FW");
         let err = p
-            .create_voice("A", VoiceSource::samples(vec![sample], None::<&str>), None)
+            .create_voice("A", VoiceSource::samples(vec![sample], None), None)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));

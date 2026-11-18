@@ -22,7 +22,7 @@ use agentai_audio::provider::omlx::OmlxProvider;
 use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, base64};
 
 const DESCRIPTION: &str = "A warm, calm middle-aged woman with a low voice, speaking slowly";
-const TEXT: &str = "Welcome back. Let me tell you how this voice was made.";
+const TEXT: &str = "Welcome back, and thank you for listening. Let me tell you how this voice was made, and why it sounds the way it does.";
 
 fn save(media: &Media, name: &str) -> anyhow::Result<()> {
     match &media.source {

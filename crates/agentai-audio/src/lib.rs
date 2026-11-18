@@ -1,7 +1,7 @@
 //! # AgentAI Audio
 //!
-//! Text-to-speech, voice cloning and voice design for [AgentAI](https://crates.io/crates/agentai): from your
-//! code with [`SpeechGenerator`], or by an agent with [`SpeechToolBox`] (feature `toolbox`).
+//! Text-to-speech, voice cloning and voice design for [AgentAI](https://crates.io/crates/agentai):
+//! from your code with [`SpeechGenerator`], or by an agent with [`SpeechToolBox`] (feature `toolbox`).
 //!
 //! ## Speaking texts
 //!
@@ -97,9 +97,9 @@
 //! ([`supports_voice_design`](SpeechGenerator::supports_voice_design)): Fish Audio, ElevenLabs and
 //! oMLX (with a model that turns `instructions` into a voice). It returns previews to listen to;
 //! [`create_voice`](SpeechGenerator::create_voice) keeps one as a voice, and its ID goes to
-//! [`Voice::id`] like any other. Fish Audio returns `count` previews and ElevenLabs its own number;
-//! oMLX needs the text and a [`VoiceStore`] to keep a preview.
-//! ElevenLabs needs the description again to save a preview.
+//! [`Voice::id`] like any other. Fish Audio returns `count` previews and ElevenLabs its own
+//! number; oMLX needs the text and a [`VoiceStore`] to keep a preview. ElevenLabs needs the
+//! description again to save a preview.
 //!
 //! ```rust,no_run
 //! use agentai_audio::{SpeechGenerator, SpeechRequest, Voice};
