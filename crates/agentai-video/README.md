@@ -42,9 +42,6 @@ let video = provider.download(&job).await?; // a `Media`, base64 or a URL
 | `comfy-serve` | `COMFY_SERVE_BASE_URL` (required), `COMFY_SERVE_API_KEY` (optional) | yes | first and last frames; image, video and audio references; files are uploaded as multipart |
 | `openrouter` | `OPENROUTER_API_KEY` (required), `OPENROUTER_BASE_URL` (optional) | no | first and last frames and image references, sent as URLs or data URLs |
 
-The `openrouter` request format follows OpenRouter's public video generation guide and was not verified against
-a live key.
-
 To change timeouts or the proxy, build the provider yourself (`ComfyServeVideoProvider::new(model, api_key,
 base_url)`) and give it your own client with `with_http_client(ReqwestClient::from_client(client))`.
 `ReqwestClient`, `HttpClient` and the other HTTP types are re-exported from `agentai_video`, as are `Media` and

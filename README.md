@@ -51,7 +51,6 @@ This library is under heavy development. The interface may change at any time wi
   `file_name(stem)` and `to_url()` (a data URL for bytes). Generated images and audio keep the extension
   of their name only when it is a known file type, so an image named `my.picture` is saved as
   `my.picture.png`.
-- OpenRouter's request format follows its public guide and was not verified against a live key.
 - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms; the
   media crates share its MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`).
 

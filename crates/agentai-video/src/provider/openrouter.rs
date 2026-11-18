@@ -1,10 +1,10 @@
 //! OpenRouter video generation (`/api/v1/videos`).
 //!
 //! The request format follows the OpenRouter video generation guide and its cookbook pages
-//! (`frame_images` with a `frame_type`, `input_references` with images); it was not checked
-//! against a live key. OpenRouter documents no way to cancel a job and no video or audio
-//! references, so [`supports_cancel`](VideoProvider::supports_cancel) is `false` and such
-//! inputs are [`VideoError::Unsupported`].
+//! (`frame_images` with a `frame_type`, `input_references` with images). OpenRouter documents
+//! no way to cancel a job and no video or audio references, so
+//! [`supports_cancel`](VideoProvider::supports_cancel) is `false` and such inputs are
+//! [`VideoError::Unsupported`].
 
 use std::sync::Arc;
 
