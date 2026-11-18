@@ -30,22 +30,43 @@ This library is under heavy development. The interface may change at any time wi
 - **Streaming**: Show the answer as the model writes it, together with the tool calls the agent makes. The stream is `Send + 'static`, ready for spawned tasks and server-sent events.
 - **Images for vision models**: Send text and images together in a `Prompt`, by URL or from bytes. Plain text prompts work as before.
 - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with `ToolOutput`.
-- **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, oMLX) and clones voices from your code.
+- **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, Fish Audio, oMLX), including dialogues of several voices, and clones voices from your code.
 - **Video generation**: The [`agentai-video`](https://docs.rs/agentai-video) crate submits video jobs, follows them and downloads the result (comfy-serve, OpenRouter), from text, frames or reference files.
+- **Background tools**: A tool can start slow work in the background and answer at once; the agent tells the model when the work is done.
+- **Cost and context control**: Cap the dollar cost of runs with a budget, and trim images and reasoning from what is sent to the model with history processors.
 - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 
 ## What's New
 
-#### 0.7.0 - Video generation
+#### 0.7.0 - Background tools, video generation, history processors, budgets
 
+- **Tools that run in the background**: a tool returns
+  [`ToolReturn::deferred(message, future)`](https://docs.rs/agentai/latest/agentai/tool/enum.ToolReturn.html#method.deferred) for slow work. The model
+  gets the message and a task ID at once and the run goes on; when the task finishes, the agent tells the
+  model in a user message, in the same run or in a later one that gets the unfinished tasks with
+  `with_deferred_tasks(result.deferred_tasks)`. With the `tokio` feature, `TokioDeferredTaskToolBox` spawns the
+  tasks and gives the model `list_deferred_tasks`, `get_deferred_task` and `wait_deferred_task`.
 - **Video generation**: the new [`agentai-video`](https://docs.rs/agentai-video) crate has
   `from_model("comfy-serve::wan-2.2")?` (or `openrouter::<model>`), which gives a `VideoProvider`.
   `submit` returns a `VideoJob`, you poll `status` until `JobStatus::Completed` and `download` the
   video as a `Media`. A `VideoJob` is serializable, so you can store it and follow it after a restart.
-- **Text, frames or references**: `VideoRequest` takes text only, a first and/or last frame, or
-  reference images, videos and audio (comfy-serve; OpenRouter takes images only).
-- **Models**: `list_models("comfy-serve")` returns the durations, resolutions, aspect ratios and
-  inputs a model accepts, where the provider says so. comfy-serve jobs can be cancelled.
+  `VideoRequest` takes text only, a first and/or last frame, or reference images, videos and audio
+  (comfy-serve; OpenRouter takes images only). `list_models("comfy-serve")` returns the durations,
+  resolutions, aspect ratios and inputs a model accepts, where the provider says so; comfy-serve jobs can
+  be cancelled.
+- **History processors**: `Agent::with_history_processor` changes
+  the messages right before every model call, while your history and `new_messages` stay complete.
+  `HistoryPruning` replaces images and drops reasoning from finished turns, so long
+  conversations stop resending them; write your own `HistoryProcessor` or pass a
+  closure to trim or summarize.
+- **Dollar budgets**: with the `budget` feature, `Agent::with_budget` charges every model call to a limit
+  from [`llm-budget`](https://crates.io/crates/llm-budget) and stops the run with `AgentError::Budget` when
+  it is used up; `AgentResult::cost_usd` tells what a run cost.
+- **Fish Audio and dialogues**: `agentai-audio` speaks with Fish Audio (`fishaudio::<model>`). A
+  `SpeechRequest` takes several voices for dialogue models such as `drama-3`, Fish Audio clones voices,
+  and `with_timestamps(true)` returns the time of every word.
+- **Provider-specific options**: `ChatOptions::with_extra_header` and `with_extra_body` send headers and
+  body fields that `agentai` has no setting for, such as Anthropic beta features.
 - **File names and types**: `agentai_core::mime` (re-exported by `agentai-image`, `agentai-audio` and
   `agentai-video`) maps MIME types to file extensions and back, and `Media` gains `extension()`,
   `file_name(stem)` and `to_url()` (a data URL for bytes). Generated images and audio keep the extension
@@ -54,10 +75,12 @@ This library is under heavy development. The interface may change at any time wi
 - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms; the
   media crates share its MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`).
 
-**Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order;
-in `agentai-image` and `agentai-audio` a file name keeps only a known media extension.
-Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
-[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#060--070-YYYY-MM-DD)
+**Breaking changes**: `ToolBox::call_tool` returns `ToolResult<ToolReturn>` (`#[toolbox]` methods need no
+change), an empty prompt returns `AgentError::EmptyPrompt`, `SpeechRequest::voice` in `agentai-audio` is
+now `voices`, a list in speaker order, and in `agentai-image` and `agentai-audio` a file name keeps only a
+known media extension. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#060--070-2026-11-18)
 before upgrading.
 
 #### 0.6.0 - Text-to-speech and voice cloning
@@ -107,7 +130,7 @@ before upgrading.
 the `content` of tool result events are no longer a `String`. With `default-features = false` you must enable a
 TLS feature, or HTTPS requests fail. Read the
 [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
-[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#040--050-YYYY-MM-DD)
+[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#040--050-2026-11-04)
 before upgrading.
 
 #### 0.3.0 - Streaming, conversation history in your hands, run details
@@ -188,6 +211,26 @@ This command adds the crate and its dependencies to your project.
 
 ## Feature Flags
 <!-- FEATURE FLAGS -->
+
+Available features for `agentai` crate.
+To enable any of these features, you need to enter this command:
+
+```bash
+cargo add agentai -F mcp-client
+```
+
+Features list:
+
+- `rustls-ring` _(enabled by default)_ — TLS with rustls and the ring crypto provider, checking certificates against the OS trust store. The library installs ring as the process-wide rustls provider when it builds a client; call [`tls::install_crypto_provider`](https://docs.rs/agentai/latest/agentai/tls/fn.install_crypto_provider.html) before you build your own `genai::Client` or `reqwest::Client`.
+- `rustls-aws-lc` — TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+- `native-tls` — TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined with a `rustls-*` feature: set `default-features = false`.
+- `system-proxy` _(enabled by default)_ — Reads the macOS and Windows system proxy settings. Proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) work without it.
+- `mcp-client` _(enabled by default)_ — Enables support for Agent Tools served by MCP servers (stdio and Streamable HTTP, via `rmcp`)
+- `tokio` _(enabled by default)_ — Enables tokio integrations, such as [`TokioDeferredTaskToolBox`](https://docs.rs/agentai/latest/agentai/tool/deferred/struct.TokioDeferredTaskToolBox.html) and writing a stream to a tokio writer with [`AgentStream::print_to_tokio`](https://docs.rs/agentai/latest/agentai/agent/struct.AgentStream.html#method.print_to_tokio)
+- `macros` _(enabled by default)_ — Enables support for macro [`#[toolbox]`](https://docs.rs/agentai/latest/agentai/tool/attr.toolbox.html)
+- `tools-buildin` _(enabled by default)_ — Enables support for [buildin tools](https://docs.rs/agentai/latest/agentai/tool/buildin/index.html)
+- `tools-web` _(enabled by default)_ — Enables support for [web tools](https://docs.rs/agentai/latest/agentai/tool/web/index.html)
+- `budget` — Enables dollar spend limits with [`llm-budget`](https://crates.io/crates/llm-budget): every model call is charged to the budget set with `Agent::with_budget`
 
 ## Usage
 
