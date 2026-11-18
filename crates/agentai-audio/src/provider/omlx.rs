@@ -6,12 +6,16 @@
 //! sent with every request (`ref_audio` and `ref_text`), so the provider keeps the samples in a
 //! [`VoiceStore`] set with [`with_voice_store`](OmlxProvider::with_voice_store).
 //!
+//! There is no design endpoint: [`design_voice`](SpeechProvider::design_voice) speaks the text
+//! once per candidate with the description as `instructions`, which models with a designable
+//! voice (VoxCPM2 and alike) turn into a voice. Keep a preview with `create_voice`.
+//!
 //! Every field of a request has an equivalent, so none is left out. What the server does not
 //! accept comes back as [`AudioError::Api`].
 
 use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    VoiceSource, audio_media,
+    VoicePreview, VoiceSource, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::{Media, MediaSource};
@@ -234,6 +238,38 @@ impl SpeechProvider for OmlxProvider {
         voice.description = description.map(str::to_string);
         voice.transcript = transcript.map(str::to_string);
         Ok(store.save(voice).await?)
+    }
+
+    fn supports_voice_design(&self) -> bool {
+        true
+    }
+
+    /// Emulates voice design: speaks `text` `count` times with `description` as `instructions`,
+    /// one request after another. `text` is required. The previews have no ID: keep one by
+    /// sending it to `create_voice` (needs a voice store).
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let text = text.ok_or_else(|| {
+            AudioError::InvalidRequest(
+                "oMLX designs a voice by speaking a text; give one".to_string(),
+            )
+        })?;
+        let mut previews = Vec::with_capacity(count);
+        for _ in 0..count {
+            let response = self
+                .generate(SpeechRequest::new(text).with_instructions(description))
+                .await?;
+            let mut preview = VoicePreview::new(response.audio).with_text(text);
+            if let Some(rate) = response.sample_rate {
+                preview = preview.with_sample_rate(rate);
+            }
+            previews.push(preview);
+        }
+        Ok(previews)
     }
 
     /// The cloned voices of the voice store.
@@ -515,5 +551,55 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::InvalidRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn design_voice_speaks_the_text_once_per_candidate() {
+        let http = MockHttp::new(vec![audio(), audio()]);
+        let previews = provider(&http)
+            .design_voice("deep calm voice", Some("Hello"), 2)
+            .await
+            .unwrap();
+        assert_eq!(previews.len(), 2);
+        for (i, preview) in previews.iter().enumerate() {
+            let req = http.request(i);
+            assert_eq!(req.url, "http://local/v1/audio/speech");
+            assert_eq!(
+                body_json(&req),
+                json!({"model": "m", "input": "Hello", "instructions": "deep calm voice"})
+            );
+            assert_eq!(preview.audio.content_type, "audio/wav");
+            assert_eq!(preview.audio.bytes(&http).await.unwrap(), b"audio");
+            assert_eq!(preview.text.as_deref(), Some("Hello"));
+            assert_eq!(preview.sample_id, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn design_voice_needs_a_text() {
+        let http = MockHttp::new(vec![]);
+        let err = provider(&http)
+            .design_voice("x", None, 1)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::InvalidRequest(_)));
+        assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_designed_voice_can_be_saved_and_spoken() {
+        let http = MockHttp::new(vec![audio(), audio()]);
+        let p = provider(&http).with_voice_store(MemoryVoiceStore::new());
+        let previews = p.design_voice("calm", Some("Hello"), 1).await.unwrap();
+        let id = p
+            .create_voice("calm", VoiceSource::from(&previews[0]), None)
+            .await
+            .unwrap();
+        p.generate(SpeechRequest::new("hi").with_voice(Voice::id(&id)))
+            .await
+            .unwrap();
+        let body = body_json(&http.request(1));
+        assert_eq!(body["ref_text"], json!("Hello"));
+        assert_eq!(body["ref_audio"], json!("YXVkaW8="));
     }
 }
