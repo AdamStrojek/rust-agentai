@@ -178,6 +178,24 @@ impl HttpResponse {
     }
 }
 
+/// Percent-encodes `value` for use as one path segment or query value of a URL: everything but
+/// the unreserved characters of RFC 3986 (letters, digits, `-`, `.`, `_`, `~`) is escaped.
+///
+/// ```rust
+/// assert_eq!(agentai_core::percent_encode("a/b?c d"), "a%2Fb%3Fc%20d");
+/// ```
+pub fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
 fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()

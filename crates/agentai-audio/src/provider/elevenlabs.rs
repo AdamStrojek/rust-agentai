@@ -10,18 +10,10 @@ use super::{
     VoiceInfo, audio_media,
 };
 use agentai_core::message::Media;
-use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
+use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient, percent_encode};
 use async_trait::async_trait;
-use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-/// What is escaped in a query value: everything but the unreserved characters of RFC 3986.
-const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'_')
-    .remove(b'.')
-    .remove(b'~');
 
 /// The ElevenLabs API endpoint.
 pub const DEFAULT_BASE_URL: &str = "https://api.elevenlabs.io";
@@ -203,7 +195,7 @@ impl SpeechProvider for ElevenLabsProvider {
         let mut url = format!("{}/v1/text-to-speech/{voice}", self.base_url);
         if let Some(output_format) = output_format {
             url.push_str("?output_format=");
-            url.extend(utf8_percent_encode(output_format, QUERY_VALUE));
+            url.push_str(&percent_encode(output_format));
         }
         let body = SpeechBody {
             text: &request.text,
@@ -273,7 +265,7 @@ impl SpeechProvider for ElevenLabsProvider {
             let mut path = "/v2/voices?page_size=100".to_string();
             if let Some(token) = &token {
                 path.push_str("&next_page_token=");
-                path.extend(utf8_percent_encode(token, QUERY_VALUE));
+                path.push_str(&percent_encode(token));
             }
             let response = self
                 .client

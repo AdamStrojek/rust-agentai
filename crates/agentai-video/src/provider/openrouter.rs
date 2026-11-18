@@ -9,11 +9,10 @@
 use std::sync::Arc;
 
 use agentai_core::message::Media;
-use agentai_core::{HttpClient, HttpRequest, HttpResponse, ReqwestClient};
+use agentai_core::{HttpClient, HttpRequest, HttpResponse, ReqwestClient, percent_encode};
 use async_trait::async_trait;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::{
     JobStatus, VideoError, VideoInputs, VideoJob, VideoModel, VideoProvider, VideoRequest,
@@ -192,7 +191,6 @@ impl ImagePart {
 #[derive(Deserialize)]
 struct JobReply {
     id: String,
-    polling_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -243,10 +241,10 @@ fn json_reply<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, VideoEr
         .map_err(|err| VideoError::InvalidResponse(err.to_string()))
 }
 
-/// `{ "id", "polling_url" }` becomes `VideoJob { id, data: {"polling_url": ..} }`.
+/// The job of a submit reply: its `id` is all that is needed to follow it.
 fn parse_job(response: &HttpResponse) -> Result<VideoJob, VideoError> {
     let reply: JobReply = json_reply(response)?;
-    Ok(VideoJob::new(reply.id).with_data(json!({ "polling_url": reply.polling_url })))
+    Ok(VideoJob::new(reply.id))
 }
 
 /// 404 is `Gone`, so are cancelled and expired jobs.
@@ -312,15 +310,17 @@ impl VideoProvider for OpenRouterVideoProvider {
 
     async fn status(&self, job: &VideoJob) -> Result<JobStatus, VideoError> {
         let response = self
-            .send(HttpRequest::get(self.url(&format!("/{}", job.id))))
+            .send(HttpRequest::get(
+                self.url(&format!("/{}", percent_encode(&job.id))),
+            ))
             .await?;
         parse_status(response)
     }
 
     async fn download(&self, job: &VideoJob) -> Result<Media, VideoError> {
-        let response = self
-            .send(HttpRequest::get(
-                self.url(&format!("/{}/content?index=0", job.id)),
+        let response =
+            self.send(HttpRequest::get(
+                self.url(&format!("/{}/content?index=0", percent_encode(&job.id))),
             ))
             .await?;
         parse_content(response)
@@ -340,6 +340,7 @@ mod tests {
     use super::*;
     use crate::provider::VideoReferences;
     use agentai_core::mock::{MockHttp, body_json, json_response};
+    use serde_json::json;
 
     fn provider(http: &MockHttp) -> OpenRouterVideoProvider {
         OpenRouterVideoProvider::new("google/veo-3.1", "key", "https://or/api/v1")

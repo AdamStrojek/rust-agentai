@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use agentai_core::message::Media;
-use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
+use agentai_core::{
+    HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient, percent_encode,
+};
 use async_trait::async_trait;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::{
     JobStatus, VideoError, VideoInputKind, VideoInputs, VideoJob, VideoModel, VideoProvider,
@@ -158,7 +159,6 @@ struct RequestBody<'a> {
 #[derive(Deserialize)]
 struct JobReply {
     id: String,
-    polling_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -220,10 +220,10 @@ fn json_reply<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, VideoEr
         .map_err(|err| VideoError::InvalidResponse(err.to_string()))
 }
 
-/// `{ "id", "polling_url" }` becomes `VideoJob { id, data: {"polling_url": ..} }`.
+/// The job of a submit reply: its `id` is all that is needed to follow it.
 fn parse_job(response: &HttpResponse) -> Result<VideoJob, VideoError> {
     let reply: JobReply = json_reply(response)?;
-    Ok(VideoJob::new(reply.id).with_data(json!({ "polling_url": reply.polling_url })))
+    Ok(VideoJob::new(reply.id))
 }
 
 /// 404 is `Gone`, so are cancelled and expired jobs.
@@ -306,14 +306,18 @@ impl VideoProvider for ComfyServeVideoProvider {
 
     async fn status(&self, job: &VideoJob) -> Result<JobStatus, VideoError> {
         let response = self
-            .send(HttpRequest::get(self.url(&format!("/{}", job.id))))
+            .send(HttpRequest::get(
+                self.url(&format!("/{}", percent_encode(&job.id))),
+            ))
             .await?;
         parse_status(response)
     }
 
     async fn download(&self, job: &VideoJob) -> Result<Media, VideoError> {
         let response = self
-            .send(HttpRequest::get(self.url(&format!("/{}/content", job.id))))
+            .send(HttpRequest::get(
+                self.url(&format!("/{}/content", percent_encode(&job.id))),
+            ))
             .await?;
         parse_content(response)
     }
@@ -325,7 +329,9 @@ impl VideoProvider for ComfyServeVideoProvider {
     /// A job that is gone (404) or already finished (409) counts as cancelled.
     async fn cancel(&self, job: &VideoJob) -> Result<(), VideoError> {
         let response = self
-            .send(HttpRequest::delete(self.url(&format!("/{}", job.id))))
+            .send(HttpRequest::delete(
+                self.url(&format!("/{}", percent_encode(&job.id))),
+            ))
             .await?;
         if matches!(response.status, 404 | 409) {
             return Ok(());
@@ -349,7 +355,7 @@ mod tests {
     use crate::provider::VideoReferences;
     use agentai_core::Method;
     use agentai_core::mock::{MockHttp, body_json, json_response};
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     fn provider(http: &MockHttp) -> ComfyServeVideoProvider {
         ComfyServeVideoProvider::new("wan", "", "http://host/").with_http_client(http.clone())
@@ -499,8 +505,9 @@ mod tests {
             json_response(500, json!({"error": {"message": "boom"}})),
         ]);
         let provider = provider(&http);
-        for _ in 0..3 {
-            provider.cancel(&VideoJob::new("j")).await.unwrap();
+        // An ID is one path segment, whatever characters a stored job holds
+        for id in ["a/b?c", "j", "j"] {
+            provider.cancel(&VideoJob::new(id)).await.unwrap();
         }
         assert!(matches!(
             provider.cancel(&VideoJob::new("j")).await,
@@ -508,7 +515,7 @@ mod tests {
         ));
         assert_eq!(
             (http.request(0).method, http.request(0).url.as_str()),
-            (Method::Delete, "http://host/api/v1/videos/j")
+            (Method::Delete, "http://host/api/v1/videos/a%2Fb%3Fc")
         );
     }
 
@@ -581,10 +588,7 @@ mod tests {
             json!({"id": "j1", "polling_url": "/api/v1/videos/j1"}),
         ))
         .unwrap();
-        assert_eq!(
-            job,
-            VideoJob::new("j1").with_data(json!({"polling_url": "/api/v1/videos/j1"}))
-        );
+        assert_eq!(job, VideoJob::new("j1"));
     }
 
     #[test]

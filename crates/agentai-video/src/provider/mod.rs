@@ -150,7 +150,8 @@ impl VideoReferences {
 pub struct VideoJob {
     /// ID of the job at the provider.
     pub id: String,
-    /// Whatever the provider needs to find the job again (for example a polling URL).
+    /// Whatever the provider needs to find the job again besides the ID; `null` for providers
+    /// that need nothing more.
     pub data: Value,
 }
 
