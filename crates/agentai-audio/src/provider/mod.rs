@@ -497,6 +497,27 @@ pub trait SpeechProvider: Send + Sync + 'static {
         Err(AudioError::Unsupported("voice cloning"))
     }
 
+    /// Returns `true` when the provider implements [`design_voice`](SpeechProvider::design_voice).
+    fn supports_voice_design(&self) -> bool {
+        false
+    }
+
+    /// Designs voices from a text description and returns previews to listen to and choose
+    /// from. Keep one with [`create_voice`](SpeechProvider::create_voice) (its
+    /// [`VoiceSource::SampleId`] when the preview has one). `text` is what the previews say,
+    /// if the provider lets you choose, and `count` is how many candidates to ask for; a
+    /// provider may return its own number. The default implementation returns
+    /// [`AudioError::Unsupported`].
+    async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        let _ = (description, text, count);
+        Err(AudioError::Unsupported("voice design"))
+    }
+
     /// Lists the voices of the API. The default implementation returns
     /// [`AudioError::Unsupported`].
     async fn list_voices(&self) -> Result<Vec<VoiceInfo>, AudioError> {
@@ -684,6 +705,21 @@ mod tests {
                 assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
             }
         }
+        assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn openai_cannot_design_voices() {
+        use agentai_core::mock::MockHttp;
+        use std::sync::Arc;
+        let http = MockHttp::new(vec![]);
+        let provider = openai::OpenAiSpeechProvider::new("tts-1", "k", "http://x")
+            .with_client(Arc::new(http.clone()));
+        assert!(!provider.supports_voice_design());
+        let Err(err) = provider.design_voice("warm", Some("Hi"), 2).await else {
+            panic!("design_voice must fail");
+        };
+        assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
         assert_eq!(http.request_count(), 0);
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::provider::{
     self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
-    Voice, VoiceInfo, VoiceSource,
+    Voice, VoiceInfo, VoicePreview, VoiceSource,
 };
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
@@ -146,6 +146,23 @@ impl SpeechGenerator {
         self.provider
             .create_voice(name, source.into(), description)
             .await
+    }
+
+    /// Returns `true` when the provider can design voices.
+    pub fn supports_voice_design(&self) -> bool {
+        self.provider.supports_voice_design()
+    }
+
+    /// Designs voices from a text description and returns previews to choose from, see
+    /// [`SpeechProvider::design_voice`]. Keep one with [`create_voice`](Self::create_voice).
+    /// Fails with [`AudioError::Unsupported`] when the provider cannot design voices.
+    pub async fn design_voice(
+        &self,
+        description: &str,
+        text: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        self.provider.design_voice(description, text, count).await
     }
 
     /// Lists the voices of the provider.
