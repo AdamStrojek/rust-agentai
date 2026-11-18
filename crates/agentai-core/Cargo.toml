@@ -42,6 +42,11 @@ default = ["reqwest", "rustls-ring", "system-proxy"]
 ## Enables [`ReqwestClient`](crate::ReqwestClient), the [`HttpClient`](crate::HttpClient) on top of `reqwest`
 reqwest = ["dep:reqwest"]
 
+## `mock::MockHttp`, a [`HttpClient`](crate::HttpClient) that records
+## requests and answers with prepared responses, for the tests of provider crates. Enable it in
+## `[dev-dependencies]` only.
+test-support = []
+
 ## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
 ## store. Install the provider with [`tls::install_crypto_provider`](crate::tls::install_crypto_provider)
 ## before you build your own `reqwest` client.

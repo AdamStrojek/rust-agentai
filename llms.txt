@@ -4,11 +4,11 @@
 
 Key facts for code generation:
 
-- The crate is pre-1.0 and the API changes between minor versions. This file was written for `agentai` 0.6.0 (schemars 1.x, Rust 1.88+); check the CHANGELOG for later changes.
+- The crate is pre-1.0 and the API changes between minor versions. This file was written for `agentai` 0.7.0 (schemars 1.x, Rust 1.88+); check the CHANGELOG for later changes.
 - The library is async. Examples use `tokio` with `#[tokio::main]` and return `anyhow::Result`.
 - Create an agent with `Agent::new(model, system)?` (returns `Result<_, AgentError>`), then optionally `.with_toolbox(toolbox)`. The provider comes from the model name (`gpt-*` OpenAI, `claude-*` Anthropic, ...) or a `provider::` prefix such as `open_router::vendor/model`; the API key from the provider's environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPEN_ROUTER_API_KEY`, ...). `Agent` is immutable configuration, cheap to `Clone` and `Send + Sync`.
 - Ask with `let result: AgentResult<T> = agent.run(prompt).with_history(&history).await?;` and read `result.answer`. Use `T = String` for plain text. Any other `T` turns on structured output. `AgentResult` also has `new_messages`, `usage` (summed over model calls), `stop_reason`, `reasoning_content` and `iterations`.
-- The prompt is any `IntoPrompt`: `&str`, `String` (anything `Into<String>`), a `Media`, or a `Prompt` for vision models: `Prompt::text("What is in this picture?").with_image_url(url)` or `.with_image_bytes("image/png", &bytes)` (sent base64 encoded); `.with_text(..)` and `.with_media(Media)` add more parts in order. `Media::image_url`, `Media::from_url`, `Media::from_bytes`, `Media::from_base64` build media. The model must support images.
+- The prompt is any `IntoPrompt`: `&str`, `String` (anything `Into<String>`), a `Media`, or a `Prompt` for vision models: `Prompt::text("What is in this picture?").with_image_url(url)` or `.with_image_bytes("image/png", &bytes)` (sent base64 encoded); `.with_text(..)` and `.with_media(Media)` add more parts in order. `Media::image_url`, `Media::from_url`, `Media::from_bytes`, `Media::from_base64` build media; `Media::extension()`, `file_name(stem)` and `to_url()` (a data URL for bytes) use the MIME table of `agentai_core::mime` (`extension`, `from_path`, `with_extension`, re-exported by `agentai-image`, `agentai-audio` and `agentai-video`). The model must support images.
 - The agent does not remember conversations. Keep a `Vec<Message>` yourself (`Message` has its own stable JSON format), pass it with `.with_history(&history)` and append `result.new_messages` to continue. `Message::deferred_task_notifications(lines)` combines notification lines into one user message. The system prompt is sent by the agent and is not part of the history. A failed run never changes your history.
 - Images and reasoning from earlier turns are sent again with every model call. `agent.with_history_processor(HistoryPruning::default().with_media(true).with_reasoning(true))` replaces media with a short text and drops reasoning in finished turns, only in the request; your own `HistoryProcessor` (or a closure over `Vec<Message>`) can trim or summarize the messages the same way.
 - Stream with `agent.run_stream::<T>(prompt).with_history(&history).await?` (same builder as `run`): an `AgentStream<T>` (`Send + 'static`) of `Result<AgentEvent<T>, AgentError>` with `TextDelta`, `ReasoningDelta`, `ToolCall`, `ToolResult` and finally `Finished(AgentResult<T>)`. Read it with `futures_util::StreamExt::next`, write it to stdout, stderr, a file or any `std::io::Write` with `.print_to(std::io::stdout()).await?` (`print_to_async` for `futures::io::AsyncWrite`, `print_to_tokio` for `tokio::io::AsyncWrite`), or pass an `EventListener` (`agentai::listener`; `Printer` is the ready-made one, configurable with `with_*`) to `.listen(..)`, or call `.finish().await`.
@@ -32,6 +32,7 @@ Key facts for code generation:
 
 - [agentai-image](https://docs.rs/agentai-image/latest/agentai_image/): `ImageGenerator`, `GenerateImageToolBox`, `ReadMediaToolBox`, providers in `agentai_image::provider`
 - [agentai-audio](https://docs.rs/agentai-audio/latest/agentai_audio/): `SpeechGenerator`, `SpeechToolBox`, providers in `agentai_audio::provider`
+- [agentai-video](https://docs.rs/agentai-video/latest/agentai_video/): `from_model`, `VideoProvider` (`submit`, `status`, `download`, `cancel`, `list_models`), `VideoRequest`, `VideoJob`, `JobStatus`, `mime`, providers in `agentai_video::provider`; no agent tools
 
 ## Examples
 
@@ -49,6 +50,7 @@ Key facts for code generation:
 - [speech_tools.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-audio/examples/speech_tools.rs): an agent that speaks texts with `generate_speech`, with a `MediaStorage` that keeps them in a directory
 - [clone_voice.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-audio/examples/clone_voice.rs): clone a voice from a WAV sample with oMLX and speak with it
 - [dialogue.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-audio/examples/dialogue.rs): a dialogue of two voices from WAV samples with Fish Audio `drama-3`
+- [generate_video.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai-video/examples/generate_video.rs): print what the model accepts, submit a video job (optional first frame, `AGENTAI_VIDEO_RESOLUTION`, `AGENTAI_VIDEO_DURATION`), poll its status and save the video with the extension of its type, with comfy-serve or OpenRouter
 - [openrouter.rs](https://raw.githubusercontent.com/AdamStrojek/rust-agentai/master/crates/agentai/examples/openrouter.rs): OpenRouter through the `open_router::` model prefix, with built-in tools
 
 ## Optional

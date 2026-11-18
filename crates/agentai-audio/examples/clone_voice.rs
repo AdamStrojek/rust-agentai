@@ -13,8 +13,7 @@
 
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice};
-use base64::Engine;
+use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, base64};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,10 +47,7 @@ async fn main() -> anyhow::Result<()> {
         MediaSource::Base64(data) => {
             std::fs::create_dir_all("audio")?;
             let path = "audio/cloned.wav";
-            std::fs::write(
-                path,
-                base64::engine::general_purpose::STANDARD.decode(data)?,
-            )?;
+            std::fs::write(path, base64::decode(data)?)?;
             println!("Saved {path} ({})", response.audio.content_type);
         }
         MediaSource::Url(url) => println!("The audio is at {url}"),

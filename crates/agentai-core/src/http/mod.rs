@@ -11,6 +11,7 @@ use thiserror::Error;
 pub enum Method {
     Get,
     Post,
+    Delete,
 }
 
 /// A request sent with a [`HttpClient`]. The body is always plain bytes, so a client only
@@ -43,6 +44,11 @@ impl HttpRequest {
     /// Creates a `POST` request.
     pub fn post(url: impl Into<String>) -> Self {
         Self::new(Method::Post, url)
+    }
+
+    /// Creates a `DELETE` request.
+    pub fn delete(url: impl Into<String>) -> Self {
+        Self::new(Method::Delete, url)
     }
 
     /// Adds a header.
@@ -153,6 +159,14 @@ impl HttpResponse {
         find_header(&self.headers, name)
     }
 
+    /// The `Content-Type` header without its parameters, `None` when it is missing or empty.
+    pub fn content_type(&self) -> Option<&str> {
+        self.header("content-type")
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
     /// Parses the body as JSON.
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, HttpError> {
         serde_json::from_slice(&self.body).map_err(HttpError::Json)
@@ -162,6 +176,24 @@ impl HttpResponse {
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).into_owned()
     }
+}
+
+/// Percent-encodes `value` for use as one path segment or query value of a URL: everything but
+/// the unreserved characters of RFC 3986 (letters, digits, `-`, `.`, `_`, `~`) is escaped.
+///
+/// ```rust
+/// assert_eq!(agentai_core::percent_encode("a/b?c d"), "a%2Fb%3Fc%20d");
+/// ```
+pub fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
@@ -229,7 +261,8 @@ pub struct Multipart {
 #[derive(Debug, Clone, PartialEq)]
 struct FormPart {
     name: String,
-    file: Option<(String, String)>,
+    filename: Option<String>,
+    content_type: Option<String>,
     data: Vec<u8>,
 }
 
@@ -243,7 +276,8 @@ impl Multipart {
     pub fn with_text(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.parts.push(FormPart {
             name: name.into(),
-            file: None,
+            filename: None,
+            content_type: None,
             data: value.into().into_bytes(),
         });
         self
@@ -259,10 +293,26 @@ impl Multipart {
     ) -> Self {
         self.parts.push(FormPart {
             name: name.into(),
-            file: Some((filename.into(), content_type.into())),
+            filename: Some(filename.into()),
+            content_type: Some(content_type.into()),
             data: data.into(),
         });
         self
+    }
+
+    /// Adds a field with a JSON value (`Content-Type: application/json`, no filename).
+    pub fn with_json(
+        mut self,
+        name: impl Into<String>,
+        value: &impl Serialize,
+    ) -> Result<Self, HttpError> {
+        self.parts.push(FormPart {
+            name: name.into(),
+            filename: None,
+            content_type: Some("application/json".into()),
+            data: serde_json::to_vec(value).map_err(HttpError::Json)?,
+        });
+        Ok(self)
     }
 
     /// Returns the `Content-Type` header value and the body.
@@ -272,19 +322,16 @@ impl Multipart {
         for part in self.parts {
             body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
             let name = escape(&part.name);
-            match part.file {
-                Some((filename, content_type)) => body.extend_from_slice(
-                    format!(
-                        "Content-Disposition: form-data; name=\"{name}\"; filename=\"{}\"\r\n\
-                         Content-Type: {content_type}\r\n\r\n",
-                        escape(&filename)
-                    )
-                    .as_bytes(),
-                ),
-                None => body.extend_from_slice(
-                    format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
-                ),
+            let mut head = format!("Content-Disposition: form-data; name=\"{name}\"");
+            if let Some(filename) = &part.filename {
+                head.push_str(&format!("; filename=\"{}\"", escape(filename)));
             }
+            head.push_str("\r\n");
+            if let Some(content_type) = &part.content_type {
+                head.push_str(&format!("Content-Type: {content_type}\r\n"));
+            }
+            head.push_str("\r\n");
+            body.extend_from_slice(head.as_bytes());
             body.extend_from_slice(&part.data);
             body.extend_from_slice(b"\r\n");
         }
@@ -321,6 +368,8 @@ fn escape(value: &str) -> String {
         .replace('\n', "%0A")
 }
 
+#[cfg(feature = "test-support")]
+pub mod mock;
 #[cfg(feature = "reqwest")]
 mod reqwest;
 #[cfg(feature = "reqwest")]
@@ -329,6 +378,22 @@ pub use reqwest::ReqwestClient;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multipart_json_part_has_a_content_type_and_no_filename() {
+        let form = Multipart::new()
+            .with_json("request", &serde_json::json!({"model": "m"}))
+            .unwrap()
+            .with_file("image", "a.png", "image/png", vec![1u8]);
+        let (_, body) = form.into_body();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains(
+            "Content-Disposition: form-data; name=\"request\"\r\nContent-Type: application/json\r\n\r\n{\"model\":\"m\"}\r\n"
+        ));
+        assert!(
+            body.contains("name=\"image\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n")
+        );
+    }
 
     #[test]
     fn error_for_status_reads_every_error_shape() {

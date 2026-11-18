@@ -8,7 +8,6 @@ use super::{ImageEditRequest, ImageError, ImageModel, ImageProvider, ImageReques
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -146,10 +145,7 @@ impl ImageProvider for OpenAiImageProvider {
         }
         for (index, image) in request.images.iter().enumerate() {
             let bytes = image.bytes(&*self.client).await?;
-            let filename = image.name.clone().unwrap_or_else(|| {
-                let extension = image.content_type.rsplit('/').next().unwrap_or("png");
-                format!("image-{}.{extension}", index + 1)
-            });
+            let filename = image.file_name(&format!("image-{}", index + 1));
             form = form.with_file("image[]", filename, image.content_type.as_str(), bytes);
         }
         let http =
@@ -250,9 +246,7 @@ pub(super) fn parse_response(response: &HttpResponse) -> Result<ImageResponse, I
 /// Image type from the first bytes of base64 data, `image/png` when unknown.
 fn sniff_image_type(b64: &str) -> &'static str {
     let prefix: String = b64.chars().take(16).collect();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(prefix)
-        .unwrap_or_default();
+    let bytes = agentai_core::base64::decode(&prefix).unwrap_or_default();
     match bytes.as_slice() {
         [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
         [b'G', b'I', b'F', b'8', ..] => "image/gif",
@@ -278,55 +272,12 @@ fn sniff_image_type(b64: &str) -> &'static str {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use agentai_core::HttpError;
-    use serde_json::{Value, json};
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
+    use serde_json::json;
 
-    /// Records the requests and answers with the prepared responses, in order.
-    #[derive(Default)]
-    pub(crate) struct MockHttp {
-        pub(crate) requests: Mutex<Vec<HttpRequest>>,
-        responses: Mutex<VecDeque<HttpResponse>>,
-    }
-
-    impl MockHttp {
-        pub(crate) fn new(responses: Vec<HttpResponse>) -> Arc<Self> {
-            Arc::new(Self {
-                requests: Mutex::default(),
-                responses: Mutex::new(responses.into()),
-            })
-        }
-
-        pub(crate) fn request(&self, index: usize) -> HttpRequest {
-            self.requests.lock().unwrap()[index].clone()
-        }
-    }
-
-    #[async_trait]
-    impl HttpClient for MockHttp {
-        async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
-            self.requests.lock().unwrap().push(request);
-            Ok(self
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("no response left"))
-        }
-    }
-
-    pub(crate) fn json_response(status: u16, body: Value) -> HttpResponse {
-        HttpResponse::new(status, body.to_string())
-    }
-
-    pub(crate) fn provider(http: &Arc<MockHttp>) -> OpenAiImageProvider {
+    pub(crate) fn provider(http: &MockHttp) -> OpenAiImageProvider {
         OpenAiImageProvider::new("gpt-image-1", "key", "https://api.test/v1/")
-            .with_client(http.clone())
-    }
-
-    fn body_json(request: &HttpRequest) -> Value {
-        serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
+            .with_client(Arc::new(http.clone()))
     }
 
     #[tokio::test]
@@ -367,15 +318,14 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn without_output_format_the_type_comes_from_the_bytes_and_no_key_sends_no_header() {
-        use base64::Engine;
-        let jpeg = base64::engine::general_purpose::STANDARD.encode([0xFF, 0xD8, 0xFF, 0xE0, 0, 1]);
+        let jpeg = agentai_core::base64::encode([0xFF, 0xD8, 0xFF, 0xE0, 0, 1]);
         // As a local OpenAI-compatible server answers: `url: null`, no `output_format`
         let http = MockHttp::new(vec![json_response(
             200,
             json!({"created": 1, "data": [{"b64_json": jpeg, "url": null}]}),
         )]);
-        let provider =
-            OpenAiImageProvider::new("m", "", "http://local/v1").with_client(http.clone());
+        let provider = OpenAiImageProvider::new("m", "", "http://local/v1")
+            .with_client(Arc::new(http.clone()));
 
         let response = provider.generate(ImageRequest::new("x")).await.unwrap();
 
@@ -396,7 +346,7 @@ pub(crate) mod tests {
             .unwrap();
 
         assert_eq!(response.image, Media::image_url("https://cdn.test/a.png"));
-        assert_eq!(http.requests.lock().unwrap().len(), 1);
+        assert_eq!(http.request_count(), 1);
     }
 
     #[tokio::test]
@@ -483,7 +433,7 @@ pub(crate) mod tests {
         };
         let http = MockHttp::new(vec![models(), models()]);
         let official = OpenAiImageProvider::new("", "key", DEFAULT_BASE_URL)
-            .with_client(http.clone())
+            .with_client(Arc::new(http.clone()))
             .list_models()
             .await
             .unwrap();

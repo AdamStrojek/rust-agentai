@@ -21,9 +21,34 @@
 //! - **Images for vision models**: Send text and images together in a [`Prompt`](crate::Prompt), by URL or from bytes. Plain text prompts work as before.
 //! - **Image generation and editing**: The [`agentai-image`](https://docs.rs/agentai-image) crate gives the agent tools to draw and edit images (OpenAI and compatible APIs). Tools can return images to the model with [`ToolOutput`](crate::tool::ToolOutput).
 //! - **Speech and voice cloning**: The [`agentai-audio`](https://docs.rs/agentai-audio) crate gives the agent tools to speak texts (OpenAI and compatible APIs, ElevenLabs, oMLX) and clones voices from your code.
+//! - **Video generation**: The [`agentai-video`](https://docs.rs/agentai-video) crate submits video jobs, follows them and downloads the result (comfy-serve, OpenRouter), from text, frames or reference files.
 //! - **You own the conversation**: An agent is shareable configuration. You keep the history, decide what to store, trim or persist, and get token usage and the stop reason from every run.
 //!
 //! ## What's New
+//!
+//! #### 0.7.0 - Video generation
+//!
+//! - **Video generation**: the new [`agentai-video`](https://docs.rs/agentai-video) crate has
+//!   `from_model("comfy-serve::wan-2.2")?` (or `openrouter::<model>`), which gives a `VideoProvider`.
+//!   `submit` returns a `VideoJob`, you poll `status` until `JobStatus::Completed` and `download` the
+//!   video as a `Media`. A `VideoJob` is serializable, so you can store it and follow it after a restart.
+//! - **Text, frames or references**: `VideoRequest` takes text only, a first and/or last frame, or
+//!   reference images, videos and audio (comfy-serve; OpenRouter takes images only).
+//! - **Models**: `list_models("comfy-serve")` returns the durations, resolutions, aspect ratios and
+//!   inputs a model accepts, where the provider says so. comfy-serve jobs can be cancelled.
+//! - **File names and types**: `agentai_core::mime` (re-exported by `agentai-image`, `agentai-audio` and
+//!   `agentai-video`) maps MIME types to file extensions and back, and `Media` gains `extension()`,
+//!   `file_name(stem)` and `to_url()` (a data URL for bytes). Generated images and audio keep the extension
+//!   of their name only when it is a known file type, so an image named `my.picture` is saved as
+//!   `my.picture.png`.
+//! - Internal: `agentai-core` HTTP requests now support `DELETE` and JSON parts in multipart forms; the
+//!   media crates share its MIME table, base64 helpers and a `MockHttp` test client (feature `test-support`).
+//!
+//! **Breaking changes**: in `agentai-audio`, `SpeechRequest::voice` is now `voices`, a list in speaker order;
+//! in `agentai-image` and `agentai-audio` a file name keeps only a known media extension.
+//! Read the [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+//! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#060--070-YYYY-MM-DD)
+//! before upgrading.
 //!
 //! #### 0.6.0 - Text-to-speech and voice cloning
 //!

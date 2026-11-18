@@ -20,13 +20,12 @@
 
 use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    WordTimestamp, audio_media, extension_for,
+    WordTimestamp, audio_media,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
 use async_trait::async_trait;
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -350,13 +349,7 @@ impl SpeechProvider for FishAudioProvider {
         }
         for (index, sample) in samples.iter().enumerate() {
             let bytes = sample.bytes(&*self.client).await?;
-            let filename = sample.name.clone().unwrap_or_else(|| {
-                format!(
-                    "sample-{}.{}",
-                    index + 1,
-                    extension_for(&sample.content_type)
-                )
-            });
+            let filename = sample.file_name(&format!("sample-{}", index + 1));
             form = form.with_file("voices", filename, sample.content_type.as_str(), bytes);
         }
         let http = HttpRequest::post(format!("{}/model", self.base_url)).with_multipart(form);
@@ -466,8 +459,7 @@ fn parse_timestamp_stream(body: &[u8]) -> Result<(Vec<u8>, Vec<WordTimestamp>), 
         let event: TimestampEvent =
             serde_json::from_value(object.into()).map_err(|e| invalid(e.to_string()))?;
         audio.extend(
-            base64::engine::general_purpose::STANDARD
-                .decode(&event.audio_base64)
+            agentai_core::base64::decode(&event.audio_base64)
                 .map_err(|e| invalid(e.to_string()))?,
         );
         if let Some(alignment) = event.alignment {
@@ -506,12 +498,13 @@ struct ModelEntry {
 mod tests {
     use super::*;
     use crate::MemoryVoiceStore;
-    use crate::provider::test_support::{MockHttp, body_json, json_response};
     use agentai_core::HttpResponse;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::{Value, json};
 
-    fn provider(http: &Arc<MockHttp>) -> FishAudioProvider {
-        FishAudioProvider::new("drama-3", "key", "https://api.test/").with_client(http.clone())
+    fn provider(http: &MockHttp) -> FishAudioProvider {
+        FishAudioProvider::new("drama-3", "key", "https://api.test/")
+            .with_client(Arc::new(http.clone()))
     }
 
     fn audio() -> HttpResponse {
@@ -584,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn timestamps_join_the_audio_and_offset_the_words() {
         let event = |audio: &[u8], seq: u64, offset: f64, alignment: Value| {
-            let audio = base64::engine::general_purpose::STANDARD.encode(audio);
+            let audio = agentai_core::base64::encode(audio);
             let event = json!({
                 "audio_base64": audio, "content": "x", "alignment": alignment,
                 "chunk_seq": seq, "chunk_audio_offset_sec": offset
@@ -731,7 +724,7 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(err, AudioError::Unsupported(_)));
         }
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]

@@ -13,9 +13,8 @@
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::fishaudio::FishAudioProvider;
 use agentai_audio::{
-    MemoryVoiceStore, SpeechGenerator, SpeechRequest, StoredVoice, Voice, VoiceStore,
+    MemoryVoiceStore, SpeechGenerator, SpeechRequest, StoredVoice, Voice, VoiceStore, base64,
 };
-use base64::Engine;
 
 const USAGE: &str = "usage: dialogue <a.wav> <transcript a> <b.wav> <transcript b>";
 
@@ -56,10 +55,7 @@ async fn main() -> anyhow::Result<()> {
         MediaSource::Base64(data) => {
             std::fs::create_dir_all("audio")?;
             let path = "audio/dialogue.mp3";
-            std::fs::write(
-                path,
-                base64::engine::general_purpose::STANDARD.decode(data)?,
-            )?;
+            std::fs::write(path, base64::decode(data)?)?;
             println!("Saved {path} ({})", response.audio.content_type);
         }
         MediaSource::Url(url) => println!("The audio is at {url}"),

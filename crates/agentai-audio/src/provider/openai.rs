@@ -291,9 +291,9 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::test_support::{MockHttp, body_json, json_response};
     use crate::provider::{AudioFormat, SpeechRequest, Voice};
     use agentai_core::HttpResponse;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -301,19 +301,19 @@ mod tests {
         HttpResponse::new(200, b"audio".to_vec())
     }
 
-    fn build(model: &str, base_url: &str, http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
-        OpenAiSpeechProvider::new(model, "key", base_url).with_client(http.clone())
+    fn build(model: &str, base_url: &str, http: &MockHttp) -> OpenAiSpeechProvider {
+        OpenAiSpeechProvider::new(model, "key", base_url).with_client(Arc::new(http.clone()))
     }
 
-    fn official(http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
+    fn official(http: &MockHttp) -> OpenAiSpeechProvider {
         build("gpt-4o-mini-tts", DEFAULT_BASE_URL, http)
     }
 
-    fn tts1(http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
+    fn tts1(http: &MockHttp) -> OpenAiSpeechProvider {
         build("tts-1", DEFAULT_BASE_URL, http)
     }
 
-    fn compatible(http: &Arc<MockHttp>) -> OpenAiSpeechProvider {
+    fn compatible(http: &MockHttp) -> OpenAiSpeechProvider {
         build("kokoro", "http://local/v1", http)
     }
 
@@ -351,7 +351,7 @@ mod tests {
 
     async fn voice_body(
         provider: OpenAiSpeechProvider,
-        http: &Arc<MockHttp>,
+        http: &MockHttp,
         request: SpeechRequest,
     ) -> serde_json::Value {
         provider.generate(request).await.unwrap();
@@ -440,7 +440,7 @@ mod tests {
             .generate(SpeechRequest::new("hi").with_voice(Voice::description("warm")))
             .await;
         assert!(matches!(err, Err(AudioError::MissingVoice)));
-        assert!(http.requests.lock().unwrap().is_empty());
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]

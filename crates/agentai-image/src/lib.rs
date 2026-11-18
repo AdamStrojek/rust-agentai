@@ -86,7 +86,7 @@ pub mod provider;
 mod toolbox;
 
 #[doc(inline)]
-pub use agentai_core::storage;
+pub use agentai_core::{base64, mime, storage};
 pub use generator::ImageGenerator;
 pub use provider::{ImageError, ImageModel, ImageResponse};
 #[cfg(feature = "toolbox")]

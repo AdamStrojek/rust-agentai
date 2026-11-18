@@ -39,6 +39,7 @@ impl HttpClient for ReqwestClient {
         let method = match request.method {
             Method::Get => reqwest::Method::GET,
             Method::Post => reqwest::Method::POST,
+            Method::Delete => reqwest::Method::DELETE,
         };
         let mut builder = self.client.request(method, &request.url);
         for (name, value) in request.headers {

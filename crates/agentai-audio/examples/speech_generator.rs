@@ -16,8 +16,7 @@
 //! there are no voice IDs.
 
 use agentai::MediaSource;
-use agentai_audio::{SpeechGenerator, Voice};
-use base64::Engine;
+use agentai_audio::{SpeechGenerator, Voice, base64};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,10 +36,7 @@ async fn main() -> anyhow::Result<()> {
             std::fs::create_dir_all("audio")?;
             let name = response.audio.name.as_deref().unwrap_or("greeting.wav");
             let path = format!("audio/{name}");
-            std::fs::write(
-                &path,
-                base64::engine::general_purpose::STANDARD.decode(data)?,
-            )?;
+            std::fs::write(&path, base64::decode(data)?)?;
             println!("Saved {path} ({})", response.audio.content_type);
         }
         MediaSource::Url(url) => println!("The audio is at {url}"),

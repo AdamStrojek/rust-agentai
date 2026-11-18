@@ -8,6 +8,7 @@
 //! stored history keeps working when the LLM client used inside `agentai` changes.
 
 use crate::http::{HttpClient, HttpError, HttpRequest};
+use crate::{base64, mime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -243,19 +244,20 @@ impl Media {
     }
 
     /// Creates an image the provider downloads from `url`. The MIME type is guessed from the
-    /// file extension (`png`, `jpg`, `jpeg`, `gif`, `webp`); other URLs are sent as
+    /// file extension with [`mime::from_path`]; URLs without an image extension are sent as
     /// `image/jpeg`. Use [`Media::from_url`] to set it yourself.
     pub fn image_url(url: impl Into<String>) -> Self {
         let url = url.into();
-        Self::from_url(image_type_from_url(&url), url)
+        let content_type = mime::from_path(&url)
+            .filter(|content_type| content_type.starts_with("image/"))
+            .unwrap_or("image/jpeg");
+        Self::from_url(content_type, url)
     }
 
     /// Creates media from its bytes, for example an image read from a file. The bytes are
     /// sent base64 encoded inside the request.
     pub fn from_bytes(content_type: impl Into<String>, bytes: impl AsRef<[u8]>) -> Self {
-        use base64::Engine;
-        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-        Self::from_base64(content_type, data)
+        Self::from_base64(content_type, base64::encode(bytes))
     }
 
     /// Creates media from bytes that are already base64 encoded.
@@ -274,14 +276,36 @@ impl Media {
         self.content_type.starts_with("image/")
     }
 
+    /// File extension of the MIME type, see [`mime::extension`].
+    pub fn extension(&self) -> &str {
+        mime::extension(&self.content_type)
+    }
+
+    /// A file name for the media: its [`name`](Media::name), else `stem`, with the extension of
+    /// its type unless it already ends in a known one (see [`mime::with_extension`]).
+    ///
+    /// ```rust
+    /// # use agentai_core::message::Media;
+    /// let audio = Media::from_bytes("audio/mpeg", b"ID3");
+    /// assert_eq!(audio.file_name("speech"), "speech.mp3");
+    /// assert_eq!(audio.with_name("intro.wav").file_name("speech"), "intro.wav");
+    /// ```
+    pub fn file_name(&self, stem: &str) -> String {
+        mime::with_extension(self.name.as_deref().unwrap_or(stem), &self.content_type)
+    }
+
+    /// The media as a URL: its own URL, or a `data:` URL with the base64 bytes.
+    pub fn to_url(&self) -> String {
+        match &self.source {
+            MediaSource::Url(url) => url.clone(),
+            MediaSource::Base64(data) => format!("data:{};base64,{data}", self.content_type),
+        }
+    }
+
     /// Size of the media in bytes. `None` for a URL or invalid base64.
     pub fn byte_len(&self) -> Option<usize> {
-        use base64::Engine;
         match &self.source {
-            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .ok()
-                .map(|bytes| bytes.len()),
+            MediaSource::Base64(data) => base64::decode(data).ok().map(|bytes| bytes.len()),
             MediaSource::Url(_) => None,
         }
     }
@@ -289,32 +313,14 @@ impl Media {
     /// Returns the bytes of the media: decoded base64, or downloaded from its URL with
     /// `client`.
     pub async fn bytes(&self, client: &dyn HttpClient) -> Result<Vec<u8>, HttpError> {
-        use base64::Engine;
         match &self.source {
-            MediaSource::Base64(data) => base64::engine::general_purpose::STANDARD
-                .decode(data)
-                .map_err(|e| HttpError::InvalidMedia(e.to_string())),
+            MediaSource::Base64(data) => base64::decode(data),
             MediaSource::Url(url) => Ok(client
                 .send(HttpRequest::get(url))
                 .await?
                 .error_for_status()?
                 .body),
         }
-    }
-}
-
-/// Guesses the MIME type of an image from the extension of its URL.
-fn image_type_from_url(url: &str) -> &'static str {
-    let path = url.split(['?', '#']).next().unwrap_or_default();
-    let extension = path
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "png" => "image/png",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        _ => "image/jpeg",
     }
 }
 
@@ -543,6 +549,26 @@ mod tests {
         assert_eq!(
             Media::image_url("https://example.com/a.png").source,
             MediaSource::Url("https://example.com/a.png".into())
+        );
+    }
+
+    #[test]
+    fn file_name_prefers_the_name_over_the_stem() {
+        let video = Media::from_bytes("video/mp4", b"MP4");
+        assert_eq!(video.file_name("first_frame"), "first_frame.mp4");
+        assert_eq!(video.clone().with_name("clip").file_name("x"), "clip.mp4");
+        assert_eq!(video.with_name("clip.mov").file_name("x"), "clip.mov");
+    }
+
+    #[test]
+    fn to_url_gives_the_url_or_a_data_url() {
+        assert_eq!(
+            Media::from_base64("image/png", "aGk=").to_url(),
+            "data:image/png;base64,aGk="
+        );
+        assert_eq!(
+            Media::image_url("https://example.com/a.png").to_url(),
+            "https://example.com/a.png"
         );
     }
 

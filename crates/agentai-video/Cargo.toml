@@ -1,0 +1,47 @@
+[package]
+name = "agentai-video"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Adam Strojek <adam@strojek.info>"]
+license = "MIT"
+repository = "https://github.com/AdamStrojek/rust-agentai"
+description = "Video generation for AgentAI: submit a job, follow it, download the video."
+readme = "README.md"
+categories = ["multimedia::video"]
+keywords = ["generative-ai", "agent", "video-generation", "text-to-video"]
+
+[dependencies]
+agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+    "reqwest",
+] }
+async-trait = "0.1.92"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+document-features = { version = "0.2" }
+
+[dev-dependencies]
+agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+    "test-support",
+] }
+anyhow = "1.0.104"
+tokio = { version = "1.54.0", features = ["full"] }
+
+[features]
+default = ["rustls-ring", "system-proxy"]
+#! Available features for `agentai-video` crate.
+#!
+#! Features list:
+#!
+
+## TLS with rustls and the ring crypto provider, checking certificates against the OS trust
+## store.
+rustls-ring = ["agentai-core/rustls-ring"]
+## TLS with rustls and the aws-lc-rs crypto provider (builds the `aws-lc-sys` C library).
+rustls-aws-lc = ["agentai-core/rustls-aws-lc"]
+## TLS of the operating system (OpenSSL, SChannel or Security Framework). It cannot be combined
+## with a `rustls-*` feature: set `default-features = false`.
+native-tls = ["agentai-core/native-tls"]
+## Reads the macOS and Windows system proxy settings.
+system-proxy = ["agentai-core/system-proxy"]
