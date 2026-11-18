@@ -22,6 +22,9 @@ thiserror = "2.0.21"
 document-features = { version = "0.2" }
 
 [dev-dependencies]
+agentai-core = { path = "../agentai-core", version = "0.6", default-features = false, features = [
+    "test-support",
+] }
 anyhow = "1.0.104"
 tokio = { version = "1.54.0", features = ["full"] }
 

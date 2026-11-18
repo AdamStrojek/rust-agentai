@@ -1,16 +1,17 @@
-//! Comfy Serve, a server for video generation models that speaks the "Video API v1" protocol
-//! (`/api/v1/videos`).
+//! Comfy Serve, a server for video generation models (`/api/v1/videos`).
 
 use std::sync::Arc;
 
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, Multipart, ReqwestClient};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::{
-    JobStatus, VideoError, VideoInputs, VideoJob, VideoModel, VideoProvider, VideoRequest,
-    video_api,
+    JobStatus, VideoError, VideoInputKind, VideoInputs, VideoJob, VideoModel, VideoProvider,
+    VideoRequest,
 };
 
 /// Environment variable with the base URL of the server.
@@ -95,9 +96,8 @@ impl ComfyServeVideoProvider {
         request: HttpRequest,
         video: VideoRequest,
     ) -> Result<HttpRequest, VideoError> {
-        let mut json = video_api::request_options(&self.model, &video);
-
         let mut files: Vec<(&str, &Media)> = Vec::new();
+        let mut video_sound: &[u32] = &[];
         match &video.inputs {
             VideoInputs::Frames { first, last } => {
                 files.extend(first.iter().map(|m| ("first_frame", m)));
@@ -107,44 +107,189 @@ impl ComfyServeVideoProvider {
                 files.extend(refs.images.iter().map(|m| ("image", m)));
                 files.extend(refs.videos.iter().map(|m| ("video", m)));
                 files.extend(refs.audio.iter().map(|m| ("audio", m)));
-                if !refs.video_sound.is_empty() {
-                    json.insert("video_sound".into(), json!(refs.video_sound));
-                }
+                video_sound = &refs.video_sound;
             }
             VideoInputs::None => {}
         }
+        let body = RequestBody {
+            model: &self.model,
+            prompt: &video.prompt,
+            duration: video.duration,
+            resolution: video.resolution.as_deref(),
+            aspect_ratio: video.aspect_ratio.as_deref(),
+            seed: video.seed,
+            video_sound,
+        };
 
         if files.is_empty() {
-            return Ok(request.with_json(&Value::Object(json))?);
+            return Ok(request.with_json(&body)?);
         }
-        let mut form = Multipart::new().with_json("request", &Value::Object(json))?;
+        let mut form = Multipart::new().with_json("request", &body)?;
         for (part, media) in files {
-            let filename = media
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("{part}.{}", extension(&media.content_type)));
             let bytes = media.bytes(&*self.client).await?;
-            form = form.with_file(part, filename, media.content_type.clone(), bytes);
+            form = form.with_file(
+                part,
+                media.file_name(part),
+                media.content_type.clone(),
+                bytes,
+            );
         }
         Ok(request.with_multipart(form))
     }
 }
 
-/// File extension for a MIME type: its subtype when that is plain ASCII letters and digits,
-/// with the two common names that differ, otherwise `bin`. Parameters are ignored.
-fn extension(content_type: &str) -> &str {
-    let mime = content_type.split(';').next().unwrap_or("").trim();
-    match mime {
-        "audio/mpeg" => "mp3",
-        "video/quicktime" => "mov",
-        other => other
-            .split_once('/')
-            .map(|(_, subtype)| subtype)
-            .filter(|subtype| {
-                !subtype.is_empty() && subtype.chars().all(|c| c.is_ascii_alphanumeric())
-            })
-            .unwrap_or("bin"),
+/// The JSON of `POST /api/v1/videos`, the whole body or the `request` part of the form.
+#[derive(Serialize)]
+struct RequestBody<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolution: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aspect_ratio: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u32>,
+    #[serde(skip_serializing_if = "<[u32]>::is_empty")]
+    video_sound: &'a [u32],
+}
+
+#[derive(Deserialize)]
+struct JobReply {
+    id: String,
+    polling_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StatusReply {
+    status: Status,
+    error: Option<ErrorReply>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Status {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+    Expired,
+}
+
+/// `{"message": ...}`, a plain string, or anything else (no message).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ErrorReply {
+    Object { message: Option<String> },
+    Text(String),
+    Other(IgnoredAny),
+}
+
+#[derive(Deserialize)]
+struct ModelList {
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: Option<String>,
+    name: Option<String>,
+    supported_durations: Option<Vec<u32>>,
+    supported_resolutions: Option<Vec<String>>,
+    supported_aspect_ratios: Option<Vec<String>>,
+    supported_inputs: Option<Vec<InputKind>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InputKind {
+    FirstFrame,
+    LastFrame,
+    Image,
+    Video,
+    Audio,
+    #[serde(other)]
+    Unknown,
+}
+
+fn json_reply<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, VideoError> {
+    response
+        .json()
+        .map_err(|err| VideoError::InvalidResponse(err.to_string()))
+}
+
+/// `{ "id", "polling_url" }` becomes `VideoJob { id, data: {"polling_url": ..} }`.
+fn parse_job(response: &HttpResponse) -> Result<VideoJob, VideoError> {
+    let reply: JobReply = json_reply(response)?;
+    Ok(VideoJob::new(reply.id).with_data(json!({ "polling_url": reply.polling_url })))
+}
+
+/// 404 is `Gone`, so are cancelled and expired jobs.
+fn parse_status(response: HttpResponse) -> Result<JobStatus, VideoError> {
+    if response.status == 404 {
+        return Ok(JobStatus::Gone);
     }
+    let reply: StatusReply = json_reply(&response.error_for_status()?)?;
+    Ok(match reply.status {
+        Status::Pending => JobStatus::Queued,
+        Status::InProgress => JobStatus::Running,
+        Status::Completed => JobStatus::Completed,
+        Status::Cancelled | Status::Expired => JobStatus::Gone,
+        Status::Failed => JobStatus::Failed(match reply.error {
+            Some(
+                ErrorReply::Object {
+                    message: Some(message),
+                }
+                | ErrorReply::Text(message),
+            ) => message,
+            _ => "the job failed".to_string(),
+        }),
+    })
+}
+
+/// The models of `data`, named `comfy-serve::{id}`; entries without an ID are skipped.
+fn parse_models(response: &HttpResponse) -> Result<Vec<VideoModel>, VideoError> {
+    let list: ModelList = json_reply(response)?;
+    Ok(list
+        .data
+        .into_iter()
+        .filter_map(|entry| {
+            let id = entry.id?;
+            let mut model = VideoModel::new(format!("comfy-serve::{id}"), id);
+            model.name = entry.name;
+            model.durations = entry.supported_durations.map(|mut durations| {
+                durations.sort_unstable();
+                durations
+            });
+            model.resolutions = entry.supported_resolutions;
+            model.aspect_ratios = entry.supported_aspect_ratios;
+            model.inputs = entry.supported_inputs.and_then(|kinds| {
+                let known: Vec<VideoInputKind> = kinds
+                    .iter()
+                    .filter_map(|kind| match kind {
+                        InputKind::FirstFrame => Some(VideoInputKind::FirstFrame),
+                        InputKind::LastFrame => Some(VideoInputKind::LastFrame),
+                        InputKind::Image => Some(VideoInputKind::Image),
+                        InputKind::Video => Some(VideoInputKind::Video),
+                        InputKind::Audio => Some(VideoInputKind::Audio),
+                        InputKind::Unknown => None,
+                    })
+                    .collect();
+                // A list of kinds we do not know says nothing about what the model accepts
+                (!known.is_empty() || kinds.is_empty()).then_some(known)
+            });
+            Some(model)
+        })
+        .collect())
+}
+
+/// The video bytes, typed by the `Content-Type` header (`video/mp4` without one).
+fn parse_content(response: HttpResponse) -> Result<Media, VideoError> {
+    let response = response.error_for_status()?;
+    let content_type = response.content_type().unwrap_or("video/mp4").to_string();
+    Ok(Media::from_bytes(content_type, response.body))
 }
 
 #[async_trait]
@@ -156,21 +301,21 @@ impl VideoProvider for ComfyServeVideoProvider {
     async fn submit(&self, request: VideoRequest) -> Result<VideoJob, VideoError> {
         let request = self.body(HttpRequest::post(self.url("")), request).await?;
         let response = self.send(request).await?.error_for_status()?;
-        video_api::parse_job(&response)
+        parse_job(&response)
     }
 
     async fn status(&self, job: &VideoJob) -> Result<JobStatus, VideoError> {
         let response = self
             .send(HttpRequest::get(self.url(&format!("/{}", job.id))))
             .await?;
-        video_api::parse_status(response)
+        parse_status(response)
     }
 
     async fn download(&self, job: &VideoJob) -> Result<Media, VideoError> {
         let response = self
             .send(HttpRequest::get(self.url(&format!("/{}/content", job.id))))
             .await?;
-        video_api::parse_content(response)
+        parse_content(response)
     }
 
     fn supports_cancel(&self) -> bool {
@@ -194,7 +339,7 @@ impl VideoProvider for ComfyServeVideoProvider {
             .send(HttpRequest::get(self.url("/models")))
             .await?
             .error_for_status()?;
-        video_api::parse_models("comfy-serve", &response)
+        parse_models(&response)
     }
 }
 
@@ -202,8 +347,9 @@ impl VideoProvider for ComfyServeVideoProvider {
 mod tests {
     use super::*;
     use crate::provider::VideoReferences;
-    use crate::provider::tests::{MockHttp, body_json, json_response};
     use agentai_core::Method;
+    use agentai_core::mock::{MockHttp, body_json, json_response};
+    use serde_json::Value;
 
     fn provider(http: &MockHttp) -> ComfyServeVideoProvider {
         ComfyServeVideoProvider::new("wan", "", "http://host/").with_http_client(http.clone())
@@ -372,5 +518,127 @@ mod tests {
         let models = provider(&http).list_models().await.unwrap();
         assert_eq!(http.request(0).url, "http://host/api/v1/videos/models");
         assert_eq!(models[0].model, "comfy-serve::wan");
+    }
+
+    #[test]
+    fn statuses_map_to_job_status() {
+        let status = |code, body: Value| parse_status(json_response(code, body));
+        assert_eq!(
+            status(200, json!({"status": "pending"})).unwrap(),
+            JobStatus::Queued
+        );
+        assert_eq!(
+            status(200, json!({"status": "in_progress"})).unwrap(),
+            JobStatus::Running
+        );
+        assert_eq!(
+            status(200, json!({"status": "completed"})).unwrap(),
+            JobStatus::Completed
+        );
+        for gone in ["cancelled", "expired"] {
+            assert_eq!(
+                status(200, json!({"status": gone})).unwrap(),
+                JobStatus::Gone
+            );
+        }
+        assert_eq!(
+            status(404, json!({"error": {"message": "no job"}})).unwrap(),
+            JobStatus::Gone
+        );
+        assert_eq!(
+            status(
+                200,
+                json!({"status": "failed", "error": {"message": "oom"}})
+            )
+            .unwrap(),
+            JobStatus::Failed("oom".into())
+        );
+        assert_eq!(
+            status(200, json!({"status": "failed", "error": "bad prompt"})).unwrap(),
+            JobStatus::Failed("bad prompt".into())
+        );
+        assert!(
+            matches!(status(200, json!({"status": "failed"})).unwrap(), JobStatus::Failed(m) if !m.is_empty())
+        );
+        assert!(matches!(
+            status(200, json!({"status": "dreaming"})),
+            Err(VideoError::InvalidResponse(_))
+        ));
+        assert!(matches!(
+            status(500, json!({"error": {"message": "boom"}})),
+            Err(VideoError::Api { status: 500, message }) if message == "boom"
+        ));
+    }
+
+    #[test]
+    fn a_job_without_an_id_is_an_invalid_response() {
+        assert!(matches!(
+            parse_job(&json_response(202, json!({"polling_url": "/x"}))),
+            Err(VideoError::InvalidResponse(_))
+        ));
+        let job = parse_job(&json_response(
+            202,
+            json!({"id": "j1", "polling_url": "/api/v1/videos/j1"}),
+        ))
+        .unwrap();
+        assert_eq!(
+            job,
+            VideoJob::new("j1").with_data(json!({"polling_url": "/api/v1/videos/j1"}))
+        );
+    }
+
+    #[test]
+    fn models_keep_absent_capabilities_unknown() {
+        let models = parse_models(&json_response(
+            200,
+            json!({"data": [
+                {"id": "wan", "name": "Wan", "supported_durations": [10, 5],
+                 "supported_resolutions": ["720p"], "supported_aspect_ratios": ["16:9"],
+                 "supported_inputs": ["first_frame", "audio", "hologram"]},
+                {"id": "bare", "supported_durations": []},
+                {"id": "odd", "supported_inputs": ["hologram"]},
+                {"id": "none", "supported_inputs": []},
+            ]}),
+        ))
+        .unwrap();
+        assert_eq!(models[0].model, "comfy-serve::wan");
+        assert_eq!(models[0].id, "wan");
+        assert_eq!(models[0].durations, Some(vec![5, 10]));
+        assert_eq!(
+            models[0].inputs,
+            Some(vec![VideoInputKind::FirstFrame, VideoInputKind::Audio])
+        );
+        assert_eq!(models[1].durations, Some(vec![]));
+        // Only unknown kinds say nothing; an empty list from the server accepts nothing
+        assert_eq!(models[2].inputs, None);
+        assert_eq!(models[3].inputs, Some(vec![]));
+        assert_eq!(
+            (
+                models[1].resolutions.clone(),
+                models[1].inputs.clone(),
+                models[1].name.clone()
+            ),
+            (None, None, None)
+        );
+        assert!(matches!(
+            parse_models(&json_response(200, json!({}))),
+            Err(VideoError::InvalidResponse(_))
+        ));
+    }
+
+    #[test]
+    fn content_type_comes_from_the_header_or_defaults_to_mp4() {
+        let media = parse_content(
+            HttpResponse::new(200, vec![1u8, 2])
+                .with_header("Content-Type", "video/webm; codecs=vp9"),
+        )
+        .unwrap();
+        assert_eq!(media.content_type, "video/webm");
+        assert_eq!(
+            parse_content(HttpResponse::new(200, vec![1u8]))
+                .unwrap()
+                .content_type,
+            "video/mp4"
+        );
     }
 }

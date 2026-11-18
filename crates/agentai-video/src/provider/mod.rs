@@ -5,7 +5,6 @@
 
 pub mod comfy_serve;
 pub mod openrouter;
-pub(crate) mod video_api;
 
 use agentai_core::HttpError;
 use agentai_core::message::Media;
@@ -391,64 +390,10 @@ pub async fn list_models(provider: &str) -> Result<Vec<VideoModel>, VideoError> 
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse};
-    use async_trait::async_trait;
-    use serde_json::{Value, json};
-    use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex};
+mod tests {
+    use serde_json::json;
 
     use super::*;
-
-    #[derive(Default)]
-    struct Recorded {
-        requests: Mutex<Vec<HttpRequest>>,
-        responses: Mutex<VecDeque<HttpResponse>>,
-    }
-
-    /// Records the requests and answers with the prepared responses, in order. Clones share
-    /// the record, so one can go to a provider (`with_http_client`) while the test keeps another.
-    #[derive(Clone, Default)]
-    pub(crate) struct MockHttp(Arc<Recorded>);
-
-    impl MockHttp {
-        pub(crate) fn new(responses: Vec<HttpResponse>) -> Self {
-            Self(Arc::new(Recorded {
-                requests: Mutex::default(),
-                responses: Mutex::new(responses.into()),
-            }))
-        }
-
-        pub(crate) fn request(&self, index: usize) -> HttpRequest {
-            self.0.requests.lock().unwrap()[index].clone()
-        }
-
-        pub(crate) fn request_count(&self) -> usize {
-            self.0.requests.lock().unwrap().len()
-        }
-    }
-
-    #[async_trait]
-    impl HttpClient for MockHttp {
-        async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
-            self.0.requests.lock().unwrap().push(request);
-            Ok(self
-                .0
-                .responses
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("no response left"))
-        }
-    }
-
-    pub(crate) fn json_response(status: u16, body: Value) -> HttpResponse {
-        HttpResponse::new(status, body.to_string())
-    }
-
-    pub(crate) fn body_json(request: &HttpRequest) -> Value {
-        serde_json::from_slice(request.body.as_ref().unwrap()).unwrap()
-    }
 
     #[test]
     fn a_prefix_selects_the_provider_and_is_required() {

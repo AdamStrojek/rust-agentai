@@ -8,14 +8,15 @@
 
 use std::sync::Arc;
 
-use agentai_core::message::{Media, MediaSource};
+use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, HttpResponse, ReqwestClient};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::{
     JobStatus, VideoError, VideoInputs, VideoJob, VideoModel, VideoProvider, VideoRequest,
-    video_api,
 };
 
 /// The official API.
@@ -101,23 +102,26 @@ impl OpenRouterVideoProvider {
             .await?)
     }
 
-    fn body(&self, video: VideoRequest) -> Result<Value, VideoError> {
-        let mut json = video_api::request_options(&self.model, &video);
+    fn body<'a>(&'a self, video: &'a VideoRequest) -> Result<RequestBody<'a>, VideoError> {
+        let mut body = RequestBody {
+            model: &self.model,
+            prompt: &video.prompt,
+            duration: video.duration,
+            resolution: video.resolution.as_deref(),
+            aspect_ratio: video.aspect_ratio.as_deref(),
+            seed: video.seed,
+            frame_images: Vec::new(),
+            input_references: Vec::new(),
+        };
         match &video.inputs {
             VideoInputs::None => {}
             VideoInputs::Frames { first, last } => {
-                let frames: Vec<Value> = [(first, "first_frame"), (last, "last_frame")]
+                body.frame_images = [(first, "first_frame"), (last, "last_frame")]
                     .into_iter()
-                    .filter_map(|(media, frame_type)| Some((media.as_ref()?, frame_type)))
-                    .map(|(media, frame_type)| {
-                        let mut entry = image_entry(media);
-                        entry["frame_type"] = json!(frame_type);
-                        entry
+                    .filter_map(|(media, frame_type)| {
+                        Some(ImagePart::new(media.as_ref()?, Some(frame_type)))
                     })
                     .collect();
-                if !frames.is_empty() {
-                    json.insert("frame_images".into(), Value::Array(frames));
-                }
             }
             VideoInputs::References(refs) => {
                 if !refs.videos.is_empty() {
@@ -129,23 +133,169 @@ impl OpenRouterVideoProvider {
                 if !refs.video_sound.is_empty() {
                     return Err(VideoError::Unsupported("video sound"));
                 }
-                if !refs.images.is_empty() {
-                    let images: Vec<Value> = refs.images.iter().map(image_entry).collect();
-                    json.insert("input_references".into(), Value::Array(images));
-                }
+                body.input_references = refs
+                    .images
+                    .iter()
+                    .map(|image| ImagePart::new(image, None))
+                    .collect();
             }
         }
-        Ok(Value::Object(json))
+        Ok(body)
     }
 }
 
+/// The JSON of `POST /videos`.
+#[derive(Serialize)]
+struct RequestBody<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolution: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aspect_ratio: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    frame_images: Vec<ImagePart>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    input_references: Vec<ImagePart>,
+}
+
 /// An image as OpenRouter takes it: a data URL for bytes, the URL itself otherwise.
-fn image_entry(media: &Media) -> Value {
-    let url = match &media.source {
-        MediaSource::Base64(data) => format!("data:{};base64,{data}", media.content_type),
-        MediaSource::Url(url) => url.clone(),
-    };
-    json!({"type": "image_url", "image_url": {"url": url}})
+#[derive(Serialize)]
+struct ImagePart {
+    r#type: &'static str,
+    image_url: ImageUrl,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frame_type: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct ImageUrl {
+    url: String,
+}
+
+impl ImagePart {
+    fn new(media: &Media, frame_type: Option<&'static str>) -> Self {
+        Self {
+            r#type: "image_url",
+            image_url: ImageUrl {
+                url: media.to_url(),
+            },
+            frame_type,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct JobReply {
+    id: String,
+    polling_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StatusReply {
+    status: Status,
+    error: Option<ErrorReply>,
+}
+
+/// The job statuses OpenRouter documents.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Status {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Cancelled,
+    Expired,
+}
+
+/// `{"message": ...}`, a plain string, or anything else (no message).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ErrorReply {
+    Object { message: Option<String> },
+    Text(String),
+    Other(IgnoredAny),
+}
+
+#[derive(Deserialize)]
+struct ModelList {
+    data: Vec<ModelEntry>,
+}
+
+/// OpenRouter lists no input kinds, so [`VideoModel::inputs`] stays `None`.
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: Option<String>,
+    name: Option<String>,
+    supported_durations: Option<Vec<u32>>,
+    supported_resolutions: Option<Vec<String>>,
+    supported_aspect_ratios: Option<Vec<String>>,
+}
+
+fn json_reply<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, VideoError> {
+    response
+        .json()
+        .map_err(|err| VideoError::InvalidResponse(err.to_string()))
+}
+
+/// `{ "id", "polling_url" }` becomes `VideoJob { id, data: {"polling_url": ..} }`.
+fn parse_job(response: &HttpResponse) -> Result<VideoJob, VideoError> {
+    let reply: JobReply = json_reply(response)?;
+    Ok(VideoJob::new(reply.id).with_data(json!({ "polling_url": reply.polling_url })))
+}
+
+/// 404 is `Gone`, so are cancelled and expired jobs.
+fn parse_status(response: HttpResponse) -> Result<JobStatus, VideoError> {
+    if response.status == 404 {
+        return Ok(JobStatus::Gone);
+    }
+    let reply: StatusReply = json_reply(&response.error_for_status()?)?;
+    Ok(match reply.status {
+        Status::Pending => JobStatus::Queued,
+        Status::InProgress => JobStatus::Running,
+        Status::Completed => JobStatus::Completed,
+        Status::Cancelled | Status::Expired => JobStatus::Gone,
+        Status::Failed => JobStatus::Failed(match reply.error {
+            Some(ErrorReply::Object {
+                message: Some(message),
+            })
+            | Some(ErrorReply::Text(message)) => message,
+            _ => "the job failed".to_string(),
+        }),
+    })
+}
+
+/// The models of `data`, named `openrouter::{id}`; entries without an ID are skipped.
+fn parse_models(response: &HttpResponse) -> Result<Vec<VideoModel>, VideoError> {
+    let list: ModelList = json_reply(response)?;
+    Ok(list
+        .data
+        .into_iter()
+        .filter_map(|entry| {
+            let id = entry.id?;
+            let mut model = VideoModel::new(format!("openrouter::{id}"), id);
+            model.name = entry.name;
+            model.durations = entry.supported_durations.map(|mut durations| {
+                durations.sort_unstable();
+                durations
+            });
+            model.resolutions = entry.supported_resolutions;
+            model.aspect_ratios = entry.supported_aspect_ratios;
+            Some(model)
+        })
+        .collect())
+}
+
+/// The video bytes, typed by the `Content-Type` header (`video/mp4` without one).
+fn parse_content(response: HttpResponse) -> Result<Media, VideoError> {
+    let response = response.error_for_status()?;
+    let content_type = response.content_type().unwrap_or("video/mp4").to_string();
+    Ok(Media::from_bytes(content_type, response.body))
 }
 
 #[async_trait]
@@ -155,17 +305,16 @@ impl VideoProvider for OpenRouterVideoProvider {
     }
 
     async fn submit(&self, request: VideoRequest) -> Result<VideoJob, VideoError> {
-        let body = self.body(request)?;
-        let request = HttpRequest::post(self.url("")).with_json(&body)?;
+        let request = HttpRequest::post(self.url("")).with_json(&self.body(&request)?)?;
         let response = self.send(request).await?.error_for_status()?;
-        video_api::parse_job(&response)
+        parse_job(&response)
     }
 
     async fn status(&self, job: &VideoJob) -> Result<JobStatus, VideoError> {
         let response = self
             .send(HttpRequest::get(self.url(&format!("/{}", job.id))))
             .await?;
-        video_api::parse_status(response)
+        parse_status(response)
     }
 
     async fn download(&self, job: &VideoJob) -> Result<Media, VideoError> {
@@ -174,7 +323,7 @@ impl VideoProvider for OpenRouterVideoProvider {
                 self.url(&format!("/{}/content?index=0", job.id)),
             ))
             .await?;
-        video_api::parse_content(response)
+        parse_content(response)
     }
 
     async fn list_models(&self) -> Result<Vec<VideoModel>, VideoError> {
@@ -182,7 +331,7 @@ impl VideoProvider for OpenRouterVideoProvider {
             .send(HttpRequest::get(self.url("/models")))
             .await?
             .error_for_status()?;
-        video_api::parse_models("openrouter", &response)
+        parse_models(&response)
     }
 }
 
@@ -190,7 +339,7 @@ impl VideoProvider for OpenRouterVideoProvider {
 mod tests {
     use super::*;
     use crate::provider::VideoReferences;
-    use crate::provider::tests::{MockHttp, body_json, json_response};
+    use agentai_core::mock::{MockHttp, body_json, json_response};
 
     fn provider(http: &MockHttp) -> OpenRouterVideoProvider {
         OpenRouterVideoProvider::new("google/veo-3.1", "key", "https://or/api/v1")
@@ -266,5 +415,48 @@ mod tests {
         let sent = http.request(0);
         assert_eq!(sent.url, "https://or/api/v1/videos/j/content?index=0");
         assert_eq!(sent.header("Authorization"), Some("Bearer key"));
+    }
+
+    #[test]
+    fn statuses_follow_the_documented_values() {
+        let status = |code, body| parse_status(json_response(code, body));
+        for (reply, expected) in [
+            ("pending", JobStatus::Queued),
+            ("in_progress", JobStatus::Running),
+            ("completed", JobStatus::Completed),
+            ("cancelled", JobStatus::Gone),
+            ("expired", JobStatus::Gone),
+        ] {
+            assert_eq!(status(200, json!({"status": reply})).unwrap(), expected);
+        }
+        assert_eq!(
+            status(200, json!({"status": "failed", "error": "content policy"})).unwrap(),
+            JobStatus::Failed("content policy".into())
+        );
+        assert_eq!(status(404, json!({})).unwrap(), JobStatus::Gone);
+        assert!(matches!(
+            status(200, json!({"status": "queued"})),
+            Err(VideoError::InvalidResponse(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn models_have_no_input_kinds() {
+        let http = MockHttp::new(vec![json_response(
+            200,
+            json!({"data": [
+                {"id": "vendor/video", "name": "Video", "supported_durations": [8, 4],
+                 "supported_resolutions": ["720p", "1080p"], "supported_aspect_ratios": ["16:9"]},
+                {"name": "no id"},
+            ]}),
+        )]);
+        let models = provider(&http).list_models().await.unwrap();
+        assert_eq!(http.request(0).url, "https://or/api/v1/videos/models");
+        let mut expected = VideoModel::new("openrouter::vendor/video", "vendor/video");
+        expected.name = Some("Video".into());
+        expected.durations = Some(vec![4, 8]);
+        expected.resolutions = Some(vec!["720p".into(), "1080p".into()]);
+        expected.aspect_ratios = Some(vec!["16:9".into()]);
+        assert_eq!(models, [expected]);
     }
 }

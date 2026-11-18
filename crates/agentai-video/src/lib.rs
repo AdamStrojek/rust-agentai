@@ -103,6 +103,8 @@ compile_error!(
 pub mod provider;
 
 pub use agentai_core::message::{Media, MediaSource};
+#[doc(inline)]
+pub use agentai_core::mime;
 pub use agentai_core::{HttpClient, HttpError, HttpRequest, HttpResponse, ReqwestClient};
 pub use provider::{
     JobStatus, VideoError, VideoInputKind, VideoInputs, VideoJob, VideoModel, VideoProvider,
