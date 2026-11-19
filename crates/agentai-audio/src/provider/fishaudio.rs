@@ -7,9 +7,18 @@
 //! [`with_design_model`](FishAudioProvider::with_design_model) (for example `voice-design-1`);
 //! a preview is kept with `create_voice`, which saves it as a sample.
 //!
+//! The provider has three engines, each with its own model: speech
+//! ([`new`](FishAudioProvider::new)), dialogue
+//! ([`with_dialogue_model`](FishAudioProvider::with_dialogue_model)) and voice design
+//! ([`with_design_model`](FishAudioProvider::with_design_model)). A dialogue is one request
+//! whose text marks the speakers, `<|speaker:0|>Hi<|speaker:1|>Hello`, numbered like the
+//! voices of the request.
+//!
 //! A voice is the ID of a Fish Audio voice model or, with a [`VoiceStore`] set with
 //! [`with_voice_store`](FishAudioProvider::with_voice_store), the ID of a voice in that store:
 //! its sample and transcript are then sent with the request (`references`, as MessagePack).
+//! A request takes either IDs or samples for all its voices: when a store is set, all voices
+//! must be in it or none, and a mix is [`AudioError::InvalidRequest`].
 //!
 //! With [`SpeechRequest::with_timestamps`] the request goes to
 //! `POST /v1/tts/stream/with-timestamp`: the streamed audio chunks are joined and the time of
@@ -21,7 +30,7 @@ use super::{
     AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
     VoiceSource, WordTimestamp, audio_media,
 };
-use crate::request::{DesignVoiceRequest, SpeechRequest};
+use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient};
@@ -146,16 +155,32 @@ impl FishAudioProvider {
         request.with_bearer_token(&self.api_key)
     }
 
-    /// The sample of a voice of the voice store, or `None` for a voice model ID.
-    async fn stored_reference(&self, id: &str) -> Result<Option<Reference>, AudioError> {
-        let stored = match &self.store {
-            Some(store) => store.get(id).await?,
-            None => None,
+    /// The samples of `voices`, one per voice, when all of them are in the voice store;
+    /// `None` when none is (or no store is set), so they are voice model IDs. A mix is an
+    /// error. Every voice is looked up before a sample is downloaded.
+    async fn samples(&self, voices: &[VoiceId]) -> Result<Option<Vec<Reference>>, AudioError> {
+        let Some(store) = &self.store else {
+            return Ok(None);
         };
-        match stored {
-            Some(voice) => Ok(Some(self.reference(voice).await?)),
-            None => Ok(None),
+        let mut found = Vec::new();
+        for id in voices {
+            found.push(store.get(id).await?);
         }
+        let stored = found.iter().flatten().count();
+        if stored == 0 {
+            return Ok(None);
+        }
+        if stored < found.len() {
+            return Err(AudioError::InvalidRequest(
+                "Fish Audio takes either voice IDs or samples for all voices of a request, not both"
+                    .to_string(),
+            ));
+        }
+        let mut samples = Vec::new();
+        for voice in found.into_iter().flatten() {
+            samples.push(self.reference(voice).await?);
+        }
+        Ok(Some(samples))
     }
 
     async fn reference(&self, voice: StoredVoice) -> Result<Reference, AudioError> {
@@ -164,69 +189,17 @@ impl FishAudioProvider {
             text: voice.transcript,
         })
     }
-}
 
-#[derive(Serialize)]
-struct Reference {
-    #[serde(with = "serde_bytes")]
-    audio: Vec<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Prosody {
-    speed: f64,
-}
-
-#[derive(Serialize)]
-struct SpeechBody<'a> {
-    text: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reference_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    references: Option<Vec<Reference>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prosody: Option<Prosody>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    language: Option<&'a str>,
-}
-
-fn format_name(format: AudioFormat) -> Result<&'static str, AudioError> {
-    match format {
-        AudioFormat::Mp3 => Ok("mp3"),
-        AudioFormat::Wav => Ok("wav"),
-        AudioFormat::Opus => Ok("opus"),
-        AudioFormat::Pcm => Ok("pcm"),
-        AudioFormat::Flac => Err(AudioError::Unsupported("FLAC output with Fish Audio")),
-        AudioFormat::Aac => Err(AudioError::Unsupported("AAC output with Fish Audio")),
-    }
-}
-
-#[async_trait]
-impl SpeechProvider for FishAudioProvider {
-    async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError> {
-        let model = request.model().unwrap_or(&self.speech_model);
-        let format = request.format().map(format_name).transpose()?;
-        let (reference_id, references) = match request.voice() {
-            Some(id) => match self.stored_reference(id).await? {
-                Some(reference) => (None, Some(vec![reference])),
-                None => (Some(id), None),
-            },
-            None => (None, None),
-        };
-        let inline = references.is_some();
-        let body = SpeechBody {
-            text: request.text(),
-            reference_id,
-            references,
-            format,
-            prosody: request.speed().map(|speed| Prosody { speed }),
-            language: request.language(),
-        };
-        let path = if request.timestamps() {
+    /// Sends a body to `/v1/tts` (or the timestamp stream) and reads the audio. Samples are
+    /// binary, which only the MessagePack body takes.
+    async fn send<Id: Serialize, Refs: Serialize>(
+        &self,
+        model: &str,
+        body: &SpeechBody<'_, Id, Refs>,
+        format: Option<AudioFormat>,
+        timestamps: bool,
+    ) -> Result<SpeechResponse, AudioError> {
+        let path = if timestamps {
             "/v1/tts/stream/with-timestamp"
         } else {
             "/v1/tts"
@@ -235,22 +208,21 @@ impl SpeechProvider for FishAudioProvider {
         if !model.is_empty() {
             http = http.with_header("model", model);
         }
-        // Samples are sent as binary, which only the MessagePack body takes
-        http = if inline {
-            let bytes = rmp_serde::to_vec_named(&body)
+        http = if body.references.is_some() {
+            let bytes = rmp_serde::to_vec_named(body)
                 .map_err(|e| AudioError::InvalidRequest(e.to_string()))?;
             http.with_header("Content-Type", "application/msgpack")
                 .with_body(bytes)
         } else {
-            http.with_json(&body)?
+            http.with_json(body)?
         };
         let response = self
             .client
             .send(self.request(http))
             .await?
             .error_for_status()?;
-        let format = request.format().unwrap_or(AudioFormat::Mp3);
-        let (audio, timestamps) = if request.timestamps() {
+        let format = format.unwrap_or(AudioFormat::Mp3);
+        let (audio, timestamps) = if timestamps {
             let (bytes, timestamps) = parse_timestamp_stream(&response.body)?;
             if bytes.is_empty() {
                 return Err(AudioError::InvalidResponse(
@@ -275,6 +247,115 @@ impl SpeechProvider for FishAudioProvider {
             result = result.with_timestamps(timestamps);
         }
         Ok(result)
+    }
+}
+
+#[derive(Serialize)]
+struct Reference {
+    #[serde(with = "serde_bytes")]
+    audio: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Prosody {
+    speed: f64,
+}
+
+#[derive(Serialize)]
+struct SpeechBody<'a, Id, Refs> {
+    text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reference_id: Option<Id>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    references: Option<Refs>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prosody: Option<Prosody>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+}
+
+fn format_name(format: AudioFormat) -> Result<&'static str, AudioError> {
+    match format {
+        AudioFormat::Mp3 => Ok("mp3"),
+        AudioFormat::Wav => Ok("wav"),
+        AudioFormat::Opus => Ok("opus"),
+        AudioFormat::Pcm => Ok("pcm"),
+        AudioFormat::Flac => Err(AudioError::Unsupported("FLAC output with Fish Audio")),
+        AudioFormat::Aac => Err(AudioError::Unsupported("AAC output with Fish Audio")),
+    }
+}
+
+#[async_trait]
+impl SpeechProvider for FishAudioProvider {
+    async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError> {
+        let model = request.model().unwrap_or(&self.speech_model);
+        let format = request.format().map(format_name).transpose()?;
+        let voice: Vec<VoiceId> = request.voice().map(String::from).into_iter().collect();
+        let (reference_id, references) = match self.samples(&voice).await? {
+            Some(samples) => (None, Some(samples)),
+            None => (request.voice(), None),
+        };
+        let body = SpeechBody {
+            text: request.text(),
+            reference_id,
+            references,
+            format,
+            prosody: request.speed().map(|speed| Prosody { speed }),
+            language: request.language(),
+        };
+        self.send(model, &body, request.format(), request.timestamps())
+            .await
+    }
+
+    fn supports_dialogue(&self) -> bool {
+        self.dialogue_model.is_some()
+    }
+
+    /// Speaks a dialogue with the dialogue model. The text marks the speakers as
+    /// `<|speaker:0|>Hi<|speaker:1|>Hello`, numbered like the voices of the request. Voices
+    /// are IDs of voice models (`reference_id` list) or, when all of them are in the voice
+    /// store, their samples (one list of references per speaker).
+    async fn generate_dialogue(
+        &self,
+        request: &DialogueRequest<'_>,
+    ) -> Result<SpeechResponse, AudioError> {
+        let default_model = self
+            .dialogue_model
+            .as_deref()
+            .ok_or(AudioError::MissingModel("dialogue"))?;
+        let model = request.model().unwrap_or(default_model);
+        let format = request.format().map(format_name).transpose()?;
+        let text: String = request
+            .turns()
+            .iter()
+            .map(|(speaker, text)| format!("<|speaker:{speaker}|>{text}"))
+            .collect();
+        let (reference_id, references) = match self.samples(request.voices()).await? {
+            Some(samples) => (
+                None,
+                Some(
+                    samples
+                        .into_iter()
+                        .map(|sample| vec![sample])
+                        .collect::<Vec<_>>(),
+                ),
+            ),
+            None => (Some(request.voices()).filter(|v| !v.is_empty()), None),
+        };
+        let body = SpeechBody {
+            text: &text,
+            reference_id,
+            references,
+            format,
+            prosody: None,
+            language: request.language(),
+        };
+        self.send(model, &body, request.format(), request.timestamps())
+            .await
     }
 
     fn supports_voice_cloning(&self) -> bool {
@@ -538,6 +619,7 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::request::DialogueTurn;
     use crate::{MemoryVoiceStore, SpeechGenerator};
     use agentai_core::HttpResponse;
     use agentai_core::mock::{MockHttp, body_json, json_response};
@@ -561,6 +643,20 @@ mod tests {
         let voice = StoredVoice::new("Ala", Media::from_bytes("audio/wav", b"WAV"))
             .with_transcript("Hello there.");
         assert_eq!(store.save(voice).await.unwrap(), "voice-1");
+        store
+    }
+
+    fn dialogue_provider(http: &MockHttp) -> FishAudioProvider {
+        provider(http).with_dialogue_model("drama-3")
+    }
+
+    async fn store_with_two() -> MemoryVoiceStore {
+        let store = MemoryVoiceStore::new();
+        for (name, sample, transcript) in [("Ala", b"WAV1", "One."), ("Bo", b"WAV2", "Two.")] {
+            let voice = StoredVoice::new(name, Media::from_bytes("audio/wav", sample))
+                .with_transcript(transcript);
+            store.save(voice).await.unwrap();
+        }
         store
     }
 
@@ -917,5 +1013,112 @@ mod tests {
         assert_eq!(previews[1].audio.content_type, "audio/wav");
         assert_eq!(previews[1].sample_rate, Some(24_000));
         assert_eq!(previews[1].text, None);
+    }
+
+    #[tokio::test]
+    async fn a_dialogue_of_stored_voices_sends_only_their_samples() {
+        let http = MockHttp::new(vec![audio()]);
+        SpeechGenerator::from_provider(
+            dialogue_provider(&http).with_voice_store(store_with_two().await),
+        )
+        .generate_dialogue([
+            DialogueTurn::new("voice-1", "Hi"),
+            DialogueTurn::new("voice-2", "Hello"),
+            DialogueTurn::new("voice-1", "Bye"),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(
+            msgpack(&http.request(0)),
+            json!({
+                "text": "<|speaker:0|>Hi<|speaker:1|>Hello<|speaker:0|>Bye",
+                "references": [[{"audio": bytes(b"WAV1"), "text": "One."}],
+                               [{"audio": bytes(b"WAV2"), "text": "Two."}]]
+            })
+        );
+        assert_eq!(http.request(0).header("model"), Some("drama-3"));
+    }
+
+    #[tokio::test]
+    async fn a_dialogue_of_model_ids_sends_only_reference_id() {
+        let http = MockHttp::new(vec![audio()]);
+        SpeechGenerator::from_provider(dialogue_provider(&http))
+            .generate_dialogue([
+                DialogueTurn::new("m-a", "Hi"),
+                DialogueTurn::new("m-b", "Hello"),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(
+            body_json(&http.request(0)),
+            json!({
+                "text": "<|speaker:0|>Hi<|speaker:1|>Hello", "reference_id": ["m-a", "m-b"]
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn stored_and_model_voices_cannot_be_mixed() {
+        let http = MockHttp::new(vec![]);
+        let err = SpeechGenerator::from_provider(
+            dialogue_provider(&http).with_voice_store(store_with_sample().await),
+        )
+        .generate_dialogue([
+            DialogueTurn::new("voice-1", "Hi"),
+            DialogueTurn::new("m-a", "Hello"),
+        ])
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AudioError::InvalidRequest(_)));
+        assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_dialogue_without_a_dialogue_model_sends_nothing() {
+        let http = MockHttp::new(vec![]);
+        let err = SpeechGenerator::from_provider(provider(&http))
+            .generate_dialogue([DialogueTurn::new("m-a", "Hi")])
+            .with_model("drama-3")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::MissingModel("dialogue")));
+        assert_eq!(http.request_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn one_stored_voice_with_timestamps_streams_its_sample() {
+        let audio = agentai_core::base64::encode(b"AB");
+        let body = format!(
+            "data: {{\"audio_base64\": \"{audio}\", \"chunk_seq\": 0}}\n\ndata: [DONE]\n\n"
+        );
+        let http = MockHttp::new(vec![HttpResponse::new(200, body)]);
+        SpeechGenerator::from_provider(provider(&http).with_voice_store(store_with_sample().await))
+            .generate("hi")
+            .with_voice("voice-1")
+            .with_timestamps(true)
+            .await
+            .unwrap();
+        assert_eq!(
+            http.request(0).url,
+            "https://api.test/v1/tts/stream/with-timestamp"
+        );
+        assert_eq!(
+            msgpack(&http.request(0))["references"],
+            json!([{"audio": bytes(b"WAV"), "text": "Hello there."}])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_voice_missing_from_a_set_store_is_sent_as_its_id() {
+        let http = MockHttp::new(vec![audio()]);
+        SpeechGenerator::from_provider(provider(&http).with_voice_store(store_with_sample().await))
+            .generate("hi")
+            .with_voice("m-a")
+            .await
+            .unwrap();
+        assert_eq!(
+            body_json(&http.request(0)),
+            json!({"text": "hi", "reference_id": "m-a"})
+        );
     }
 }
