@@ -16,8 +16,8 @@
 //! accept comes back as [`AudioError::Api`].
 
 use super::{
-    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
-    VoiceSource, audio_media,
+    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoiceOrigin,
+    VoicePreview, VoiceSource, audio_media,
 };
 use crate::request::{DesignVoiceRequest, SpeechRequest};
 use crate::voice_store::{StoredVoice, VoiceStore};
@@ -326,7 +326,7 @@ impl SpeechProvider for OmlxProvider {
             .await?
             .into_iter()
             .map(|(id, voice)| {
-                let mut info = VoiceInfo::new(id, voice.name).with_cloned(true);
+                let mut info = VoiceInfo::new(id, voice.name, VoiceOrigin::Store);
                 info.description = voice.description;
                 info
             })
@@ -556,11 +556,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             p.list_voices().await.unwrap(),
-            vec![
-                VoiceInfo::new("voice-1", "Adam")
-                    .with_description("calm")
-                    .with_cloned(true)
-            ]
+            vec![VoiceInfo::new("voice-1", "Adam", VoiceOrigin::Store).with_description("calm")]
         );
     }
 

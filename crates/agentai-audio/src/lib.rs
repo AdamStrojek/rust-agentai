@@ -229,7 +229,7 @@ pub use agentai_core::{base64, mime, storage};
 pub use generator::SpeechGenerator;
 pub use provider::{
     AudioError, AudioFormat, AudioModel, IntoSpeechProviderKind, SpeechProviderBuilder,
-    SpeechProviderKind, SpeechResponse, VoiceId, VoiceInfo, VoicePreview, VoiceSource,
+    SpeechProviderKind, SpeechResponse, VoiceId, VoiceInfo, VoiceOrigin, VoicePreview, VoiceSource,
     WordTimestamp, speech_provider,
 };
 pub use request::{DesignVoiceRequest, DialogueRequest, DialogueTurn, SpeechRequest};

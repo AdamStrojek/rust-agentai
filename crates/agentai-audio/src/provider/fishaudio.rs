@@ -27,8 +27,8 @@
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
 use super::{
-    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
-    VoiceSource, WordTimestamp, audio_media,
+    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoiceOrigin,
+    VoicePreview, VoiceSource, WordTimestamp, audio_media,
 };
 use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use crate::voice_store::{StoredVoice, VoiceStore};
@@ -478,7 +478,7 @@ impl SpeechProvider for FishAudioProvider {
                 .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
             let empty = page.items.is_empty();
             voices.extend(page.items.into_iter().map(|model| {
-                let info = VoiceInfo::new(model.id, model.title).with_cloned(true);
+                let info = VoiceInfo::new(model.id, model.title, VoiceOrigin::Account);
                 match model.description.filter(|d| !d.is_empty()) {
                     Some(description) => info.with_description(description),
                     None => info,
@@ -493,7 +493,7 @@ impl SpeechProvider for FishAudioProvider {
         }
         if let Some(store) = &self.store {
             voices.extend(store.list().await?.into_iter().map(|(id, voice)| {
-                let mut info = VoiceInfo::new(id, voice.name).with_cloned(true);
+                let mut info = VoiceInfo::new(id, voice.name, VoiceOrigin::Store);
                 info.description = voice.description;
                 info
             }));
@@ -943,11 +943,9 @@ mod tests {
         assert_eq!(
             voices,
             [
-                VoiceInfo::new("m1", "A").with_cloned(true),
-                VoiceInfo::new("m2", "B")
-                    .with_description("d")
-                    .with_cloned(true),
-                VoiceInfo::new("voice-1", "Ala").with_cloned(true),
+                VoiceInfo::new("m1", "A", VoiceOrigin::Account),
+                VoiceInfo::new("m2", "B", VoiceOrigin::Account).with_description("d"),
+                VoiceInfo::new("voice-1", "Ala", VoiceOrigin::Store),
             ]
         );
     }

@@ -161,6 +161,24 @@ for model in SpeechProviderKind::ElevenLabs.known_models() {
 }
 ```
 
+### `VoiceInfo` says where a voice comes from
+
+`VoiceInfo::cloned` is replaced by `origin`, a `VoiceOrigin`: `Preset` (a built-in voice),
+`Account` (a voice of your account on the provider's server) or `Store` (a voice of the
+`VoiceStore`). Fish Audio lists both its account voices and its store voices, so `origin` tells
+them apart. `VoiceInfo::new` takes the origin, and the `list_voices` tool reports it as `"origin"`
+instead of `"cloned"`.
+
+```rust,ignore
+// 0.7.1
+let custom: Vec<_> = voices.iter().filter(|v| v.cloned).collect();
+let allowed = VoiceInfo::new("alloy", "Alloy");
+
+// 0.7.2
+let stored: Vec<_> = voices.iter().filter(|v| v.origin == VoiceOrigin::Store).collect();
+let allowed = VoiceInfo::new("alloy", "Alloy", VoiceOrigin::Preset);
+```
+
 ### Custom providers
 
 `SpeechProvider::generate` takes `&SpeechRequest<'_>` and reads it with getters (`text()`,

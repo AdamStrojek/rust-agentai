@@ -48,6 +48,8 @@
 //!   `SpeechProviderKind::FishAudio.builder(..)`) builds a provider with its keys from the environment or
 //!   `with_api_key`/`with_base_url`, and `SpeechProviderKind::known_models()` lists the models this crate
 //!   knows with what each can do (speech, dialogue, voice design), for example for a model picker.
+//! - **Where a voice comes from**: `VoiceInfo::origin` is `Preset`, `Account` or `Store`, so a voice picker
+//!   can show the account voices and the `VoiceStore` voices of Fish Audio in separate sections.
 //!
 //! **Breaking changes** (all in `agentai-audio`; released as a patch while the audio interface is reworked):
 //! `SpeechGenerator::new` takes a provider from `speech_provider(..).build()?`, `generate_with` and
@@ -55,7 +57,8 @@
 //! (`with_default_voice`, `with_format`, `with_speed`, `with_language`) and `SpeechRequest::with_voices`
 //! are removed, `design_voice` is a builder that needs a design model, `Voice` is replaced by `VoiceId` (a
 //! `String`), `provider::from_model` and `provider::list_models` are replaced by `speech_provider` and
-//! `SpeechProviderKind::known_models`, and `AudioModel` lost its `model` field. Read the
+//! `SpeechProviderKind::known_models`, `AudioModel` lost its `model` field, and `VoiceInfo::cloned` is
+//! replaced by `origin`. Read the
 //! [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
 //! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#071--072-2026-11-19)
 //! before upgrading.

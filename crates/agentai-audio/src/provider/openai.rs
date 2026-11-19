@@ -10,7 +10,7 @@
 
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
-    VoiceInfo, audio_media, known_capabilities,
+    VoiceInfo, VoiceOrigin, audio_media, known_capabilities,
 };
 use crate::request::SpeechRequest;
 use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
@@ -200,7 +200,7 @@ impl SpeechProvider for OpenAiSpeechProvider {
             ));
         }
         Ok(presets(&self.speech_model)
-            .map(|p| VoiceInfo::new(p, p))
+            .map(|p| VoiceInfo::new(p, p, VoiceOrigin::Preset))
             .collect())
     }
 

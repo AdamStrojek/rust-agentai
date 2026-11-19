@@ -1,6 +1,8 @@
 //! Agent tools (feature `toolbox`): [`SpeechToolBox`].
 
 use crate::generator::SpeechGenerator;
+#[cfg(test)]
+use crate::provider::VoiceOrigin;
 use crate::provider::{AudioError, SpeechResponse, VoiceId, VoiceInfo};
 use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult, toolbox};
 use agentai_core::storage::MediaStorage;
@@ -312,7 +314,11 @@ mod tests {
     #[tokio::test]
     async fn a_listed_voice_is_sent() {
         let http = MockHttp::new(vec![audio()]);
-        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("voice_ok", "OK")]);
+        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "voice_ok",
+            "OK",
+            VoiceOrigin::Preset,
+        )]);
 
         toolbox
             .call_tool(&tool_call(
@@ -331,7 +337,11 @@ mod tests {
     #[tokio::test]
     async fn an_unlisted_voice_fails() {
         let http = MockHttp::new(vec![]);
-        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("alloy", "Alloy")]);
+        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "alloy",
+            "Alloy",
+            VoiceOrigin::Preset,
+        )]);
 
         let result = toolbox
             .call_tool(&tool_call(
@@ -408,7 +418,11 @@ mod tests {
         let json = text_json(&output);
         assert_eq!(json["voices"].as_array().unwrap().len(), 13);
 
-        let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("a", "A")]);
+        let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "a",
+            "A",
+            VoiceOrigin::Preset,
+        )]);
         let output = call_done(&own, "list_voices", json!({})).await;
         let voices = text_json(&output)["voices"].clone();
         assert_eq!(voices.as_array().unwrap().len(), 1);

@@ -225,30 +225,37 @@ pub struct VoiceInfo {
     pub name: String,
     /// Description.
     pub description: Option<String>,
-    /// Whether the voice was cloned, not a built-in preset.
-    pub cloned: bool,
+    /// Where the voice comes from.
+    pub origin: VoiceOrigin,
+}
+
+/// Where a [`VoiceInfo`] comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum VoiceOrigin {
+    /// A built-in voice of the provider, such as an OpenAI preset or an ElevenLabs premade voice.
+    Preset,
+    /// A voice of your account on the provider's server: cloned, designed or professional.
+    Account,
+    /// A voice of the [`VoiceStore`](crate::VoiceStore) set on the provider.
+    Store,
 }
 
 impl VoiceInfo {
-    /// Creates a voice with its ID and name.
-    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+    /// Creates a voice with its ID, name and origin.
+    pub fn new(id: impl Into<String>, name: impl Into<String>, origin: VoiceOrigin) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             description: None,
-            cloned: false,
+            origin,
         }
     }
 
     /// Sets the description.
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
-        self
-    }
-
-    /// Marks the voice as cloned.
-    pub fn with_cloned(mut self, cloned: bool) -> Self {
-        self.cloned = cloned;
         self
     }
 }

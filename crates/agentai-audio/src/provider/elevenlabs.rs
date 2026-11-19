@@ -14,7 +14,7 @@
 
 use super::{
     AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
-    VoiceId, VoiceInfo, VoicePreview, VoiceSource, audio_media, known_capabilities,
+    VoiceId, VoiceInfo, VoiceOrigin, VoicePreview, VoiceSource, audio_media, known_capabilities,
 };
 use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use agentai_core::message::Media;
@@ -430,8 +430,11 @@ impl SpeechProvider for ElevenLabsProvider {
                 .json()
                 .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
             voices.extend(page.voices.into_iter().map(|voice| {
-                let info = VoiceInfo::new(voice.voice_id, voice.name)
-                    .with_cloned(voice.category.as_deref() == Some("cloned"));
+                let origin = match voice.category.as_deref() {
+                    Some("premade") => VoiceOrigin::Preset,
+                    _ => VoiceOrigin::Account,
+                };
+                let info = VoiceInfo::new(voice.voice_id, voice.name, origin);
                 match voice.description {
                     Some(description) => info.with_description(description),
                     None => info,
@@ -812,10 +815,8 @@ mod tests {
         assert_eq!(
             voices,
             [
-                VoiceInfo::new("v1", "A")
-                    .with_description("d")
-                    .with_cloned(true),
-                VoiceInfo::new("v2", "B"),
+                VoiceInfo::new("v1", "A", VoiceOrigin::Account).with_description("d"),
+                VoiceInfo::new("v2", "B", VoiceOrigin::Preset),
             ]
         );
     }
