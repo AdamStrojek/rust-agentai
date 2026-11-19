@@ -5,22 +5,26 @@
 //! # Fish Audio (FISH_API_KEY)
 //! cargo run -p agentai-audio --example design_voice
 //! # ElevenLabs (ELEVENLABS_API_KEY)
-//! AGENTAI_SPEECH_MODEL=elevenlabs::eleven_multilingual_v2 \
-//!     cargo run -p agentai-audio --example design_voice
+//! AGENTAI_SPEECH_PROVIDER=elevenlabs cargo run -p agentai-audio --example design_voice
 //! # A local oMLX server (OMLX_ENDPOINT, OMLX_API_KEY), with a model that designs voices
-//! AGENTAI_SPEECH_MODEL=omlx::mlx-community/VoxCPM2-8bit \
-//!     cargo run -p agentai-audio --example design_voice
+//! AGENTAI_SPEECH_PROVIDER=omlx cargo run -p agentai-audio --example design_voice
 //! ```
 //!
-//! `AGENTAI_SPEECH_MODEL` defaults to `fishaudio::s2-pro`. oMLX designs a voice by speaking the
-//! text with the description as instructions, and keeps a chosen preview in a `VoiceStore`, so
-//! this example builds that provider with a `MemoryVoiceStore` (gone when the program ends)
-//! instead of going through the model name.
+//! - `AGENTAI_SPEECH_PROVIDER`: `fishaudio` (default), `elevenlabs` or `omlx`; the others cannot
+//!   design voices.
+//! - `AGENTAI_SPEECH_MODEL`: the speech model that speaks with the new voice (default `s2-pro`,
+//!   `eleven_multilingual_v2` or `mlx-community/VoxCPM2-8bit`).
+//! - `AGENTAI_DESIGN_MODEL`: the oMLX model that designs the voice (default: the speech model).
+//!   Fish Audio designs with `voice-design-1` and ElevenLabs with `eleven_ttv_v3`.
+//!
+//! oMLX designs a voice by speaking the text with the description as instructions, and keeps a
+//! chosen preview in a `VoiceStore`, so this example gives it a `MemoryVoiceStore` (gone when
+//! the program ends).
 
 use agentai::{Media, MediaSource};
-use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::provider::{elevenlabs::ElevenLabsProvider, fishaudio::FishAudioProvider};
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, base64};
+use agentai_audio::{
+    MemoryVoiceStore, SpeechGenerator, SpeechProviderKind, base64, speech_provider,
+};
 
 const DESCRIPTION: &str = "A warm, calm middle-aged woman with a low voice, speaking slowly";
 const TEXT: &str = "Welcome back, and thank you for listening. Let me tell you how this voice was made, and why it sounds the way it does.";
@@ -40,24 +44,31 @@ fn save(media: &Media, name: &str) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let model =
-        std::env::var("AGENTAI_SPEECH_MODEL").unwrap_or_else(|_| "fishaudio::s2-pro".to_string());
-    let generator = if let Some(model) = model.strip_prefix("omlx::") {
-        SpeechGenerator::from_provider(
-            OmlxProvider::from_env(model)?
-                .with_design_model(model)
-                .with_voice_store(MemoryVoiceStore::new()),
-        )
-    } else if let Some(model) = model.strip_prefix("elevenlabs::") {
-        SpeechGenerator::from_provider(
-            ElevenLabsProvider::from_env(model)?.with_design_model("eleven_ttv_v3"),
-        )
-    } else {
-        let model = model.strip_prefix("fishaudio::").unwrap_or(&model);
-        SpeechGenerator::from_provider(
-            FishAudioProvider::from_env(model)?.with_design_model("voice-design-1"),
-        )
+    let kind: SpeechProviderKind = std::env::var("AGENTAI_SPEECH_PROVIDER")
+        .as_deref()
+        .unwrap_or("fishaudio")
+        .parse()?;
+    let speech_model = |default: &str| {
+        std::env::var("AGENTAI_SPEECH_MODEL").unwrap_or_else(|_| default.to_string())
     };
+    let builder = match kind {
+        SpeechProviderKind::FishAudio => {
+            speech_provider(kind, speech_model("s2-pro")).with_design_model("voice-design-1")
+        }
+        SpeechProviderKind::ElevenLabs => {
+            speech_provider(kind, speech_model("eleven_multilingual_v2"))
+                .with_design_model("eleven_ttv_v3")
+        }
+        SpeechProviderKind::Omlx => {
+            let model = speech_model("mlx-community/VoxCPM2-8bit");
+            let design_model = std::env::var("AGENTAI_DESIGN_MODEL").unwrap_or(model.clone());
+            speech_provider(kind, model)
+                .with_design_model(design_model)
+                .with_voice_store(MemoryVoiceStore::new())
+        }
+        other => anyhow::bail!("{other} cannot design voices"),
+    };
+    let generator = SpeechGenerator::new(builder.build()?);
 
     // The text is required by oMLX, optional for ElevenLabs and Fish Audio
     let previews = generator

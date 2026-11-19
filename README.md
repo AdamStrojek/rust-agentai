@@ -38,6 +38,38 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
+#### 0.7.2 - Dialogues and per-engine audio models
+
+- **Dialogues as turns**: in `agentai-audio`,
+  `generator.generate_dialogue([DialogueTurn::new(voice, text), ..]).await` speaks a dialogue of several
+  voices as one audio, with Fish Audio (`drama-3`, `s2-pro`, ...) and now also ElevenLabs (`eleven_v3`,
+  `eleven_v4`). Each turn is plain text: you no longer write `<|speaker:N|>` tags.
+- **Fish Audio speaks every turn in the right voice**: a dialogue whose voices came from a `VoiceStore`
+  sent both the store IDs and the samples, so the server could speak turns in the wrong voice. Now a
+  request sends samples when all its voices are in the store and voice model IDs when none are; a mix
+  fails with `InvalidRequest` before anything is sent.
+- **One model per engine**: a provider speaks with its speech model, speaks dialogues with the model set
+  by `with_dialogue_model` and designs voices with the one set by `with_design_model` (for example Fish
+  Audio `voice-design-1`, ElevenLabs `eleven_ttv_v3`). An engine without a model is off and returns
+  `MissingModel` without a request; `with_model` on a call overrides the model for that call.
+- **Calls are builders**: `generate(text).with_voice(id).with_instructions(..).await`, and
+  `design_voice(description).with_text(..).with_count(n).await`.
+- **Choosing a provider**: `speech_provider("fishaudio", "s2-pro")` (or
+  `SpeechProviderKind::FishAudio.builder(..)`) builds a provider with its keys from the environment or
+  `with_api_key`/`with_base_url`, and `SpeechProviderKind::known_models()` lists the models this crate
+  knows with what each can do (speech, dialogue, voice design), for example for a model picker.
+
+**Breaking changes** (all in `agentai-audio`; released as a patch while the audio interface is reworked):
+`SpeechGenerator::new` takes a provider from `speech_provider(..).build()?`, `generate_with` and
+`SpeechRequest::new` are replaced by the `generate(..)` builder, the generator defaults
+(`with_default_voice`, `with_format`, `with_speed`, `with_language`) and `SpeechRequest::with_voices`
+are removed, `design_voice` is a builder that needs a design model, `Voice` is replaced by `VoiceId` (a
+`String`), `provider::from_model` and `provider::list_models` are replaced by `speech_provider` and
+`SpeechProviderKind::known_models`, and `AudioModel` lost its `model` field. Read the
+[CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+[migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#071--072-2026-11-19)
+before upgrading.
+
 #### 0.7.1 - Voice design
 
 - **Design voices from a description**: `SpeechGenerator::design_voice(description, text, count)` in

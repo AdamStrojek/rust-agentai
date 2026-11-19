@@ -6,14 +6,17 @@
 //!     ala.wav "What Ala says in her sample." ola.wav "What Ola says in her sample."
 //! ```
 //!
-//! The samples go to a `VoiceStore`, so they are sent with the request; the ID of a voice model
-//! in the Fish Audio account works the same way in `with_voices`. The order of the voices is the
-//! speaker index used by the `<|speaker:N|>` tags in the text. The time of every word is printed.
+//! The provider speaks single texts with its speech model (`s2-pro`) and dialogues with its
+//! dialogue model (`drama-3`, set with `with_dialogue_model`). The samples go to a `VoiceStore`
+//! and every `DialogueTurn` names the voice that speaks it by its store ID, so the samples are
+//! sent with the request. The IDs of voice models in your Fish Audio account work the same way,
+//! but a dialogue takes either store IDs or account voices, not both. The text of a turn is plain
+//! text: the provider marks the speakers itself. The time of every word is printed.
 
 use agentai::{Media, MediaSource};
-use agentai_audio::provider::fishaudio::FishAudioProvider;
 use agentai_audio::{
     DialogueTurn, MemoryVoiceStore, SpeechGenerator, StoredVoice, VoiceStore, base64,
+    speech_provider,
 };
 
 const USAGE: &str = "usage: dialogue <a.wav> <transcript a> <b.wav> <transcript b>";
@@ -35,10 +38,11 @@ async fn main() -> anyhow::Result<()> {
         voices.push(id);
     }
 
-    let provider = FishAudioProvider::from_env("drama-3")?
+    let provider = speech_provider("fishaudio", "s2-pro")
         .with_dialogue_model("drama-3")
-        .with_voice_store(store);
-    let generator = SpeechGenerator::from_provider(provider);
+        .with_voice_store(store)
+        .build()?;
+    let generator = SpeechGenerator::new(provider);
     let response = generator
         .generate_dialogue([
             DialogueTurn::new(&voices[0], "Did you hear that?"),
@@ -54,8 +58,8 @@ async fn main() -> anyhow::Result<()> {
     match &response.audio.source {
         MediaSource::Base64(data) => {
             std::fs::create_dir_all("audio")?;
-            let path = "audio/dialogue.mp3";
-            std::fs::write(path, base64::decode(data)?)?;
+            let path = format!("audio/{}", response.audio.file_name("dialogue"));
+            std::fs::write(&path, base64::decode(data)?)?;
             println!("Saved {path} ({})", response.audio.content_type);
         }
         MediaSource::Url(url) => println!("The audio is at {url}"),

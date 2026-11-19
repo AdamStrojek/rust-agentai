@@ -7,13 +7,15 @@
 //!     cargo run -p agentai-audio --example clone_voice -- sample.wav "What is said in the sample"
 //! ```
 //!
+//! `AGENTAI_SPEECH_MODEL` is the oMLX speech model (default `mlx-community/VoxCPM2-8bit`).
+//!
 //! oMLX has no voice library: it clones from the sample sent with every request, so the provider
-//! keeps the sample in a `VoiceStore`. This one is `MemoryVoiceStore`, gone when the program ends.
-//! The second argument is the transcript of the sample, which the server requires.
+//! keeps the sample in a `VoiceStore`, set with `with_voice_store`. This one is
+//! `MemoryVoiceStore`, gone when the program ends. The second argument is the transcript of the
+//! sample, which the server requires.
 
 use agentai::{Media, MediaSource};
-use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, VoiceSource, base64};
+use agentai_audio::{MemoryVoiceStore, SpeechGenerator, VoiceSource, base64, speech_provider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,8 +29,10 @@ async fn main() -> anyhow::Result<()> {
     let model = std::env::var("AGENTAI_SPEECH_MODEL")
         .unwrap_or_else(|_| "mlx-community/VoxCPM2-8bit".to_string());
 
-    let provider = OmlxProvider::from_env(model)?.with_voice_store(MemoryVoiceStore::new());
-    let generator = SpeechGenerator::from_provider(provider);
+    let provider = speech_provider("omlx", model)
+        .with_voice_store(MemoryVoiceStore::new())
+        .build()?;
+    let generator = SpeechGenerator::new(provider);
 
     let sample = Media::from_bytes("audio/wav", std::fs::read(&sample_path)?);
     let voice_id = generator
