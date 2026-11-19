@@ -9,7 +9,8 @@
 //! OpenAI shuts down these models on 2027-01-06.
 
 use super::{
-    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechResponse, VoiceInfo, audio_media,
+    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
+    VoiceInfo, audio_media, known_capabilities,
 };
 use crate::request::SpeechRequest;
 use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
@@ -221,7 +222,10 @@ impl SpeechProvider for OpenAiSpeechProvider {
                     || entry.id.starts_with("tts-1")
                     || entry.id.starts_with("gpt-4o-mini-tts")
             })
-            .map(|entry| AudioModel::new(format!("openai::{}", entry.id), entry.id))
+            .map(|entry| {
+                let name = entry.id.clone();
+                known_capabilities(SpeechProviderKind::OpenAi, AudioModel::new(entry.id, name))
+            })
             .collect())
     }
 }
@@ -365,8 +369,8 @@ mod tests {
             json!({"data": [{"id": "gpt-4o"}, {"id": "tts-1"}, {"id": "gpt-4o-mini-tts"}]}),
         )]);
         let models = official(&http).list_models().await.unwrap();
-        let names: Vec<_> = models.iter().map(|m| m.model.as_str()).collect();
-        assert_eq!(names, ["openai::tts-1", "openai::gpt-4o-mini-tts"]);
+        let names: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(names, ["tts-1", "gpt-4o-mini-tts"]);
         assert_eq!(http.request(0).url, "https://api.openai.com/v1/models");
     }
 }

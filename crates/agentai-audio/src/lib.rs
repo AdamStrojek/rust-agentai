@@ -157,12 +157,10 @@
 //! The speech APIs live in [`provider`]: [`openai`](provider::openai) (OpenAI and compatible
 //! servers; OpenAI shuts its speech models down on 2027-01-06),
 //! [`elevenlabs`](provider::elevenlabs), [`fishaudio`](provider::fishaudio) and
-//! [`omlx`](provider::omlx). [`SpeechGenerator::new`] picks one from the model name
-//! (`openai::gpt-4o-mini-tts`, `elevenlabs::eleven_multilingual_v2`, `fishaudio::drama-3`,
-//! `omlx::mlx-community/VoxCPM2-8bit`) with its settings
-//! from environment variables. [`provider::list_models`] lists the speech models of a provider.
-//! To set the API key or base URL in code, build the provider and pass it to
-//! [`SpeechGenerator::from_provider`]. Implement [`provider::SpeechProvider`] to use another API.
+//! [`omlx`](provider::omlx). [`speech_provider`] builds one by name
+//! (`openai`, `elevenlabs`, `fishaudio`, `omlx`) and speech model, with its settings from
+//! environment variables or the builder. [`SpeechProviderKind::known_models`] lists the
+//! models this crate knows. Implement [`provider::SpeechProvider`] to use another API.
 //!
 //! ## Features
 #![doc = document_features::document_features!()]
@@ -178,8 +176,9 @@ mod voice_store;
 pub use agentai_core::{base64, mime, storage};
 pub use generator::SpeechGenerator;
 pub use provider::{
-    AudioError, AudioFormat, AudioModel, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
-    VoiceSource, WordTimestamp,
+    AudioError, AudioFormat, AudioModel, IntoSpeechProviderKind, SpeechProviderBuilder,
+    SpeechProviderKind, SpeechResponse, VoiceId, VoiceInfo, VoicePreview, VoiceSource,
+    WordTimestamp, speech_provider,
 };
 pub use request::{DesignVoiceRequest, DialogueRequest, DialogueTurn, SpeechRequest};
 #[cfg(feature = "toolbox")]

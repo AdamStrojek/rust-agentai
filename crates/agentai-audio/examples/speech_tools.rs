@@ -17,7 +17,7 @@
 use agentai::tool::ToolBoxSet;
 use agentai::{Agent, Media, MediaSource};
 use agentai_audio::storage::{MediaRead, MediaSave, StorageError};
-use agentai_audio::{SpeechGenerator, SpeechToolBox, base64, mime, provider};
+use agentai_audio::{SpeechGenerator, SpeechToolBox, base64, mime, speech_provider};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,7 +71,12 @@ async fn main() -> anyhow::Result<()> {
         count: AtomicUsize::new(0),
     });
 
-    let generator = SpeechGenerator::new(provider::from_model(&speech_model)?.into());
+    let generator = SpeechGenerator::new({
+        let (kind, name) = speech_model
+            .split_once("::")
+            .unwrap_or(("openai", &speech_model));
+        speech_provider(kind, name).build()?
+    });
     let voice = match std::env::var("AGENTAI_SPEECH_VOICE") {
         Ok(voice) => format!(" with the voice {voice}"),
         Err(_) => String::new(),

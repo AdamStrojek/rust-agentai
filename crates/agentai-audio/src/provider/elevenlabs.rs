@@ -13,8 +13,8 @@
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
 use super::{
-    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo,
-    VoicePreview, VoiceSource, audio_media,
+    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
+    VoiceId, VoiceInfo, VoicePreview, VoiceSource, audio_media, known_capabilities,
 };
 use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use agentai_core::message::Media;
@@ -458,11 +458,10 @@ impl SpeechProvider for ElevenLabsProvider {
             .into_iter()
             .filter(|model| model.can_do_text_to_speech)
             .map(|entry| {
-                let mut model =
-                    AudioModel::new(format!("elevenlabs::{}", entry.model_id), entry.model_id);
-                model.name = entry.name;
+                let name = entry.name.unwrap_or_else(|| entry.model_id.clone());
+                let mut model = AudioModel::new(entry.model_id, name);
                 model.description = entry.description;
-                model
+                known_capabilities(SpeechProviderKind::ElevenLabs, model)
             })
             .collect())
     }
@@ -827,13 +826,21 @@ mod tests {
             200,
             json!([
                 {"model_id": "eleven_v4", "name": "V4", "can_do_text_to_speech": true},
+                {"model_id": "eleven_v3", "name": "Server v3", "can_do_text_to_speech": true},
+                {"model_id": "eleven_x", "can_do_text_to_speech": true},
                 {"model_id": "scribe", "can_do_text_to_speech": false}
             ]),
         )]);
         let models = provider(&http).list_models().await.unwrap();
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].model, "elevenlabs::eleven_v4");
+        assert_eq!(models.len(), 3);
         assert_eq!(models[0].id, "eleven_v4");
+        assert_eq!(models[0].name, "V4");
+        assert!(models[0].dialogue);
+        assert_eq!(models[1].id, "eleven_v3");
+        assert_eq!(models[1].name, "Server v3");
+        assert!(models[1].dialogue);
+        assert_eq!(models[2].id, "eleven_x");
+        assert!(models[2].speech && !models[2].dialogue);
         assert_eq!(http.request(0).url, "https://api.test/v1/models");
     }
 

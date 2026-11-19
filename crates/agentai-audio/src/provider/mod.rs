@@ -5,8 +5,14 @@
 
 pub mod elevenlabs;
 pub mod fishaudio;
+mod kind;
 pub mod omlx;
 pub mod openai;
+
+pub(crate) use kind::known_capabilities;
+pub use kind::{
+    IntoSpeechProviderKind, SpeechProviderBuilder, SpeechProviderKind, speech_provider,
+};
 
 use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use agentai_core::message::Media;
@@ -247,29 +253,59 @@ impl VoiceInfo {
     }
 }
 
-/// A speech model a provider offers.
+/// A model of a speech provider and what it can do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AudioModel {
-    /// Model name with the provider prefix, for example `elevenlabs::eleven_multilingual_v2`.
-    pub model: String,
     /// Name of the model in the API.
     pub id: String,
     /// Display name.
-    pub name: Option<String>,
+    pub name: String,
     /// Description.
     pub description: Option<String>,
+    /// Whether the model speaks single texts.
+    pub speech: bool,
+    /// Whether the model speaks dialogues.
+    pub dialogue: bool,
+    /// Whether the model designs voices.
+    pub voice_design: bool,
 }
 
 impl AudioModel {
-    /// Creates a model with its full name and its name in the API.
-    pub fn new(model: impl Into<String>, id: impl Into<String>) -> Self {
+    /// Creates a speech model with its ID and display name.
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
-            model: model.into(),
             id: id.into(),
-            name: None,
+            name: name.into(),
             description: None,
+            speech: true,
+            dialogue: false,
+            voice_design: false,
         }
+    }
+
+    /// Sets the description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Sets whether the model speaks single texts.
+    pub fn with_speech(mut self, speech: bool) -> Self {
+        self.speech = speech;
+        self
+    }
+
+    /// Sets whether the model speaks dialogues.
+    pub fn with_dialogue(mut self, dialogue: bool) -> Self {
+        self.dialogue = dialogue;
+        self
+    }
+
+    /// Sets whether the model designs voices.
+    pub fn with_voice_design(mut self, voice_design: bool) -> Self {
+        self.voice_design = voice_design;
+        self
     }
 }
 
@@ -289,8 +325,8 @@ pub enum AudioError {
     /// The provider cannot do this, for example clone voices.
     #[error("not supported by the audio provider: {0}")]
     Unsupported(&'static str),
-    /// No provider matches the model name.
-    #[error("no audio provider for model '{0}'")]
+    /// No provider has this name.
+    #[error("no audio provider named '{0}'")]
     UnknownProvider(String),
     /// The environment variable with the API key is not set.
     #[error("the API key is missing, set {0}")]
@@ -416,86 +452,6 @@ pub trait SpeechProvider: Send + Sync + 'static {
     }
 }
 
-/// The APIs [`from_model`] knows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProviderKind {
-    OpenAi,
-    ElevenLabs,
-    FishAudio,
-    Omlx,
-}
-
-impl ProviderKind {
-    fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "openai" => Some(Self::OpenAi),
-            "elevenlabs" => Some(Self::ElevenLabs),
-            "fishaudio" => Some(Self::FishAudio),
-            "omlx" => Some(Self::Omlx),
-            _ => None,
-        }
-    }
-
-    fn build(self, model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
-        Ok(match self {
-            Self::OpenAi => Box::new(openai::OpenAiSpeechProvider::from_env(model)?),
-            Self::ElevenLabs => Box::new(elevenlabs::ElevenLabsProvider::from_env(model)?),
-            Self::FishAudio => Box::new(fishaudio::FishAudioProvider::from_env(model)?),
-            Self::Omlx => Box::new(omlx::OmlxProvider::from_env(model)?),
-        })
-    }
-}
-
-/// Splits `provider::model` and finds the provider.
-fn resolve(model: &str) -> Result<(ProviderKind, &str), AudioError> {
-    let unknown = || AudioError::UnknownProvider(model.to_string());
-    match model.split_once("::") {
-        Some((provider, name)) => ProviderKind::from_name(provider)
-            .map(|kind| (kind, name))
-            .ok_or_else(unknown),
-        None if model.starts_with("tts-1") || model.starts_with("gpt-4o-mini-tts") => {
-            Ok((ProviderKind::OpenAi, model))
-        }
-        None if model.starts_with("eleven_") => Ok((ProviderKind::ElevenLabs, model)),
-        None => Err(unknown()),
-    }
-}
-
-/// Creates the provider for a model name, with its settings from environment variables.
-///
-/// The provider comes from a `provider::` prefix (`openai::`, `elevenlabs::`, `fishaudio::`,
-/// `omlx::`), for example `omlx::mlx-community/VoxCPM2-8bit` or `fishaudio::drama-3`, or, for
-/// well-known names (`tts-1*`, `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the
-/// prefix for other models behind an OpenAI-compatible API. See each provider's `from_env` for its variables.
-///
-/// An `omlx::` provider made here has no voice store, so it cannot clone voices or speak
-/// with cloned voices; a `fishaudio::` one uses only voices of the Fish Audio
-/// account. Build it with [`OmlxProvider::with_voice_store`](omlx::OmlxProvider::with_voice_store)
-/// and pass it to [`SpeechGenerator::from_provider`](crate::SpeechGenerator::from_provider)
-/// instead.
-pub fn from_model(model: &str) -> Result<Box<dyn SpeechProvider>, AudioError> {
-    let (kind, name) = resolve(model)?;
-    kind.build(name)
-}
-
-/// Lists the speech models of a provider (`openai` or `elevenlabs`; `fishaudio` and `omlx` return
-/// [`AudioError::Unsupported`]), with its settings from environment variables as in
-/// [`from_model`].
-///
-/// ```rust,no_run
-/// # async fn run() -> Result<(), agentai_audio::AudioError> {
-/// for model in agentai_audio::provider::list_models("elevenlabs").await? {
-///     println!("{} {:?}", model.model, model.name);
-/// }
-/// # Ok(())
-/// # }
-/// ```
-pub async fn list_models(provider: &str) -> Result<Vec<AudioModel>, AudioError> {
-    let kind = ProviderKind::from_name(provider)
-        .ok_or_else(|| AudioError::UnknownProvider(provider.to_string()))?;
-    kind.build("")?.list_models().await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,42 +478,6 @@ mod tests {
                 transcript: Some("Hi".into())
             }
         );
-    }
-
-    #[test]
-    fn model_names_select_the_provider() {
-        assert_eq!(
-            resolve("omlx::mlx-community/VoxCPM2-8bit").unwrap(),
-            (ProviderKind::Omlx, "mlx-community/VoxCPM2-8bit")
-        );
-        assert_eq!(
-            resolve("elevenlabs::x").unwrap(),
-            (ProviderKind::ElevenLabs, "x")
-        );
-        assert_eq!(
-            resolve("fishaudio::drama-3").unwrap(),
-            (ProviderKind::FishAudio, "drama-3")
-        );
-        assert_eq!(
-            resolve("eleven_v4").unwrap(),
-            (ProviderKind::ElevenLabs, "eleven_v4")
-        );
-        assert_eq!(
-            resolve("tts-1-hd").unwrap(),
-            (ProviderKind::OpenAi, "tts-1-hd")
-        );
-        assert_eq!(
-            resolve("gpt-4o-mini-tts").unwrap(),
-            (ProviderKind::OpenAi, "gpt-4o-mini-tts")
-        );
-        assert!(matches!(
-            resolve("gpt-4o"),
-            Err(AudioError::UnknownProvider(_))
-        ));
-        assert!(matches!(
-            resolve("nope::x"),
-            Err(AudioError::UnknownProvider(_))
-        ));
     }
 
     #[tokio::test]

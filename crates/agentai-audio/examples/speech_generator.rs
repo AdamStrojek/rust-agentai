@@ -16,13 +16,16 @@
 //! there are no voice IDs.
 
 use agentai::MediaSource;
-use agentai_audio::{SpeechGenerator, base64, provider};
+use agentai_audio::{SpeechGenerator, base64, speech_provider};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let model = std::env::var("AGENTAI_SPEECH_MODEL")
         .unwrap_or_else(|_| "openai::gpt-4o-mini-tts".to_string());
-    let generator = SpeechGenerator::new(provider::from_model(&model)?.into());
+    let generator = SpeechGenerator::new({
+        let (kind, name) = model.split_once("::").unwrap_or(("openai", &model));
+        speech_provider(kind, name).build()?
+    });
     let mut request = generator
         .generate("Good morning! This voice was made by an agent library written in Rust.");
     if let Ok(voice) = std::env::var("AGENTAI_SPEECH_VOICE") {
