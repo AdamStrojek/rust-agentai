@@ -18,6 +18,8 @@ pub struct StoredVoice {
     pub sample: Media,
     /// What is said in the sample.
     pub transcript: Option<String>,
+    /// The language of the voice (a BCP-47 code such as `pl`).
+    pub language: Option<String>,
 }
 
 impl StoredVoice {
@@ -28,12 +30,19 @@ impl StoredVoice {
             description: None,
             sample,
             transcript: None,
+            language: None,
         }
     }
 
     /// Sets the description.
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Sets the language of the voice.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
         self
     }
 
@@ -49,6 +58,7 @@ impl StoredVoice {
     pub(crate) fn into_info(self, id: VoiceId) -> VoiceInfo {
         let mut info = VoiceInfo::new(id, self.name, VoiceOrigin::Store).with_preview(self.sample);
         info.description = self.description;
+        info.language = self.language;
         info
     }
 }

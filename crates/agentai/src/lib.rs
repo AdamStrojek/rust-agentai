@@ -28,6 +28,20 @@
 //!
 //! ## What's New
 //!
+//! #### 0.7.4 - Voice languages
+//!
+//! - **Design a voice in a language**: in `agentai-audio`, `design_voice(description).with_language("pl")`
+//!   sends the language to Fish Audio and oMLX (ElevenLabs has no such setting). `VoicePreview::language`
+//!   is the language of a preview, and keeping it with `create_voice` stores it with the voice.
+//! - **Voices know their language**: `StoredVoice::language` (`with_language`) and `VoiceInfo::language`,
+//!   filled from the store, Fish Audio model languages and ElevenLabs labels.
+//!
+//! **Breaking changes**: `VoiceSource::Samples` has a `language` field and is `#[non_exhaustive]`; match it
+//! with `..` and build it with `VoiceSource::samples(..)`. Read the
+//! [CHANGELOG](https://github.com/AdamStrojek/rust-agentai/blob/master/CHANGELOG.md) and the
+//! [migration guide](https://github.com/AdamStrojek/rust-agentai/blob/master/MIGRATION.md#073--074-2026-11-19)
+//! before upgrading.
+//!
 //! #### 0.7.3 - Dialogue speed
 //!
 //! - **Set the speaking speed of a dialogue**: in `agentai-audio`, `generate_dialogue(turns).with_speed(1.5)`

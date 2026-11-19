@@ -30,10 +30,13 @@ pub type VoiceId = String;
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum VoiceSource {
-    /// Recordings to clone. `transcript` is what is said in them.
+    /// Recordings to clone. `transcript` is what is said in them, `language` the language
+    /// they are spoken in (a BCP-47 code such as `pl`).
+    #[non_exhaustive]
     Samples {
         samples: Vec<Media>,
         transcript: Option<String>,
+        language: Option<String>,
     },
     /// The ID of a designed voice preview, see [`VoicePreview::sample_id`].
     SampleId(String),
@@ -45,7 +48,17 @@ impl VoiceSource {
         Self::Samples {
             samples,
             transcript: transcript.map(str::to_string),
+            language: None,
         }
+    }
+
+    /// Sets the language the samples are spoken in. It does nothing for a
+    /// [`SampleId`](Self::SampleId), whose provider keeps the language itself.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        if let Self::Samples { language: lang, .. } = &mut self {
+            *lang = Some(language.into());
+        }
+        self
     }
 }
 
@@ -62,6 +75,9 @@ pub struct VoicePreview {
     pub sample_id: Option<String>,
     /// Sample rate of the audio in Hz, if known.
     pub sample_rate: Option<u32>,
+    /// The language of the preview (a BCP-47 code such as `pl`), if known.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 impl VoicePreview {
@@ -72,7 +88,14 @@ impl VoicePreview {
             text: None,
             sample_id: None,
             sample_rate: None,
+            language: None,
         }
+    }
+
+    /// Sets the language of the preview.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
+        self
     }
 
     /// Sets the text spoken in the preview.
@@ -101,6 +124,7 @@ impl From<VoicePreview> for VoiceSource {
             None => Self::Samples {
                 samples: vec![preview.audio],
                 transcript: preview.text,
+                language: preview.language,
             },
         }
     }
@@ -225,6 +249,8 @@ pub struct VoiceInfo {
     pub name: String,
     /// Description.
     pub description: Option<String>,
+    /// The language the voice speaks (a BCP-47 code such as `pl`), if known.
+    pub language: Option<String>,
     /// Where the voice comes from.
     pub origin: VoiceOrigin,
     /// A recording of the voice to play, when the provider has one. It is never sent to a model
@@ -253,9 +279,16 @@ impl VoiceInfo {
             id: id.into(),
             name: name.into(),
             description: None,
+            language: None,
             origin,
             preview: None,
         }
+    }
+
+    /// Sets the language the voice speaks.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
+        self
     }
 
     /// Sets the recording of the voice to play.
@@ -490,13 +523,12 @@ mod tests {
     #[test]
     fn a_preview_without_sample_id_is_samples() {
         let audio = Media::from_bytes("audio/wav", b"A");
-        let preview = VoicePreview::new(audio.clone()).with_text("Hi");
+        let preview = VoicePreview::new(audio.clone())
+            .with_text("Hi")
+            .with_language("pl");
         assert_eq!(
             VoiceSource::from(preview),
-            VoiceSource::Samples {
-                samples: vec![audio],
-                transcript: Some("Hi".into())
-            }
+            VoiceSource::samples(vec![audio], Some("Hi")).with_language("pl")
         );
     }
 

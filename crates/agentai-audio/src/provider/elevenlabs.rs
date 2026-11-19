@@ -345,11 +345,11 @@ impl SpeechProvider for ElevenLabsProvider {
                 let bytes = agentai_core::base64::decode(&preview.audio_base_64)
                     .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
                 let audio = Media::from_bytes(preview.media_type, &bytes);
-                let result = VoicePreview::new(audio).with_sample_id(preview.generated_voice_id);
-                Ok(match designed.text.as_deref().or(text) {
-                    Some(text) => result.with_text(text),
-                    None => result,
-                })
+                let mut result =
+                    VoicePreview::new(audio).with_sample_id(preview.generated_voice_id);
+                result.text = designed.text.clone().or(text.map(str::to_string));
+                result.language = preview.language;
+                Ok(result)
             })
             .collect()
     }
@@ -439,6 +439,7 @@ impl SpeechProvider for ElevenLabsProvider {
                 };
                 let mut info = VoiceInfo::new(voice.voice_id, voice.name, origin);
                 info.description = voice.description;
+                info.language = voice.labels.language;
                 info.preview = voice
                     .preview_url
                     .map(|url| Media::from_url("audio/mpeg", url));
@@ -495,6 +496,7 @@ struct DesignPreview {
     generated_voice_id: String,
     audio_base_64: String,
     media_type: String,
+    language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -527,6 +529,13 @@ struct VoiceEntry {
     category: Option<String>,
     description: Option<String>,
     preview_url: Option<String>,
+    #[serde(default)]
+    labels: VoiceLabels,
+}
+
+#[derive(Deserialize, Default)]
+struct VoiceLabels {
+    language: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -803,7 +812,8 @@ mod tests {
                 200,
                 json!({
                     "voices": [{"voice_id": "v1", "name": "A", "category": "cloned", "description": "d",
-                                "preview_url": "https://cdn.test/v1.mp3"}],
+                                "preview_url": "https://cdn.test/v1.mp3",
+                                "labels": {"language": "pl", "accent": "standard"}}],
                     "has_more": true, "next_page_token": "a+b"
                 }),
             ),
@@ -829,6 +839,7 @@ mod tests {
             [
                 VoiceInfo::new("v1", "A", VoiceOrigin::Account)
                     .with_description("d")
+                    .with_language("pl")
                     .with_preview(Media::from_url("audio/mpeg", "https://cdn.test/v1.mp3")),
                 VoiceInfo::new("v2", "B", VoiceOrigin::Preset),
             ]
@@ -888,6 +899,7 @@ mod tests {
         let previews = SpeechGenerator::from_provider(designer(&http))
             .design_voice("warm low voice")
             .with_text("Hello there")
+            .with_language("pl")
             .with_count(3)
             .await
             .unwrap();
@@ -903,7 +915,8 @@ mod tests {
             previews,
             [VoicePreview::new(Media::from_bytes("audio/mpeg", b"MP3"))
                 .with_text("Hello there")
-                .with_sample_id("g1")]
+                .with_sample_id("g1")
+                .with_language("en")]
         );
     }
 

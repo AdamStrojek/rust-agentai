@@ -7,6 +7,7 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.7.3 → 0.7.4 (2026-11-19)](#073--074-2026-11-19)
 - [0.7.1 → 0.7.2 (2026-11-19)](#071--072-2026-11-19)
 - [0.7.0 → 0.7.1 (2026-11-18)](#070--071-2026-11-18)
 - [0.6.0 → 0.7.0 (2026-11-18)](#060--070-2026-11-18)
@@ -14,6 +15,26 @@ in your code.
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.7.3 → 0.7.4 (2026-11-19)
+
+These changes are in `agentai-audio`.
+
+### `VoiceSource::Samples` has a language
+
+`VoiceSource::Samples` has a new `language` field and is `#[non_exhaustive]`. Build it with
+`VoiceSource::samples(..)` (and `with_language`), and match it with `..`. This touches custom
+`SpeechProvider` implementations of `create_voice`.
+
+```rust,ignore
+// 0.7.3
+let source = VoiceSource::Samples { samples, transcript: Some(text) };
+let VoiceSource::Samples { samples, transcript } = source else { .. };
+
+// 0.7.4
+let source = VoiceSource::samples(samples, Some(&text)).with_language("pl");
+let VoiceSource::Samples { samples, transcript, language, .. } = source else { .. };
+```
 
 ## 0.7.1 → 0.7.2 (2026-11-19)
 
