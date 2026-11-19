@@ -2,7 +2,7 @@
 
 > `agentai` is a Rust library for building LLM agents on top of the `genai` crate. An `Agent` holds a model configuration, calls the model with the conversation history you pass in, runs tools the model asks for, and deserializes the final answer into any Rust type that implements `serde::Deserialize` and `schemars::JsonSchema`. Runs can be awaited or streamed; you own the history.
 
-This guide was written for `agentai` 0.7.2 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
+This guide was written for `agentai` 0.7.3 (schemars 1.x, Rust 1.88+). The crate is pre-1.0 and its API changes between releases, so compare with the version in your `Cargo.toml` and with the CHANGELOG before relying on it.
 
 ## Installation
 
@@ -649,6 +649,6 @@ The server's tool list is read once, when the toolbox is created.
 
 `agentai` logs through the `log` crate: the prompt, each loop round and the answer at `debug`, tool calls and tool results at `trace`. Install any `log` backend (the examples use `simplelog`) to see them.
 
-## Limits in 0.7.2
+## Limits in 0.7.3
 
 - Only text and tool calls are used from a reply for the answer. Images returned by the model are kept in `new_messages` as `Part::Media` but not in `result.answer`.

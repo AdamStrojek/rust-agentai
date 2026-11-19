@@ -28,6 +28,12 @@
 //!
 //! ## What's New
 //!
+//! #### 0.7.3 - Dialogue speed
+//!
+//! - **Set the speaking speed of a dialogue**: in `agentai-audio`, `generate_dialogue(turns).with_speed(1.5)`
+//!   speaks every turn at that speed (Fish Audio `prosody`). ElevenLabs dialogues have no speed setting and
+//!   return `Unsupported`.
+//!
 //! #### 0.7.2 - Dialogues and per-engine audio models
 //!
 //! - **Dialogues as turns**: in `agentai-audio`,
