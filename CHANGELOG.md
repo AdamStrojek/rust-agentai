@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.3...agentai-v0.7.4) - 2026-11-19
+
+### New features
+- *(audio)* voice languages in the store, voice info and voice design ([#103](https://github.com/AdamStrojek/rust-agentai/pull/103)) (by @AdamStrojek)
+
+### Miscellaneous
+- release notes for 0.7.3 ([#102](https://github.com/AdamStrojek/rust-agentai/pull/102)) (by @AdamStrojek) - #102
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.7.3](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.2...agentai-v0.7.3) - 2026-11-19
 
 ### New features
