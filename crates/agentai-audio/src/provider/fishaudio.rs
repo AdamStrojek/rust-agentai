@@ -374,6 +374,7 @@ impl SpeechProvider for FishAudioProvider {
         let VoiceSource::Samples {
             samples,
             transcript,
+            ..
         } = source
         else {
             return Err(AudioError::Unsupported("saving a designed voice"));
@@ -430,6 +431,7 @@ impl SpeechProvider for FishAudioProvider {
         let body = VoiceDesignBody {
             instruction: request.description(),
             reference_text: text,
+            language: request.language(),
             n: request.count(),
         };
         let http = HttpRequest::post(format!("{}/v1/voice-design", self.base_url))
@@ -450,11 +452,10 @@ impl SpeechProvider for FishAudioProvider {
                 let bytes = agentai_core::base64::decode(&candidate.audio_base64)
                     .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
                 let audio = Media::from_bytes(audio_type(&bytes), &bytes);
-                let preview = VoicePreview::new(audio).with_sample_rate(candidate.sample_rate);
-                Ok(match candidate.text.as_deref().or(text) {
-                    Some(text) => preview.with_text(text),
-                    None => preview,
-                })
+                let mut preview = VoicePreview::new(audio).with_sample_rate(candidate.sample_rate);
+                preview.text = candidate.text.or(text.map(str::to_string));
+                preview.language = request.language().map(str::to_string);
+                Ok(preview)
             })
             .collect()
     }
@@ -481,6 +482,7 @@ impl SpeechProvider for FishAudioProvider {
                 let mut info = VoiceInfo::new(model.id, model.title, VoiceOrigin::Account);
                 info.description = model.description.filter(|d| !d.is_empty());
                 info.preview = model_preview(model.samples);
+                info.language = model.languages.into_iter().next();
                 info
             }));
             let done = empty
@@ -508,6 +510,8 @@ impl SpeechProvider for FishAudioProvider {
 struct VoiceDesignBody<'a> {
     instruction: &'a str,
     reference_text: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
     n: usize,
 }
 
@@ -617,6 +621,8 @@ struct ModelEntry {
     description: Option<String>,
     #[serde(default)]
     samples: Vec<ModelSample>,
+    #[serde(default)]
+    languages: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -946,7 +952,7 @@ mod tests {
             json_response(
                 200,
                 json!({"total": 2, "has_more": true,
-                       "items": [{"_id": "m1", "title": "A", "description": "",
+                       "items": [{"_id": "m1", "title": "A", "description": "", "languages": ["pl", "en"],
                                   "samples": [{"title": "s", "text": "t", "task_id": "x",
                                                "audio": "https://cdn.test/m1.wav"}]}]}),
             ),
@@ -971,6 +977,7 @@ mod tests {
             voices,
             [
                 VoiceInfo::new("m1", "A", VoiceOrigin::Account)
+                    .with_language("pl")
                     .with_preview(Media::from_url("audio/wav", "https://cdn.test/m1.wav")),
                 // A path a self-hosted server does not serve is no preview
                 VoiceInfo::new("m2", "B", VoiceOrigin::Account).with_description("d"),
@@ -995,6 +1002,7 @@ mod tests {
         let previews = SpeechGenerator::from_provider(designer(&http))
             .design_voice("warm low voice")
             .with_text("Hello")
+            .with_language("pl")
             .with_count(2)
             .await
             .unwrap();
@@ -1004,7 +1012,9 @@ mod tests {
         assert_eq!(req.header("authorization"), Some("Bearer key"));
         assert_eq!(
             body_json(&req),
-            json!({"instruction": "warm low voice", "reference_text": "Hello", "n": 2})
+            json!({
+                "instruction": "warm low voice", "reference_text": "Hello", "language": "pl", "n": 2
+            })
         );
         assert_eq!(previews[0].audio.content_type, "audio/wav");
         assert_eq!(
@@ -1014,6 +1024,7 @@ mod tests {
         assert_eq!(previews[0].text.as_deref(), Some("Hello"));
         assert_eq!(previews[0].sample_rate, Some(44_100));
         assert_eq!(previews[0].sample_id, None);
+        assert_eq!(previews[0].language.as_deref(), Some("pl"));
         assert_eq!(previews[1].audio.content_type, "audio/mpeg");
         assert_eq!(previews[1].text.as_deref(), Some("Hello"));
     }

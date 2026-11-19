@@ -317,6 +317,7 @@ pub struct DesignVoiceRequest<'a> {
     generator: &'a SpeechGenerator,
     description: String,
     text: Option<String>,
+    language: Option<String>,
     count: usize,
     model: Option<String>,
 }
@@ -327,6 +328,7 @@ impl<'a> DesignVoiceRequest<'a> {
             generator,
             description,
             text: None,
+            language: None,
             count: 1,
             model: None,
         }
@@ -335,6 +337,13 @@ impl<'a> DesignVoiceRequest<'a> {
     /// Sets the text the previews say, for providers that let you choose.
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
         self.text = Some(text.into());
+        self
+    }
+
+    /// Sets the language of the voice (a BCP-47 code such as `pl`). Fish Audio and oMLX send it;
+    /// ElevenLabs has no such setting and ignores it.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
         self
     }
 
@@ -359,6 +368,11 @@ impl<'a> DesignVoiceRequest<'a> {
     /// The text of the previews, if set.
     pub fn text(&self) -> Option<&str> {
         self.text.as_deref()
+    }
+
+    /// The language of the voice, if set.
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 
     /// How many previews to ask for.

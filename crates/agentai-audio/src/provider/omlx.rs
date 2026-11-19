@@ -246,6 +246,7 @@ impl SpeechProvider for OmlxProvider {
         let VoiceSource::Samples {
             samples,
             transcript,
+            language,
         } = source
         else {
             return Err(AudioError::Unsupported("saving a designed voice"));
@@ -270,6 +271,7 @@ impl SpeechProvider for OmlxProvider {
         let mut voice = StoredVoice::new(name, stored);
         voice.description = description.map(str::to_string);
         voice.transcript = transcript.map(str::to_string);
+        voice.language = language;
         Ok(store.save(voice).await?)
     }
 
@@ -304,10 +306,11 @@ impl SpeechProvider for OmlxProvider {
                     instructions: Some(request.description()),
                     format: None,
                     speed: None,
-                    language: None,
+                    language: request.language(),
                 })
                 .await?;
             let mut preview = VoicePreview::new(response.audio).with_text(text);
+            preview.language = request.language().map(str::to_string);
             if let Some(rate) = response.sample_rate {
                 preview = preview.with_sample_rate(rate);
             }
@@ -578,6 +581,7 @@ mod tests {
         let previews = SpeechGenerator::from_provider(designer(&http))
             .design_voice("deep calm voice")
             .with_text("Hello")
+            .with_language("pl")
             .with_count(2)
             .await
             .unwrap();
@@ -587,12 +591,14 @@ mod tests {
             assert_eq!(req.url, "http://local/v1/audio/speech");
             assert_eq!(
                 body_json(&req),
-                json!({"model": "design-model", "input": "Hello", "instructions": "deep calm voice"})
+                json!({"model": "design-model", "input": "Hello", "language": "pl",
+                       "instructions": "deep calm voice"})
             );
             assert_eq!(preview.audio.content_type, "audio/wav");
             assert_eq!(preview.audio.bytes(&http).await.unwrap(), b"audio");
             assert_eq!(preview.text.as_deref(), Some("Hello"));
             assert_eq!(preview.sample_id, None);
+            assert_eq!(preview.language.as_deref(), Some("pl"));
         }
     }
 
@@ -614,6 +620,7 @@ mod tests {
         let previews = SpeechGenerator::from_provider(p.clone())
             .design_voice("calm")
             .with_text("Hello")
+            .with_language("pl")
             .await
             .unwrap();
         let id = p
@@ -624,5 +631,7 @@ mod tests {
         let body = body_json(&http.request(1));
         assert_eq!(body["ref_text"], json!("Hello"));
         assert_eq!(body["ref_audio"], json!("YXVkaW8="));
+        let voices = p.list_voices().await.unwrap();
+        assert_eq!(voices[0].language.as_deref(), Some("pl"));
     }
 }
