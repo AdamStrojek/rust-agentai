@@ -1,8 +1,8 @@
 //! Choosing a speech provider by name and building it.
 
 use super::{
-    AudioError, AudioModel, SpeechProvider, elevenlabs::ElevenLabsProvider,
-    fishaudio::FishAudioProvider, omlx::OmlxProvider, openai::OpenAiSpeechProvider,
+    AudioError, AudioModel, SpeechProvider, elevenlabs, elevenlabs::ElevenLabsProvider, fishaudio,
+    fishaudio::FishAudioProvider, omlx, omlx::OmlxProvider, openai, openai::OpenAiSpeechProvider,
 };
 use crate::voice_store::{StoredVoice, VoiceStore};
 use agentai_core::storage::StorageError;
@@ -10,8 +10,6 @@ use async_trait::async_trait;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
-
-use super::{elevenlabs, fishaudio, omlx, openai};
 
 /// The speech APIs this crate implements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -105,7 +103,7 @@ impl SpeechProviderKind {
         }
     }
 
-    fn lacks(self, what: &Capability) -> Option<&'static str> {
+    fn lacks(self, what: Capability) -> Option<&'static str> {
         match (what, self) {
             (Capability::Dialogue, Self::FishAudio | Self::ElevenLabs) => None,
             (Capability::Dialogue, Self::OpenAi) => Some("dialogue with openai"),
@@ -119,6 +117,7 @@ impl SpeechProviderKind {
     }
 }
 
+#[derive(Clone, Copy)]
 enum Capability {
     Dialogue,
     Design,
@@ -192,23 +191,26 @@ pub struct SpeechProviderBuilder {
     speech_model: String,
     dialogue_model: Option<String>,
     design_model: Option<String>,
-    voice_store: Option<Box<dyn VoiceStore>>,
+    voice_store: Option<BoxedStore>,
     api_key: Option<String>,
     base_url: Option<String>,
 }
 
+/// Lets the builder hold any store and pass it on as `impl VoiceStore`.
+struct BoxedStore(Box<dyn VoiceStore>);
+
 #[async_trait]
-impl VoiceStore for Box<dyn VoiceStore> {
+impl VoiceStore for BoxedStore {
     async fn save(&self, voice: StoredVoice) -> Result<String, StorageError> {
-        (**self).save(voice).await
+        self.0.save(voice).await
     }
 
     async fn get(&self, id: &str) -> Result<Option<StoredVoice>, StorageError> {
-        (**self).get(id).await
+        self.0.get(id).await
     }
 
     async fn list(&self) -> Result<Vec<(String, StoredVoice)>, StorageError> {
-        (**self).list().await
+        self.0.list().await
     }
 }
 
@@ -227,7 +229,7 @@ impl SpeechProviderBuilder {
 
     /// Sets the store of voice samples.
     pub fn with_voice_store(mut self, store: impl VoiceStore) -> Self {
-        self.voice_store = Some(Box::new(store));
+        self.voice_store = Some(BoxedStore(Box::new(store)));
         self
     }
 
@@ -260,7 +262,7 @@ impl SpeechProviderBuilder {
             (self.voice_store.is_some(), Capability::Store),
         ];
         for (set, what) in checks {
-            if let (true, Some(message)) = (set, kind.lacks(&what)) {
+            if let (true, Some(message)) = (set, kind.lacks(what)) {
                 return Err(AudioError::Unsupported(message));
             }
         }

@@ -12,7 +12,7 @@
 //!
 //! `AGENTAI_SPEECH_VOICE` is the default voice ID. OpenAI and ElevenLabs need one (without it the
 //! request fails with `MissingVoice`); oMLX does not, and uses its own voice when it is unset.
-//! With `omlx::`, setting it fails with `Unsupported`: `from_model` gives no voice store, so
+//! With `omlx::`, setting it fails with `Unsupported`: the example builds the provider without a voice store, so
 //! there are no voice IDs.
 
 use agentai::MediaSource;
