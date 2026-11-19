@@ -113,11 +113,15 @@ let response = generator
 With a `VoiceStore`, Fish Audio takes the voices of one request either all from the store or none
 from it; a mix fails with `InvalidRequest`.
 
+The speech model no longer speaks dialogues: they always use the dialogue model set with
+`with_dialogue_model`.
+
 ### `design_voice` is a builder and needs a design model
 
 The text and count are options, and voice design is on only with a design model set by
 `with_design_model`; without it `design_voice` fails with `MissingModel`. Fish Audio no longer uses
-`voice-design-1` by itself, and ElevenLabs sends the design model you set.
+`voice-design-1` by itself, and ElevenLabs sends the design model you set. oMLX designed with its speech model in 0.7.1; now
+it needs `with_design_model` too (usually the same model).
 
 ```rust,ignore
 // 0.7.1

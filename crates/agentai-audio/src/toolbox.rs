@@ -130,16 +130,16 @@ impl SpeechToolBox {
         /// How to speak, for example the tone, pace or emotion. Leave it out when not needed.
         instructions: Option<String>,
     ) -> ToolResult<ToolOutput> {
-        let voice_text = voice.as_deref().map(str::trim).filter(|v| !v.is_empty());
         let mut request = self.generator.generate(text).with_name(name);
-        if let Some(voice) = self.voice(voice.as_deref())? {
-            request = request.with_voice(voice);
+        let voice = self.voice(voice.as_deref())?;
+        if let Some(voice) = &voice {
+            request = request.with_voice(voice.clone());
         }
         if let Some(instructions) = instructions.filter(|i| !i.trim().is_empty()) {
             request = request.with_instructions(instructions);
         }
         let response = request.await.map_err(tool_error)?;
-        self.output(response, voice_text)
+        self.output(response, voice.as_deref())
     }
 
     /// Lists the voices you can use in `generate_speech`.

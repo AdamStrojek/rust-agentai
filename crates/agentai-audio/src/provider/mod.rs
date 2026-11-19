@@ -445,8 +445,10 @@ pub trait SpeechProvider: Send + Sync + 'static {
         Err(AudioError::Unsupported("listing voices"))
     }
 
-    /// Lists the speech models of the API. The default implementation returns
-    /// [`AudioError::Unsupported`].
+    /// Lists the models of the API (see [`AudioModel`] for dialogue and voice design). ElevenLabs
+    /// lists only its text-to-speech models, so for design models see
+    /// [`SpeechProviderKind::known_models`](crate::SpeechProviderKind::known_models). The default
+    /// implementation returns [`AudioError::Unsupported`].
     async fn list_models(&self) -> Result<Vec<AudioModel>, AudioError> {
         Err(AudioError::Unsupported("listing models"))
     }

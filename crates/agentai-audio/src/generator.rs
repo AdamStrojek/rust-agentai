@@ -69,7 +69,7 @@ impl SpeechGenerator {
 
     /// Speaks a dialogue, turn after turn. Set the options on the returned request and
     /// `.await` it. Fails with [`AudioError::Unsupported`] when the provider cannot speak
-    /// dialogues.
+    /// dialogues, or with [`AudioError::MissingModel`] when its dialogue model is not set.
     pub fn generate_dialogue(
         &self,
         turns: impl IntoIterator<Item = DialogueTurn>,
@@ -79,7 +79,8 @@ impl SpeechGenerator {
 
     /// Designs voices from a description and returns previews to choose from. Keep one with
     /// [`create_voice`](Self::create_voice). Fails with [`AudioError::Unsupported`] when the
-    /// provider cannot design voices.
+    /// provider cannot design voices, or with [`AudioError::MissingModel`] when its design
+    /// model is not set.
     pub fn design_voice(&self, description: impl Into<String>) -> DesignVoiceRequest<'_> {
         DesignVoiceRequest::new(self, description.into())
     }
@@ -103,7 +104,9 @@ impl SpeechGenerator {
         self.provider.list_voices().await
     }
 
-    /// Lists the speech models of the provider.
+    /// Lists the models of the provider (speech, and where the API says so, dialogue and
+    /// voice design). ElevenLabs lists only its text-to-speech models, so for design models see
+    /// [`SpeechProviderKind::known_models`](crate::SpeechProviderKind::known_models).
     pub async fn list_models(&self) -> Result<Vec<AudioModel>, AudioError> {
         self.provider.list_models().await
     }

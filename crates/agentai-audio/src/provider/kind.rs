@@ -186,6 +186,7 @@ pub fn speech_provider(
 }
 
 /// Builds a [`SpeechProvider`], see [`speech_provider`].
+#[must_use]
 pub struct SpeechProviderBuilder {
     kind: Result<SpeechProviderKind, AudioError>,
     speech_model: String,
