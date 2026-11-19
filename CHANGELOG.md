@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.1...agentai-v0.7.2) - 2026-11-19
+
+### Breaking changes
+
+All in `agentai-audio`, released as a patch while the audio interface is reworked. See [MIGRATION.md](MIGRATION.md#071--072-2026-11-19) for migration steps from 0.7.1.
+
+- *(audio)* Build a provider with `speech_provider(provider, speech_model)` (or `SpeechProviderKind::X.builder(..)`) and pass it to `SpeechGenerator::new`. `SpeechGenerator::new(model)`, `provider::from_model` and `provider::list_models(name)` are removed.
+- *(audio)* Calls are builders you `await`: `generate(text).with_voice(id)...`, `design_voice(description).with_text(..).with_count(n)`. `generate_with` and the public fields of `SpeechRequest` are gone, and so are the generator defaults (`with_default_voice`, `with_format`, `with_speed`, `with_language`). Without `with_voice` no voice is sent.
+- *(audio)* Dialogues use `generate_dialogue` and the provider's dialogue model (`with_dialogue_model`) instead of `SpeechRequest::with_voices` and speaker tags in the text.
+- *(audio)* Voice design needs a design model (`with_design_model`): Fish Audio no longer defaults to `voice-design-1`, and oMLX no longer designs with its speech model.
+- *(audio)* `Voice` is replaced by `VoiceId` (a `String`). `SpeechProvider::model()` and `AudioModel::model` are removed, and custom providers read requests through getters.
+- *(audio)* `VoiceInfo::cloned` is replaced by `origin` (`Preset`, `Account`, `Store`), and `VoiceInfo::new` takes it. The `list_voices` tool reports `"origin"` instead of `"cloned"`.
+
+### New features
+
+- *(audio)* speak dialogues as a list of turns with `generate_dialogue([DialogueTurn::new(voice, text), ..])`, with Fish Audio (S2 family, `drama-3`) and ElevenLabs (`/v1/text-to-dialogue`); you no longer write speaker tags ([#98](https://github.com/AdamStrojek/rust-agentai/pull/98)) (by @AdamStrojek)
+- *(audio)* a separate model for speech, dialogues and voice design; an engine without its model returns `MissingModel` without a request, and `with_model` overrides the model for one call (by @AdamStrojek)
+- *(audio)* `speech_provider("fishaudio", "s2-pro")` builds any provider by name, and `SpeechProviderKind::known_models()` lists the known models with what each can do (speech, dialogue, voice design), without a request (by @AdamStrojek)
+- *(audio)* `VoiceInfo::origin` tells account voices from `VoiceStore` voices, and `VoiceInfo::preview` is a recording to play (ElevenLabs `preview_url`, a Fish Audio model sample, a store voice's sample) (by @AdamStrojek)
+
+### Fixed
+
+- *(audio)* a Fish Audio dialogue whose voices came from a `VoiceStore` sent both the store IDs and the samples, so the server could speak turns in the wrong voice; a request now sends samples when all its voices are in the store, voice model IDs when none are, and fails with `InvalidRequest` for a mix (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.7.1](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.0...agentai-v0.7.1) - 2026-11-18
 
 ### Breaking changes
