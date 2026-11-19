@@ -1,71 +1,44 @@
-//! [`SpeechGenerator`]: speak texts, clone voices and design voices from your code.
+//! [`SpeechGenerator`]: speak texts and dialogues, clone voices and design voices from your code.
 
 use crate::provider::{
-    self, AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse,
-    Voice, VoiceInfo, VoicePreview, VoiceSource,
+    AudioError, AudioModel, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
+    VoiceSource,
 };
+use crate::request::{DesignVoiceRequest, DialogueRequest, DialogueTurn, SpeechRequest};
 use agentai_core::storage::MediaSave;
 use std::sync::Arc;
 
-/// Speaks texts, clones voices and designs voices with a [`SpeechProvider`].
+/// Speaks texts and dialogues, clones voices and designs voices with a [`SpeechProvider`].
 ///
+/// Every call is a builder: set its options with `with_*` and `.await` it.
 /// It is cheap to clone: clones share the provider and the storage.
-///
-/// ```rust,no_run
-/// # use agentai_audio::{SpeechGenerator, Voice};
-/// # async fn run() -> Result<(), agentai_audio::AudioError> {
-/// let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
-///     .with_default_voice(Voice::id("alloy"));
-/// let response = generator.generate("Good morning").await?;
-/// println!("{} audio", response.audio.content_type);
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Clone)]
 pub struct SpeechGenerator {
     provider: Arc<dyn SpeechProvider>,
     storage: Option<Arc<dyn MediaSave>>,
-    default_voice: Option<Voice>,
-    format: Option<AudioFormat>,
-    speed: Option<f64>,
-    language: Option<String>,
 }
 
 impl std::fmt::Debug for SpeechGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SpeechGenerator")
-            .field("model", &self.provider.model())
             .field("storage", &self.storage.is_some())
-            .field("default_voice", &self.default_voice)
-            .field("format", &self.format)
-            .field("speed", &self.speed)
-            .field("language", &self.language)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl SpeechGenerator {
-    /// Creates a generator for a model, see [`provider::from_model`]: the provider comes from
-    /// the name (`openai::gpt-4o-mini-tts`) and its settings from environment variables.
-    pub fn new(model: &str) -> Result<Self, AudioError> {
-        Ok(Self::with_provider_arc(provider::from_model(model)?.into()))
+    /// Creates a generator with a shared provider.
+    pub fn new(provider: Arc<dyn SpeechProvider>) -> Self {
+        Self {
+            provider,
+            storage: None,
+        }
     }
 
     /// Creates a generator with a provider you built, for example with the API key set in
     /// code.
     pub fn from_provider(provider: impl SpeechProvider) -> Self {
-        Self::with_provider_arc(Arc::new(provider))
-    }
-
-    fn with_provider_arc(provider: Arc<dyn SpeechProvider>) -> Self {
-        Self {
-            provider,
-            storage: None,
-            default_voice: None,
-            format: None,
-            speed: None,
-            language: None,
-        }
+        Self::new(Arc::new(provider))
     }
 
     /// Saves every audio in `storage` and sets [`SpeechResponse::id`].
@@ -74,78 +47,14 @@ impl SpeechGenerator {
         self
     }
 
-    /// Voice of every request that sets no `default_voice` of its own.
-    pub fn with_default_voice(mut self, voice: Voice) -> Self {
-        self.default_voice = Some(voice);
-        self
-    }
-
-    /// Format of every request that sets none.
-    pub fn with_format(mut self, format: AudioFormat) -> Self {
-        self.format = Some(format);
-        self
-    }
-
-    /// Speaking speed of every request that sets none.
-    pub fn with_speed(mut self, speed: f64) -> Self {
-        self.speed = Some(speed);
-        self
-    }
-
-    /// Language of every request that sets none.
-    pub fn with_language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
-        self
-    }
-
-    /// Name of the model, if the provider has one.
-    pub fn model(&self) -> Option<&str> {
-        self.provider.model()
-    }
-
     /// Returns `true` when the provider can clone voices.
     pub fn supports_voice_cloning(&self) -> bool {
         self.provider.supports_voice_cloning()
     }
 
-    /// Speaks a text.
-    pub async fn generate(&self, text: impl Into<String>) -> Result<SpeechResponse, AudioError> {
-        self.generate_with(SpeechRequest::new(text)).await
-    }
-
-    /// Speaks a text from a full request. Unset fields take the defaults of the generator.
-    pub async fn generate_with(
-        &self,
-        mut request: SpeechRequest,
-    ) -> Result<SpeechResponse, AudioError> {
-        request.default_voice = request.default_voice.or_else(|| self.default_voice.clone());
-        request.format = request.format.or(self.format);
-        request.speed = request.speed.or(self.speed);
-        request.language = request.language.or_else(|| self.language.clone());
-        let name = request.name.take();
-        let mut response = self.provider.generate(request).await?;
-        if name.is_some() {
-            response.audio.name = name;
-        }
-        response.audio.name = Some(response.audio.file_name("speech"));
-        if let Some(storage) = &self.storage {
-            response.id = Some(storage.save(&response.audio).await?);
-        }
-        Ok(response)
-    }
-
-    /// Creates a voice and returns the ID to use with [`Voice::id`]: from recordings to clone
-    /// ([`VoiceSource::samples`]) or by keeping a designed [`VoicePreview`](crate::VoicePreview) (passed as is).
-    /// Fails with [`AudioError::Unsupported`] when the provider cannot do that.
-    pub async fn create_voice(
-        &self,
-        name: &str,
-        source: impl Into<VoiceSource>,
-        description: Option<&str>,
-    ) -> Result<String, AudioError> {
-        self.provider
-            .create_voice(name, source.into(), description)
-            .await
+    /// Returns `true` when the provider can speak dialogues.
+    pub fn supports_dialogue(&self) -> bool {
+        self.provider.supports_dialogue()
     }
 
     /// Returns `true` when the provider can design voices.
@@ -153,16 +62,40 @@ impl SpeechGenerator {
         self.provider.supports_voice_design()
     }
 
-    /// Designs voices from a text description and returns previews to choose from, see
-    /// [`SpeechProvider::design_voice`]. Keep one with [`create_voice`](Self::create_voice).
-    /// Fails with [`AudioError::Unsupported`] when the provider cannot design voices.
-    pub async fn design_voice(
+    /// Speaks a text. Set the options on the returned request and `.await` it.
+    pub fn generate(&self, text: impl Into<String>) -> SpeechRequest<'_> {
+        SpeechRequest::new(self, text.into())
+    }
+
+    /// Speaks a dialogue, turn after turn. Set the options on the returned request and
+    /// `.await` it. Fails with [`AudioError::Unsupported`] when the provider cannot speak
+    /// dialogues.
+    pub fn generate_dialogue(
         &self,
-        description: &str,
-        text: Option<&str>,
-        count: usize,
-    ) -> Result<Vec<VoicePreview>, AudioError> {
-        self.provider.design_voice(description, text, count).await
+        turns: impl IntoIterator<Item = DialogueTurn>,
+    ) -> DialogueRequest<'_> {
+        DialogueRequest::new(self, turns)
+    }
+
+    /// Designs voices from a description and returns previews to choose from. Keep one with
+    /// [`create_voice`](Self::create_voice). Fails with [`AudioError::Unsupported`] when the
+    /// provider cannot design voices.
+    pub fn design_voice(&self, description: impl Into<String>) -> DesignVoiceRequest<'_> {
+        DesignVoiceRequest::new(self, description.into())
+    }
+
+    /// Creates a voice and returns its ID for [`SpeechRequest::with_voice`]: from recordings
+    /// to clone ([`VoiceSource::samples`]) or by keeping a designed [`VoicePreview`] (passed
+    /// as is). Fails with [`AudioError::Unsupported`] when the provider cannot do that.
+    pub async fn create_voice(
+        &self,
+        name: &str,
+        source: impl Into<VoiceSource>,
+        description: Option<&str>,
+    ) -> Result<VoiceId, AudioError> {
+        self.provider
+            .create_voice(name, source.into(), description)
+            .await
     }
 
     /// Lists the voices of the provider.
@@ -170,9 +103,49 @@ impl SpeechGenerator {
         self.provider.list_voices().await
     }
 
-    /// Lists the speech models of the provider, see [`provider::list_models`].
+    /// Lists the speech models of the provider.
     pub async fn list_models(&self) -> Result<Vec<AudioModel>, AudioError> {
         self.provider.list_models().await
+    }
+
+    pub(crate) async fn speak(
+        &self,
+        request: &SpeechRequest<'_>,
+    ) -> Result<SpeechResponse, AudioError> {
+        let response = self.provider.generate(request).await?;
+        self.finish(response, request.name(), "speech").await
+    }
+
+    pub(crate) async fn speak_dialogue(
+        &self,
+        request: &DialogueRequest<'_>,
+    ) -> Result<SpeechResponse, AudioError> {
+        let response = self.provider.generate_dialogue(request).await?;
+        self.finish(response, request.name(), "dialogue").await
+    }
+
+    pub(crate) async fn design(
+        &self,
+        request: &DesignVoiceRequest<'_>,
+    ) -> Result<Vec<VoicePreview>, AudioError> {
+        self.provider.design_voice(request).await
+    }
+
+    /// Names the audio and saves it in the storage.
+    async fn finish(
+        &self,
+        mut response: SpeechResponse,
+        name: Option<&str>,
+        stem: &str,
+    ) -> Result<SpeechResponse, AudioError> {
+        if let Some(name) = name {
+            response.audio.name = Some(name.to_string());
+        }
+        response.audio.name = Some(response.audio.file_name(stem));
+        if let Some(storage) = &self.storage {
+            response.id = Some(storage.save(&response.audio).await?);
+        }
+        Ok(response)
     }
 }
 
@@ -180,12 +153,9 @@ impl SpeechGenerator {
 mod tests {
     use super::*;
     use crate::provider::openai::OpenAiSpeechProvider;
-    use crate::provider::{AudioFormat, SpeechRequest, Voice};
     use agentai_core::HttpResponse;
-    use agentai_core::mock::{MockHttp, body_json};
+    use agentai_core::mock::MockHttp;
     use agentai_core::storage::{MediaRead, MemoryStorage};
-    use serde_json::json;
-    use std::sync::Arc;
 
     fn audio() -> HttpResponse {
         HttpResponse::new(200, b"audio".to_vec())
@@ -197,43 +167,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn defaults_fill_unset_fields_and_the_request_wins() {
-        let http = MockHttp::new(vec![audio(), audio()]);
-        let generator = SpeechGenerator::from_provider(openai(&http))
-            .with_default_voice(Voice::id("nova"))
-            .with_format(AudioFormat::Wav)
-            .with_speed(1.5)
-            .with_language("pl");
-
-        generator.generate("a").await.unwrap();
-        generator
-            .generate_with(
-                SpeechRequest::new("b")
-                    .with_voice(Voice::id("onyx"))
-                    .with_format(AudioFormat::Mp3),
-            )
+    async fn a_dialogue_is_unsupported_by_default_and_sends_nothing() {
+        let http = MockHttp::new(vec![]);
+        let err = SpeechGenerator::from_provider(openai(&http))
+            .generate_dialogue([DialogueTurn::new("a", "hi")])
             .await
-            .unwrap();
-
-        let first = body_json(&http.request(0));
-        assert_eq!(first["voice"], json!("nova"));
-        assert_eq!(first["response_format"], json!("wav"));
-        assert_eq!(first["speed"], json!(1.5));
-        let second = body_json(&http.request(1));
-        assert_eq!(second["voice"], json!("onyx"));
-        assert_eq!(second["response_format"], json!("mp3"));
-        assert_eq!(second["speed"], json!(1.5));
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Unsupported(_)));
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
     async fn the_storage_sets_the_id() {
         let http = MockHttp::new(vec![audio()]);
         let storage = MemoryStorage::new();
-        let generator = SpeechGenerator::from_provider(openai(&http))
-            .with_default_voice(Voice::id("nova"))
-            .with_storage(storage.clone());
+        let generator = SpeechGenerator::from_provider(openai(&http)).with_storage(storage.clone());
 
-        let response = generator.generate("hi").await.unwrap();
+        let response = generator.generate("hi").with_voice("nova").await.unwrap();
 
         assert_eq!(response.id.as_deref(), Some("1-speech.mp3"));
         assert_eq!(storage.read("1-speech.mp3").await.unwrap(), response.audio);
@@ -243,11 +193,9 @@ mod tests {
     async fn an_empty_reply_saves_nothing() {
         let http = MockHttp::new(vec![HttpResponse::new(200, Vec::new())]);
         let storage = MemoryStorage::new();
-        let generator = SpeechGenerator::from_provider(openai(&http))
-            .with_default_voice(Voice::id("nova"))
-            .with_storage(storage.clone());
+        let generator = SpeechGenerator::from_provider(openai(&http)).with_storage(storage.clone());
 
-        let result = generator.generate("hi").await;
+        let result = generator.generate("hi").with_voice("nova").await;
 
         assert!(matches!(result, Err(AudioError::InvalidResponse(_))));
         assert!(storage.ids().is_empty());

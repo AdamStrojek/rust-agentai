@@ -19,7 +19,8 @@
 
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, base64};
+use agentai_audio::provider::{elevenlabs::ElevenLabsProvider, fishaudio::FishAudioProvider};
+use agentai_audio::{MemoryVoiceStore, SpeechGenerator, base64};
 
 const DESCRIPTION: &str = "A warm, calm middle-aged woman with a low voice, speaking slowly";
 const TEXT: &str = "Welcome back, and thank you for listening. Let me tell you how this voice was made, and why it sounds the way it does.";
@@ -41,15 +42,29 @@ fn save(media: &Media, name: &str) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     let model =
         std::env::var("AGENTAI_SPEECH_MODEL").unwrap_or_else(|_| "fishaudio::s2-pro".to_string());
-    let generator = match model.strip_prefix("omlx::") {
-        Some(model) => SpeechGenerator::from_provider(
-            OmlxProvider::from_env(model)?.with_voice_store(MemoryVoiceStore::new()),
-        ),
-        None => SpeechGenerator::new(&model)?,
+    let generator = if let Some(model) = model.strip_prefix("omlx::") {
+        SpeechGenerator::from_provider(
+            OmlxProvider::from_env(model)?
+                .with_design_model(model)
+                .with_voice_store(MemoryVoiceStore::new()),
+        )
+    } else if let Some(model) = model.strip_prefix("elevenlabs::") {
+        SpeechGenerator::from_provider(
+            ElevenLabsProvider::from_env(model)?.with_design_model("eleven_ttv_v3"),
+        )
+    } else {
+        let model = model.strip_prefix("fishaudio::").unwrap_or(&model);
+        SpeechGenerator::from_provider(
+            FishAudioProvider::from_env(model)?.with_design_model("voice-design-1"),
+        )
     };
 
     // The text is required by oMLX, optional for ElevenLabs and Fish Audio
-    let previews = generator.design_voice(DESCRIPTION, Some(TEXT), 2).await?;
+    let previews = generator
+        .design_voice(DESCRIPTION)
+        .with_text(TEXT)
+        .with_count(2)
+        .await?;
     for (n, preview) in previews.iter().enumerate() {
         save(&preview.audio, &format!("preview-{n}"))?;
     }
@@ -64,10 +79,8 @@ async fn main() -> anyhow::Result<()> {
     println!("Saved the first preview as voice {voice_id}");
 
     let response = generator
-        .generate_with(
-            SpeechRequest::new("This sentence is spoken with the voice I designed.")
-                .with_voice(Voice::id(voice_id)),
-        )
+        .generate("This sentence is spoken with the voice I designed.")
+        .with_voice(voice_id)
         .await?;
     save(&response.audio, "designed")
 }

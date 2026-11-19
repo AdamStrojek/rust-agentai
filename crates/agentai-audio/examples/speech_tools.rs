@@ -17,7 +17,7 @@
 use agentai::tool::ToolBoxSet;
 use agentai::{Agent, Media, MediaSource};
 use agentai_audio::storage::{MediaRead, MediaSave, StorageError};
-use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice, base64, mime};
+use agentai_audio::{SpeechGenerator, SpeechToolBox, base64, mime, provider};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,10 +71,11 @@ async fn main() -> anyhow::Result<()> {
         count: AtomicUsize::new(0),
     });
 
-    let mut generator = SpeechGenerator::new(&speech_model)?;
-    if let Ok(voice) = std::env::var("AGENTAI_SPEECH_VOICE") {
-        generator = generator.with_default_voice(Voice::id(voice));
-    }
+    let generator = SpeechGenerator::new(provider::from_model(&speech_model)?.into());
+    let voice = match std::env::var("AGENTAI_SPEECH_VOICE") {
+        Ok(voice) => format!(" with the voice {voice}"),
+        Err(_) => String::new(),
+    };
     let mut tools = ToolBoxSet::new();
     tools.add_tool(SpeechToolBox::new(generator, storage));
     let agent = Agent::new(
@@ -84,10 +85,10 @@ async fn main() -> anyhow::Result<()> {
     .with_toolbox(tools);
 
     let result = agent
-        .run::<String>(
-            "Say 'Welcome aboard, the show starts in five minutes' in a calm voice and name the file welcome. \
-             Then tell me the ID of the audio file.",
-        )
+        .run::<String>(format!(
+            "Say 'Welcome aboard, the show starts in five minutes' in a calm voice{voice} and name the file welcome. \
+             Then tell me the ID of the audio file."
+        ))
         .await?;
     println!("{}", result.answer);
     Ok(())

@@ -8,6 +8,7 @@ pub mod fishaudio;
 pub mod omlx;
 pub mod openai;
 
+use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
 use agentai_core::{HttpError, HttpResponse};
@@ -15,20 +16,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// The voice that speaks.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Voice {
-    /// The ID of a preset or cloned voice, as the provider names it.
-    Id(String),
-}
-
-impl Voice {
-    /// Creates a voice from its ID.
-    pub fn id(id: impl Into<String>) -> Self {
-        Self::Id(id.into())
-    }
-}
+/// The ID of a voice, as the provider names it: a preset, a voice of the account or a voice
+/// of a [`VoiceStore`](crate::VoiceStore).
+pub type VoiceId = String;
 
 /// What a voice is created from, see [`create_voice`](SpeechProvider::create_voice).
 #[derive(Debug, Clone, PartialEq)]
@@ -143,129 +133,6 @@ impl AudioFormat {
     }
 }
 
-/// A request to speak a text.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct SpeechRequest {
-    /// The text to speak.
-    pub text: String,
-    /// The voices, in the order of the speakers. A provider that speaks with one voice only
-    /// returns [`AudioError::Unsupported`] for more than one. With several voices the text marks
-    /// who speaks in the provider's syntax, for example `<|speaker:0|>` for Fish Audio. Falls
-    /// back to `default_voice` when empty.
-    pub voices: Vec<Voice>,
-    /// Voice used when `voices` is empty.
-    pub default_voice: Option<Voice>,
-    /// Output format. Not sent when `None`.
-    pub format: Option<AudioFormat>,
-    /// Speaking speed. Not sent when `None`.
-    pub speed: Option<f64>,
-    /// Language of the text. Not sent when `None`; OpenAI has no equivalent and ignores it.
-    pub language: Option<String>,
-    /// Style instructions. Not sent when `None`; ElevenLabs has no equivalent and ignores them.
-    pub instructions: Option<String>,
-    /// File name of the audio, set as [`Media::name`]. Never sent to the provider.
-    pub name: Option<String>,
-    /// Asks for the time of every word in [`SpeechResponse::timestamps`]. A provider that
-    /// cannot give them returns [`AudioError::Unsupported`].
-    pub timestamps: bool,
-}
-
-impl SpeechRequest {
-    /// Creates a request with the text to speak.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            voices: Vec::new(),
-            default_voice: None,
-            format: None,
-            speed: None,
-            language: None,
-            instructions: None,
-            name: None,
-            timestamps: false,
-        }
-    }
-
-    /// Adds a voice after the voices already set.
-    pub fn with_voice(mut self, voice: Voice) -> Self {
-        self.voices.push(voice);
-        self
-    }
-
-    /// Sets the voices, in the order of the speakers.
-    pub fn with_voices(mut self, voices: Vec<Voice>) -> Self {
-        self.voices = voices;
-        self
-    }
-
-    /// Sets the voice used when there is no `voice`.
-    pub fn with_default_voice(mut self, voice: Voice) -> Self {
-        self.default_voice = Some(voice);
-        self
-    }
-
-    /// Sets the output format.
-    pub fn with_format(mut self, format: AudioFormat) -> Self {
-        self.format = Some(format);
-        self
-    }
-
-    /// Sets the speaking speed.
-    pub fn with_speed(mut self, speed: f64) -> Self {
-        self.speed = Some(speed);
-        self
-    }
-
-    /// Sets the language.
-    pub fn with_language(mut self, language: impl Into<String>) -> Self {
-        self.language = Some(language.into());
-        self
-    }
-
-    /// Sets the style instructions.
-    pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
-        self.instructions = Some(instructions.into());
-        self
-    }
-
-    /// Sets the file name of the audio.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Sets whether to ask for the time of every word.
-    pub fn with_timestamps(mut self, timestamps: bool) -> Self {
-        self.timestamps = timestamps;
-        self
-    }
-
-    /// Fails for a request with timestamps, for providers that cannot give them.
-    pub(crate) fn without_timestamps(&self) -> Result<(), AudioError> {
-        if self.timestamps {
-            Err(AudioError::Unsupported("word timestamps"))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// The voice of the request, for providers that speak with one voice only.
-    pub(crate) fn request_voice(&self) -> Result<Option<&Voice>, AudioError> {
-        match self.voices.as_slice() {
-            [] => Ok(None),
-            [voice] => Ok(Some(voice)),
-            _ => Err(AudioError::Unsupported("more than one voice")),
-        }
-    }
-
-    /// The voice of the request, else the default voice, for providers that speak with one
-    /// voice only.
-    pub(crate) fn single_voice(&self) -> Result<Option<&Voice>, AudioError> {
-        Ok(self.request_voice()?.or(self.default_voice.as_ref()))
-    }
-}
-
 /// The spoken audio.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -278,6 +145,8 @@ pub struct SpeechResponse {
     pub sample_rate: Option<u32>,
     /// The time of every word, when the request asked for it.
     pub timestamps: Option<Vec<WordTimestamp>>,
+    /// The model that was sent, if any.
+    pub model: Option<String>,
 }
 
 impl SpeechResponse {
@@ -288,7 +157,14 @@ impl SpeechResponse {
             id: None,
             sample_rate: None,
             timestamps: None,
+            model: None,
         }
+    }
+
+    /// Sets the model that was sent.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 
     /// Sets the ID in the storage.
@@ -337,8 +213,8 @@ impl WordTimestamp {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct VoiceInfo {
-    /// ID for [`Voice::Id`].
-    pub id: String,
+    /// ID for [`SpeechRequest::with_voice`].
+    pub id: VoiceId,
     /// Display name.
     pub name: String,
     /// Description.
@@ -423,8 +299,11 @@ pub enum AudioError {
     #[error("cannot save the audio: {0}")]
     Storage(#[from] StorageError),
     /// The request has no voice and the provider needs one.
-    #[error("no voice: set a voice or a default voice")]
+    #[error("no voice: the provider needs one")]
     MissingVoice,
+    /// The provider has no model for this kind of call, so it is off.
+    #[error("no model for {0}")]
+    MissingModel(&'static str),
     /// The request cannot be fulfilled as given.
     #[error("invalid audio request: {0}")]
     InvalidRequest(String),
@@ -464,27 +343,22 @@ impl AudioError {
 
 /// A text-to-speech API.
 ///
-/// Implement [`generate`](SpeechProvider::generate); a provider that can clone voices also
-/// overrides [`supports_voice_cloning`](SpeechProvider::supports_voice_cloning) and
-/// [`create_voice`](SpeechProvider::create_voice).
+/// Implement [`generate`](SpeechProvider::generate); a provider that can clone voices, speak
+/// dialogues or design voices also overrides the matching `supports_*` method and the call.
+/// The model of a call is [`SpeechRequest::model`] when set, else the provider's own model.
 #[async_trait]
 pub trait SpeechProvider: Send + Sync + 'static {
-    /// Name of the model, if the provider has one.
-    fn model(&self) -> Option<&str> {
-        None
-    }
-
     /// Speaks a text.
-    async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError>;
+    async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError>;
 
     /// Returns `true` when the provider implements [`create_voice`](SpeechProvider::create_voice).
     fn supports_voice_cloning(&self) -> bool {
         false
     }
 
-    /// Creates a voice and returns the ID to use with [`Voice::id`]: from recordings to clone
-    /// ([`VoiceSource::Samples`]; `transcript` is what is said in them, and oMLX rejects a
-    /// cloned voice without it when the voice speaks) or by keeping a designed
+    /// Creates a voice and returns its ID for [`SpeechRequest::with_voice`]: from recordings
+    /// to clone ([`VoiceSource::Samples`]; `transcript` is what is said in them, and oMLX
+    /// rejects a cloned voice without it when the voice speaks) or by keeping a designed
     /// [`VoicePreview`] ([`VoiceSource::SampleId`]). The default implementation returns
     /// [`AudioError::Unsupported`].
     async fn create_voice(
@@ -492,29 +366,40 @@ pub trait SpeechProvider: Send + Sync + 'static {
         name: &str,
         source: VoiceSource,
         description: Option<&str>,
-    ) -> Result<String, AudioError> {
+    ) -> Result<VoiceId, AudioError> {
         let _ = (name, source, description);
         Err(AudioError::Unsupported("voice cloning"))
     }
 
-    /// Returns `true` when the provider implements [`design_voice`](SpeechProvider::design_voice).
+    /// Returns `true` when the provider can speak dialogues.
+    fn supports_dialogue(&self) -> bool {
+        false
+    }
+
+    /// Speaks a dialogue of several voices. The default implementation returns
+    /// [`AudioError::Unsupported`].
+    async fn generate_dialogue(
+        &self,
+        request: &DialogueRequest<'_>,
+    ) -> Result<SpeechResponse, AudioError> {
+        let _ = request;
+        Err(AudioError::Unsupported("dialogue"))
+    }
+
+    /// Returns `true` when the provider can design voices.
     fn supports_voice_design(&self) -> bool {
         false
     }
 
     /// Designs voices from a text description and returns previews to listen to and choose
     /// from. Keep one with [`create_voice`](SpeechProvider::create_voice) (its
-    /// [`VoiceSource::SampleId`] when the preview has one). `text` is what the previews say,
-    /// if the provider lets you choose, and `count` is how many candidates to ask for; a
-    /// provider may return its own number. The default implementation returns
-    /// [`AudioError::Unsupported`].
+    /// [`VoiceSource::SampleId`] when the preview has one). A provider may return its own
+    /// number of previews. The default implementation returns [`AudioError::Unsupported`].
     async fn design_voice(
         &self,
-        description: &str,
-        text: Option<&str>,
-        count: usize,
+        request: &DesignVoiceRequest<'_>,
     ) -> Result<Vec<VoicePreview>, AudioError> {
-        let _ = (description, text, count);
+        let _ = request;
         Err(AudioError::Unsupported("voice design"))
     }
 
@@ -583,8 +468,8 @@ fn resolve(model: &str) -> Result<(ProviderKind, &str), AudioError> {
 /// well-known names (`tts-1*`, `gpt-4o-mini-tts*`, `eleven_*`), from the name alone. Use the
 /// prefix for other models behind an OpenAI-compatible API. See each provider's `from_env` for its variables.
 ///
-/// An `omlx::` provider made here has no voice store, so it cannot clone voices or use
-/// [`Voice::Id`] of cloned voices; a `fishaudio::` one uses only voices of the Fish Audio
+/// An `omlx::` provider made here has no voice store, so it cannot clone voices or speak
+/// with cloned voices; a `fishaudio::` one uses only voices of the Fish Audio
 /// account. Build it with [`OmlxProvider::with_voice_store`](omlx::OmlxProvider::with_voice_store)
 /// and pass it to [`SpeechGenerator::from_provider`](crate::SpeechGenerator::from_provider)
 /// instead.
@@ -676,34 +561,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simple_providers_reject_several_voices_and_timestamps() {
+    async fn simple_providers_reject_timestamps() {
         use agentai_core::mock::MockHttp;
         use std::sync::Arc;
         let http = MockHttp::new(vec![]);
-        let providers: Vec<Box<dyn SpeechProvider>> = vec![
-            Box::new(
+        let providers: Vec<Arc<dyn SpeechProvider>> = vec![
+            Arc::new(
                 openai::OpenAiSpeechProvider::new("tts-1", "k", "http://x")
                     .with_client(Arc::new(http.clone())),
             ),
-            Box::new(
+            Arc::new(
                 elevenlabs::ElevenLabsProvider::new("m", "k", "http://x")
                     .with_client(Arc::new(http.clone())),
             ),
-            Box::new(
+            Arc::new(
                 omlx::OmlxProvider::new("m", "", "http://x").with_client(Arc::new(http.clone())),
             ),
         ];
-        let several = SpeechRequest::new("hi")
-            .with_voice(Voice::id("a"))
-            .with_voice(Voice::id("b"));
-        let timestamps = SpeechRequest::new("hi")
-            .with_voice(Voice::id("a"))
-            .with_timestamps(true);
         for provider in providers {
-            for request in [several.clone(), timestamps.clone()] {
-                let err = provider.generate(request).await.unwrap_err();
-                assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
-            }
+            let err = crate::SpeechGenerator::new(provider)
+                .generate("hi")
+                .with_voice("a")
+                .with_timestamps(true)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, AudioError::Unsupported(_)), "{err}");
         }
         assert_eq!(http.request_count(), 0);
     }

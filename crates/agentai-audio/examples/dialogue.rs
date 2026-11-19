@@ -13,7 +13,7 @@
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::fishaudio::FishAudioProvider;
 use agentai_audio::{
-    MemoryVoiceStore, SpeechGenerator, SpeechRequest, StoredVoice, Voice, VoiceStore, base64,
+    DialogueTurn, MemoryVoiceStore, SpeechGenerator, StoredVoice, VoiceStore, base64,
 };
 
 const USAGE: &str = "usage: dialogue <a.wav> <transcript a> <b.wav> <transcript b>";
@@ -32,20 +32,20 @@ async fn main() -> anyhow::Result<()> {
         let id = store
             .save(StoredVoice::new(name, sample).with_transcript(transcript))
             .await?;
-        voices.push(Voice::id(id));
+        voices.push(id);
     }
 
-    let provider = FishAudioProvider::from_env("drama-3")?.with_voice_store(store);
+    let provider = FishAudioProvider::from_env("drama-3")?
+        .with_dialogue_model("drama-3")
+        .with_voice_store(store);
     let generator = SpeechGenerator::from_provider(provider);
     let response = generator
-        .generate_with(
-            SpeechRequest::new(
-                "<|speaker:0|>Did you hear that?<|speaker:1|>Hear what? It is quiet.\
-                 <|speaker:0|>Exactly. Too quiet.",
-            )
-            .with_voices(voices)
-            .with_timestamps(true),
-        )
+        .generate_dialogue([
+            DialogueTurn::new(&voices[0], "Did you hear that?"),
+            DialogueTurn::new(&voices[1], "Hear what? It is quiet."),
+            DialogueTurn::new(&voices[0], "Exactly. Too quiet."),
+        ])
+        .with_timestamps(true)
         .await?;
     for word in response.timestamps.iter().flatten() {
         println!("{:>6.2}-{:>6.2}s {}", word.start, word.end, word.text);

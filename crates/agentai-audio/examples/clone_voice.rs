@@ -13,7 +13,7 @@
 
 use agentai::{Media, MediaSource};
 use agentai_audio::provider::omlx::OmlxProvider;
-use agentai_audio::{MemoryVoiceStore, SpeechGenerator, SpeechRequest, Voice, VoiceSource, base64};
+use agentai_audio::{MemoryVoiceStore, SpeechGenerator, VoiceSource, base64};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,10 +41,8 @@ async fn main() -> anyhow::Result<()> {
     println!("Cloned voice {voice_id}");
 
     let response = generator
-        .generate_with(
-            SpeechRequest::new("This is my cloned voice, speaking a sentence it never heard.")
-                .with_voice(Voice::id(voice_id)),
-        )
+        .generate("This is my cloned voice, speaking a sentence it never heard.")
+        .with_voice(voice_id)
         .await?;
 
     match &response.audio.source {

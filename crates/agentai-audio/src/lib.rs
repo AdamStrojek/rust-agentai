@@ -169,6 +169,7 @@
 
 mod generator;
 pub mod provider;
+mod request;
 #[cfg(feature = "toolbox")]
 mod toolbox;
 mod voice_store;
@@ -177,9 +178,10 @@ mod voice_store;
 pub use agentai_core::{base64, mime, storage};
 pub use generator::SpeechGenerator;
 pub use provider::{
-    AudioError, AudioFormat, AudioModel, SpeechRequest, SpeechResponse, Voice, VoiceInfo,
-    VoicePreview, VoiceSource, WordTimestamp,
+    AudioError, AudioFormat, AudioModel, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
+    VoiceSource, WordTimestamp,
 };
+pub use request::{DesignVoiceRequest, DialogueRequest, DialogueTurn, SpeechRequest};
 #[cfg(feature = "toolbox")]
 pub use toolbox::{SpeechToolBox, SpeechToolOutput};
 pub use voice_store::{MemoryVoiceStore, StoredVoice, VoiceStore};
