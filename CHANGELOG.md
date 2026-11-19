@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.4](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.3...agentai-v0.7.4) - 2026-11-19
 
+### Breaking changes
+
+See [MIGRATION.md](MIGRATION.md#073--074-2026-11-19) for migration steps from 0.7.3.
+
+- *(audio)* `VoiceSource::Samples` has a `language` field and is `#[non_exhaustive]`: build it with `VoiceSource::samples(..)` and `with_language`, and match it with `..` (custom `create_voice` implementations).
+
 ### New features
-- *(audio)* voice languages in the store, voice info and voice design ([#103](https://github.com/AdamStrojek/rust-agentai/pull/103)) (by @AdamStrojek)
+
+- *(audio)* design a voice in a language with `design_voice(..).with_language("pl")`, sent to Fish Audio and oMLX (ElevenLabs has no such setting); `VoicePreview::language` is the language of a preview, and keeping it with `create_voice` stores it with the voice ([#103](https://github.com/AdamStrojek/rust-agentai/pull/103)) (by @AdamStrojek)
+- *(audio)* `StoredVoice::language` and `VoiceInfo::language`, filled from the store, Fish Audio model languages and ElevenLabs labels (by @AdamStrojek)
 
 ### Miscellaneous
-- release notes for 0.7.3 ([#102](https://github.com/AdamStrojek/rust-agentai/pull/102)) (by @AdamStrojek) - #102
+
+- release notes for 0.7.3 ([#102](https://github.com/AdamStrojek/rust-agentai/pull/102)) (by @AdamStrojek)
 
 ### Contributors
 
