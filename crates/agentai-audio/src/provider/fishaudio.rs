@@ -351,7 +351,7 @@ impl SpeechProvider for FishAudioProvider {
             reference_id,
             references,
             format,
-            prosody: None,
+            prosody: request.speed().map(|speed| Prosody { speed }),
             language: request.language(),
         };
         self.send(model, &body, request.format(), request.timestamps())
@@ -1075,12 +1075,14 @@ mod tests {
                 DialogueTurn::new("m-a", "Hi"),
                 DialogueTurn::new("m-b", "Hello"),
             ])
+            .with_speed(1.5)
             .await
             .unwrap();
         assert_eq!(
             body_json(&http.request(0)),
             json!({
-                "text": "<|speaker:0|>Hi<|speaker:1|>Hello", "reference_id": ["m-a", "m-b"]
+                "text": "<|speaker:0|>Hi<|speaker:1|>Hello", "reference_id": ["m-a", "m-b"],
+                "prosody": {"speed": 1.5}
             })
         );
     }

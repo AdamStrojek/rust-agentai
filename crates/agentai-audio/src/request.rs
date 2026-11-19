@@ -178,6 +178,7 @@ pub struct DialogueRequest<'a> {
     turns: Vec<(usize, String)>,
     model: Option<String>,
     format: Option<AudioFormat>,
+    speed: Option<f64>,
     language: Option<String>,
     timestamps: bool,
     name: Option<String>,
@@ -208,6 +209,7 @@ impl<'a> DialogueRequest<'a> {
             turns,
             model: None,
             format: None,
+            speed: None,
             language: None,
             timestamps: false,
             name: None,
@@ -223,6 +225,13 @@ impl<'a> DialogueRequest<'a> {
     /// Sets the output format.
     pub fn with_format(mut self, format: AudioFormat) -> Self {
         self.format = Some(format);
+        self
+    }
+
+    /// Sets the speaking speed of every turn. A provider that cannot set it for a dialogue
+    /// returns [`AudioError::Unsupported`].
+    pub fn with_speed(mut self, speed: f64) -> Self {
+        self.speed = Some(speed);
         self
     }
 
@@ -254,6 +263,11 @@ impl<'a> DialogueRequest<'a> {
     /// Every turn as the index of its voice in [`voices`](Self::voices) and its text.
     pub fn turns(&self) -> &[(usize, String)] {
         &self.turns
+    }
+
+    /// The speaking speed, if set.
+    pub fn speed(&self) -> Option<f64> {
+        self.speed
     }
 
     /// The model of this call, if set.
