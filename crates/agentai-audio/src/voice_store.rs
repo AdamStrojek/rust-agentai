@@ -1,5 +1,6 @@
 //! Storage for cloned voices, for providers that keep the sample themselves.
 
+use crate::provider::{VoiceId, VoiceInfo, VoiceOrigin};
 use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
 use async_trait::async_trait;
@@ -43,11 +44,21 @@ impl StoredVoice {
     }
 }
 
+impl StoredVoice {
+    /// The voice as [`VoiceInfo`], with its sample as the preview.
+    pub(crate) fn into_info(self, id: VoiceId) -> VoiceInfo {
+        let mut info = VoiceInfo::new(id, self.name, VoiceOrigin::Store).with_preview(self.sample);
+        info.description = self.description;
+        info
+    }
+}
+
 /// Saves cloned voices and chooses their IDs.
 #[async_trait]
 pub trait VoiceStore: Send + Sync + 'static {
-    /// Stores the voice and returns the ID to use with [`Voice::id`](crate::Voice::id).
-    async fn save(&self, voice: StoredVoice) -> Result<String, StorageError>;
+    /// Stores the voice and returns its ID, for
+    /// [`SpeechRequest::with_voice`](crate::SpeechRequest::with_voice).
+    async fn save(&self, voice: StoredVoice) -> Result<VoiceId, StorageError>;
 
     /// Returns the voice stored under `id`, or `None`.
     ///
@@ -57,7 +68,7 @@ pub trait VoiceStore: Send + Sync + 'static {
     async fn get(&self, id: &str) -> Result<Option<StoredVoice>, StorageError>;
 
     /// Returns every voice with its ID, in the order they were saved.
-    async fn list(&self) -> Result<Vec<(String, StoredVoice)>, StorageError>;
+    async fn list(&self) -> Result<Vec<(VoiceId, StoredVoice)>, StorageError>;
 }
 
 /// [`VoiceStore`] in memory, with the IDs `voice-1`, `voice-2`, ...
@@ -65,7 +76,7 @@ pub trait VoiceStore: Send + Sync + 'static {
 /// Clones share the same voices.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryVoiceStore {
-    voices: Arc<Mutex<Vec<(String, StoredVoice)>>>,
+    voices: Arc<Mutex<Vec<(VoiceId, StoredVoice)>>>,
 }
 
 impl MemoryVoiceStore {
@@ -77,7 +88,7 @@ impl MemoryVoiceStore {
 
 #[async_trait]
 impl VoiceStore for MemoryVoiceStore {
-    async fn save(&self, voice: StoredVoice) -> Result<String, StorageError> {
+    async fn save(&self, voice: StoredVoice) -> Result<VoiceId, StorageError> {
         let mut voices = self.voices.lock().unwrap();
         let id = format!("voice-{}", voices.len() + 1);
         voices.push((id.clone(), voice));
@@ -89,7 +100,7 @@ impl VoiceStore for MemoryVoiceStore {
         Ok(voices.iter().find(|(i, _)| i == id).map(|(_, v)| v.clone()))
     }
 
-    async fn list(&self) -> Result<Vec<(String, StoredVoice)>, StorageError> {
+    async fn list(&self) -> Result<Vec<(VoiceId, StoredVoice)>, StorageError> {
         Ok(self.voices.lock().unwrap().clone())
     }
 }

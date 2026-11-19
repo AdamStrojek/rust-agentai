@@ -7,12 +7,198 @@ skip releases, apply the sections one after another, starting with the oldest.
 The [CHANGELOG](CHANGELOG.md) lists every change; this guide covers only the ones that need changes
 in your code.
 
+- [0.7.1 → 0.7.2 (2026-11-19)](#071--072-2026-11-19)
 - [0.7.0 → 0.7.1 (2026-11-18)](#070--071-2026-11-18)
 - [0.6.0 → 0.7.0 (2026-11-18)](#060--070-2026-11-18)
 - [0.4.0 → 0.5.0 (2026-11-04)](#040--050-2026-11-04)
 - [0.3.1 → 0.4.0 (2026-10-26)](#031--040-2026-10-26)
 - [0.2.0 → 0.3.0 (2026-10-22)](#020--030-2026-10-22)
 - [0.1.5 → 0.2.0 (2026-10-20)](#015--020-2026-10-20)
+
+## 0.7.1 → 0.7.2 (2026-11-19)
+
+These changes are in `agentai-audio`.
+
+### Build the provider with `speech_provider`
+
+`SpeechGenerator::new` takes a provider instead of a `provider::model` name. Build it with
+`speech_provider(provider, speech_model)` (or `SpeechProviderKind::X.builder(speech_model)`); the
+API key and URL still come from the environment unless you set them with `with_api_key` and
+`with_base_url`. `provider::from_model` is gone. `SpeechGenerator::from_provider` with a provider
+you built yourself works as before.
+
+```rust,ignore
+// 0.7.1
+let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?;
+
+// 0.7.2
+let generator = SpeechGenerator::new(speech_provider("openai", "gpt-4o-mini-tts").build()?);
+```
+
+### Calls are builders, a voice is a `VoiceId`
+
+`generate` returns a request you set options on and `.await`; `generate_with` and
+`SpeechRequest::new` are gone. `Voice` is replaced by `VoiceId`, a `String`, so `Voice::id(x)`
+becomes `x`.
+
+```rust,ignore
+// 0.7.1
+let response = generator
+    .generate_with(
+        SpeechRequest::new("Hello")
+            .with_voice(Voice::id("alloy"))
+            .with_instructions("Calm"),
+    )
+    .await?;
+
+// 0.7.2
+let response = generator
+    .generate("Hello")
+    .with_voice("alloy")
+    .with_instructions("Calm")
+    .await?;
+```
+
+### No generator defaults
+
+`SpeechGenerator::with_default_voice`, `with_format`, `with_speed` and `with_language` are gone:
+set them on each call.
+
+```rust,ignore
+// 0.7.1
+let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
+    .with_default_voice(Voice::id("alloy"));
+let response = generator.generate("Hello").await?;
+
+// 0.7.2
+let generator = SpeechGenerator::new(speech_provider("openai", "gpt-4o-mini-tts").build()?);
+let response = generator.generate("Hello").with_voice("alloy").await?;
+```
+
+With `SpeechToolBox`, the voice now comes only from the `voice` argument of `generate_speech`:
+name it in the prompt or the system prompt, or list the voices with `with_voices` so the model picks
+one from `list_voices`.
+
+### Dialogues are a list of turns
+
+`SpeechRequest::with_voices` and the `<|speaker:N|>` tags you wrote in the text are replaced by
+`generate_dialogue` with a `DialogueTurn` per turn. The dialogue model is set on the provider with
+`with_dialogue_model`; without it `generate_dialogue` fails with `MissingModel`.
+
+```rust,ignore
+// 0.7.1
+let provider = FishAudioProvider::from_env("drama-3")?.with_voice_store(store);
+let generator = SpeechGenerator::from_provider(provider);
+let response = generator
+    .generate_with(
+        SpeechRequest::new("<|speaker:0|>Ready?<|speaker:1|>Always.")
+            .with_voices(vec![Voice::id(ala), Voice::id(ola)]),
+    )
+    .await?;
+
+// 0.7.2
+let provider = speech_provider("fishaudio", "s2-pro")
+    .with_dialogue_model("drama-3")
+    .with_voice_store(store)
+    .build()?;
+let generator = SpeechGenerator::new(provider);
+let response = generator
+    .generate_dialogue([
+        DialogueTurn::new(&ala, "Ready?"),
+        DialogueTurn::new(&ola, "Always."),
+    ])
+    .await?;
+```
+
+With a `VoiceStore`, Fish Audio takes the voices of one request either all from the store or none
+from it; a mix fails with `InvalidRequest`.
+
+The speech model no longer speaks dialogues: they always use the dialogue model set with
+`with_dialogue_model`.
+
+### `design_voice` is a builder and needs a design model
+
+The text and count are options, and voice design is on only with a design model set by
+`with_design_model`; without it `design_voice` fails with `MissingModel`. Fish Audio no longer uses
+`voice-design-1` by itself, and ElevenLabs sends the design model you set. oMLX designed with its speech model in 0.7.1; now
+it needs `with_design_model` too (usually the same model).
+
+```rust,ignore
+// 0.7.1
+let generator = SpeechGenerator::new("fishaudio::s2-pro")?;
+let previews = generator
+    .design_voice(description, Some("Welcome back."), 2)
+    .await?;
+
+// 0.7.2
+let provider = speech_provider("fishaudio", "s2-pro")
+    .with_design_model("voice-design-1") // ElevenLabs: "eleven_ttv_v3"
+    .build()?;
+let generator = SpeechGenerator::new(provider);
+let previews = generator
+    .design_voice(description)
+    .with_text("Welcome back.")
+    .with_count(2)
+    .await?;
+```
+
+### Listing models
+
+`provider::list_models(name)` is gone. `SpeechProviderKind::known_models()` lists the models this
+crate knows, without a request; `SpeechGenerator::list_models()` asks the API. `AudioModel` lost its
+`model` field (use `id`), `name` is a `String`, and it says what the model can do with `speech`,
+`dialogue` and `voice_design`.
+
+```rust,ignore
+// 0.7.1
+for model in agentai_audio::provider::list_models("elevenlabs").await? {
+    println!("{}", model.model);
+}
+
+// 0.7.2
+for model in SpeechProviderKind::ElevenLabs.known_models() {
+    println!("{} {}", model.id, model.name);
+}
+```
+
+### `VoiceInfo` says where a voice comes from
+
+`VoiceInfo::cloned` is replaced by `origin`, a `VoiceOrigin`: `Preset` (a built-in voice),
+`Account` (a voice of your account on the provider's server) or `Store` (a voice of the
+`VoiceStore`). Fish Audio lists both its account voices and its store voices, so `origin` tells
+them apart. `VoiceInfo::new` takes the origin, and the `list_voices` tool reports it as `"origin"`
+instead of `"cloned"`. The new `preview` holds a recording to play, when there is one.
+
+```rust,ignore
+// 0.7.1
+let custom: Vec<_> = voices.iter().filter(|v| v.cloned).collect();
+let allowed = VoiceInfo::new("alloy", "Alloy");
+
+// 0.7.2
+let stored: Vec<_> = voices.iter().filter(|v| v.origin == VoiceOrigin::Store).collect();
+let allowed = VoiceInfo::new("alloy", "Alloy", VoiceOrigin::Preset);
+```
+
+### Custom providers
+
+`SpeechProvider::generate` takes `&SpeechRequest<'_>` and reads it with getters (`text()`,
+`voice()`, `model()`, ...); `design_voice` takes a `&DesignVoiceRequest<'_>`. `SpeechProvider::model`
+is gone: use `request.model()` and fall back to your own model.
+
+```rust,ignore
+// 0.7.1
+async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+    let text = request.text;
+    ...
+}
+
+// 0.7.2
+async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError> {
+    let text = request.text();
+    let model = request.model().unwrap_or(&self.model);
+    ...
+}
+```
 
 ## 0.7.0 → 0.7.1 (2026-11-18)
 

@@ -1,7 +1,9 @@
 //! Agent tools (feature `toolbox`): [`SpeechToolBox`].
 
 use crate::generator::SpeechGenerator;
-use crate::provider::{AudioError, SpeechRequest, SpeechResponse, Voice, VoiceInfo};
+#[cfg(test)]
+use crate::provider::VoiceOrigin;
+use crate::provider::{AudioError, SpeechResponse, VoiceId, VoiceInfo};
 use agentai::tool::{Tool, ToolBox, ToolError, ToolOutput, ToolResult, toolbox};
 use agentai_core::storage::MediaStorage;
 use serde::Serialize;
@@ -32,11 +34,12 @@ pub enum SpeechToolOutput {
 /// the provider.
 ///
 /// ```rust,no_run
-/// # use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice};
+/// # use agentai_audio::provider::openai::OpenAiSpeechProvider;
+/// # use agentai_audio::{SpeechGenerator, SpeechToolBox};
 /// # use agentai_audio::storage::MemoryStorage;
 /// # fn main() -> Result<(), agentai_audio::AudioError> {
-/// let generator = SpeechGenerator::new("openai::gpt-4o-mini-tts")?
-///     .with_default_voice(Voice::id("alloy"));
+/// let generator =
+///     SpeechGenerator::from_provider(OpenAiSpeechProvider::from_env("gpt-4o-mini-tts")?);
 /// let speech = SpeechToolBox::new(generator, MemoryStorage::new());
 /// # Ok(())
 /// # }
@@ -72,15 +75,15 @@ impl SpeechToolBox {
     }
 
     /// The voice for what the model wrote in `voice`.
-    fn voice(&self, voice: Option<&str>) -> ToolResult<Option<Voice>> {
+    fn voice(&self, voice: Option<&str>) -> ToolResult<Option<VoiceId>> {
         let Some(voice) = voice.map(str::trim).filter(|v| !v.is_empty()) else {
             return Ok(None);
         };
         let Some(voices) = &self.voices else {
-            return Ok(Some(Voice::id(voice)));
+            return Ok(Some(voice.to_string()));
         };
         if voices.iter().any(|v| v.id == voice) {
-            Ok(Some(Voice::id(voice)))
+            Ok(Some(voice.to_string()))
         } else {
             Err(ToolError::Failed(format!(
                 "'{voice}' is not a known voice ID; pick one from `list_voices`"
@@ -95,7 +98,7 @@ impl SpeechToolBox {
                     id: response.id.as_deref(),
                     content_type: &response.audio.content_type,
                     bytes: response.audio.byte_len(),
-                    model: self.generator.model(),
+                    model: response.model.as_deref(),
                     voice,
                     sample_rate: response.sample_rate,
                 };
@@ -124,25 +127,21 @@ impl SpeechToolBox {
         /// Short file name for the new audio, for example `greeting`. The storage may add to it
         /// to make the ID unique.
         name: String,
-        /// A voice ID from `list_voices`. Leave it out for the default voice.
+        /// A voice ID from `list_voices`. Leave it out for the provider's own voice.
         voice: Option<String>,
         /// How to speak, for example the tone, pace or emotion. Leave it out when not needed.
         instructions: Option<String>,
     ) -> ToolResult<ToolOutput> {
-        let voice_text = voice.as_deref().map(str::trim).filter(|v| !v.is_empty());
-        let mut request = SpeechRequest::new(text).with_name(name);
-        if let Some(voice) = self.voice(voice.as_deref())? {
-            request = request.with_voice(voice);
+        let mut request = self.generator.generate(text).with_name(name);
+        let voice = self.voice(voice.as_deref())?;
+        if let Some(voice) = &voice {
+            request = request.with_voice(voice.clone());
         }
         if let Some(instructions) = instructions.filter(|i| !i.trim().is_empty()) {
             request = request.with_instructions(instructions);
         }
-        let response = self
-            .generator
-            .generate_with(request)
-            .await
-            .map_err(tool_error)?;
-        self.output(response, voice_text)
+        let response = request.await.map_err(tool_error)?;
+        self.output(response, voice.as_deref())
     }
 
     /// Lists the voices you can use in `generate_speech`.
@@ -289,7 +288,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_blank_voice_means_the_default() {
+    async fn a_blank_voice_sends_no_voice() {
         let blanks = [
             json!({"text": "hi", "name": "x", "voice": ""}),
             json!({"text": "hi", "name": "x", "voice": "   "}),
@@ -298,30 +297,28 @@ mod tests {
         ];
         for arguments in blanks {
             let http = MockHttp::new(vec![audio()]);
-            let generator = SpeechGenerator::from_provider(official(&http))
-                .with_default_voice(Voice::id("nova"));
-            let toolbox = SpeechToolBox::new(generator, MemoryStorage::new());
+            let provider =
+                OmlxProvider::new("m", "", "http://local/v1").with_client(Arc::new(http.clone()));
 
-            toolbox
+            toolbox(provider)
                 .call_tool(&tool_call("generate_speech", arguments.clone()))
                 .await
                 .unwrap();
 
-            assert_eq!(
-                body_json(&http.request(0))["voice"],
-                json!("nova"),
-                "{arguments}"
-            );
+            let body = body_json(&http.request(0));
+            assert!(body.get("voice").is_none(), "{arguments}");
+            assert!(body.get("ref_audio").is_none(), "{arguments}");
         }
     }
 
     #[tokio::test]
     async fn a_listed_voice_is_sent() {
         let http = MockHttp::new(vec![audio()]);
-        let generator =
-            SpeechGenerator::from_provider(official(&http)).with_default_voice(Voice::id("nova"));
-        let toolbox = SpeechToolBox::new(generator, MemoryStorage::new())
-            .with_voices(vec![VoiceInfo::new("voice_ok", "OK")]);
+        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "voice_ok",
+            "OK",
+            VoiceOrigin::Preset,
+        )]);
 
         toolbox
             .call_tool(&tool_call(
@@ -340,7 +337,11 @@ mod tests {
     #[tokio::test]
     async fn an_unlisted_voice_fails() {
         let http = MockHttp::new(vec![]);
-        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("alloy", "Alloy")]);
+        let toolbox = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "alloy",
+            "Alloy",
+            VoiceOrigin::Preset,
+        )]);
 
         let result = toolbox
             .call_tool(&tool_call(
@@ -391,10 +392,7 @@ mod tests {
             401,
             json!({"error": {"message": "bad"}}),
         )]);
-        let generator =
-            SpeechGenerator::from_provider(official(&http)).with_default_voice(Voice::id("nova"));
-        let toolbox = SpeechToolBox::new(generator, MemoryStorage::new());
-        let result = toolbox
+        let result = toolbox(official(&http))
             .call_tool(&tool_call(
                 "generate_speech",
                 json!({"text": "hi", "name": "x", "voice": "nova"}),
@@ -402,19 +400,14 @@ mod tests {
             .await;
         assert!(matches!(result, Err(ToolError::Configuration(_))));
 
-        let no_default = toolbox_without_default();
-        let result = no_default
+        let without_voice = toolbox(official(&MockHttp::new(vec![])));
+        let result = without_voice
             .call_tool(&tool_call(
                 "generate_speech",
                 json!({"text": "hi", "name": "x"}),
             ))
             .await;
         assert!(matches!(result, Err(ToolError::Failed(_))));
-    }
-
-    fn toolbox_without_default() -> SpeechToolBox {
-        let http = MockHttp::new(vec![]);
-        toolbox(official(&http))
     }
 
     #[tokio::test]
@@ -425,7 +418,11 @@ mod tests {
         let json = text_json(&output);
         assert_eq!(json["voices"].as_array().unwrap().len(), 13);
 
-        let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new("a", "A")]);
+        let own = toolbox(official(&http)).with_voices(vec![VoiceInfo::new(
+            "a",
+            "A",
+            VoiceOrigin::Preset,
+        )]);
         let output = call_done(&own, "list_voices", json!({})).await;
         let voices = text_json(&output)["voices"].clone();
         assert_eq!(voices.as_array().unwrap().len(), 1);

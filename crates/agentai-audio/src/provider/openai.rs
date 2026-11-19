@@ -9,9 +9,10 @@
 //! OpenAI shuts down these models on 2027-01-06.
 
 use super::{
-    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, audio_media,
+    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
+    VoiceInfo, VoiceOrigin, audio_media, known_capabilities,
 };
+use crate::request::SpeechRequest;
 use agentai_core::{HttpClient, HttpRequest, ReqwestClient};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ const NEWER_PRESETS: [&str; 4] = ["ballad", "verse", "marin", "cedar"];
 /// ```
 #[derive(Clone)]
 pub struct OpenAiSpeechProvider {
-    model: String,
+    speech_model: String,
     api_key: String,
     base_url: String,
     client: Arc<dyn HttpClient>,
@@ -55,37 +56,37 @@ pub struct OpenAiSpeechProvider {
 impl std::fmt::Debug for OpenAiSpeechProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenAiSpeechProvider")
-            .field("model", &self.model)
+            .field("speech_model", &self.speech_model)
             .field("base_url", &self.base_url)
             .finish_non_exhaustive()
     }
 }
 
 impl OpenAiSpeechProvider {
-    /// Creates a provider for `model` with the API key and base URL given in code, for example
-    /// [`DEFAULT_BASE_URL`]. An empty key sends no `Authorization` header.
+    /// Creates a provider for `speech_model` with the API key and base URL given in code, for
+    /// example [`DEFAULT_BASE_URL`]. An empty key sends no `Authorization` header.
     pub fn new(
-        model: impl Into<String>,
+        speech_model: impl Into<String>,
         api_key: impl Into<String>,
         base_url: impl Into<String>,
     ) -> Self {
         Self {
-            model: model.into(),
+            speech_model: speech_model.into(),
             api_key: api_key.into(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             client: Arc::new(ReqwestClient::new()),
         }
     }
 
-    /// Creates a provider for `model` with the API key from `OPENAI_API_KEY` and the base URL
-    /// from `OPENAI_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set. The key may be left
-    /// out when `OPENAI_BASE_URL` is set, for local servers without authentication.
-    pub fn from_env(model: impl Into<String>) -> Result<Self, AudioError> {
-        Self::from_lookup(model, |name| std::env::var(name).ok())
+    /// Creates a provider for `speech_model` with the API key from `OPENAI_API_KEY` and the
+    /// base URL from `OPENAI_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set. The key may
+    /// be left out when `OPENAI_BASE_URL` is set, for local servers without authentication.
+    pub fn from_env(speech_model: impl Into<String>) -> Result<Self, AudioError> {
+        Self::from_lookup(speech_model, |name| std::env::var(name).ok())
     }
 
-    fn from_lookup(
-        model: impl Into<String>,
+    pub(crate) fn from_lookup(
+        speech_model: impl Into<String>,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, AudioError> {
         let base_url = lookup(BASE_URL_ENV);
@@ -95,7 +96,7 @@ impl OpenAiSpeechProvider {
             (None, None) => return Err(AudioError::MissingApiKey(API_KEY_ENV)),
         };
         let base_url = base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-        Ok(Self::new(model, api_key, base_url))
+        Ok(Self::new(speech_model, api_key, base_url))
     }
 
     #[cfg(test)]
@@ -108,42 +109,28 @@ impl OpenAiSpeechProvider {
         self.base_url == DEFAULT_BASE_URL
     }
 
-    fn is_tts1(&self) -> bool {
-        self.model.starts_with("tts-1")
-    }
-
-    fn presets(&self) -> impl Iterator<Item = &'static str> {
-        let newer: &[&str] = if self.is_tts1() { &[] } else { &NEWER_PRESETS };
-        PRESETS.into_iter().chain(newer.iter().copied())
-    }
-
-    /// The preset named `name`, in any case.
-    fn preset(&self, name: &str) -> Option<&'static str> {
-        self.presets().find(|p| p.eq_ignore_ascii_case(name))
-    }
-
-    /// The voice field for an ID.
-    fn id_voice(&self, voice: &Voice) -> WireVoice {
-        let Voice::Id(id) = voice;
+    /// The voice field for an ID, with `model`.
+    fn id_voice(&self, model: &str, id: &str) -> WireVoice {
         if !self.official() {
-            WireVoice::Name(id.clone())
-        } else if let Some(preset) = self.preset(id) {
+            WireVoice::Name(id.to_string())
+        } else if let Some(preset) = presets(model).find(|p| p.eq_ignore_ascii_case(id)) {
             WireVoice::Name(preset.to_string())
         } else if id.starts_with("voice_") {
-            WireVoice::Custom { id: id.clone() }
+            WireVoice::Custom { id: id.to_string() }
         } else {
-            WireVoice::Name(id.clone())
+            WireVoice::Name(id.to_string())
         }
     }
+}
 
-    /// The voice field and the instructions of a request.
-    fn resolve(&self, request: &SpeechRequest) -> Result<(WireVoice, Option<String>), AudioError> {
-        let voice = request
-            .request_voice()?
-            .or(request.default_voice.as_ref())
-            .ok_or(AudioError::MissingVoice)?;
-        Ok((self.id_voice(voice), request.instructions.clone()))
-    }
+/// The presets of a model.
+fn presets(model: &str) -> impl Iterator<Item = &'static str> {
+    let newer: &[&str] = if model.starts_with("tts-1") {
+        &[]
+    } else {
+        &NEWER_PRESETS
+    };
+    PRESETS.into_iter().chain(newer.iter().copied())
 }
 
 #[derive(Serialize)]
@@ -159,7 +146,7 @@ struct SpeechBody<'a> {
     input: &'a str,
     voice: WireVoice,
     #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<String>,
+    instructions: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,29 +166,25 @@ fn format_name(format: AudioFormat) -> &'static str {
 
 #[async_trait]
 impl SpeechProvider for OpenAiSpeechProvider {
-    fn model(&self) -> Option<&str> {
-        Some(&self.model)
-    }
-
-    async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+    async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError> {
         request.without_timestamps()?;
-        let (voice, instructions) = self.resolve(&request)?;
+        let model = request.model().unwrap_or(&self.speech_model);
+        let voice = request.voice().ok_or(AudioError::MissingVoice)?;
         let body = SpeechBody {
-            model: &self.model,
-            input: &request.text,
-            voice,
-            instructions,
-            response_format: request.format.map(format_name),
-            speed: request.speed,
+            model,
+            input: request.text(),
+            voice: self.id_voice(model, voice),
+            instructions: request.instructions(),
+            response_format: request.format().map(format_name),
+            speed: request.speed(),
         };
         let http = HttpRequest::post(format!("{}/audio/speech", self.base_url))
             .with_json(&body)?
             .with_bearer_token(&self.api_key);
         let response = self.client.send(http).await?.error_for_status()?;
-        let format = request.format.unwrap_or(AudioFormat::Mp3);
-        let mut audio = audio_media(&response, format.content_type())?;
-        audio.name = request.name;
-        let mut result = SpeechResponse::new(audio);
+        let format = request.format().unwrap_or(AudioFormat::Mp3);
+        let audio = audio_media(&response, format.content_type())?;
+        let mut result = SpeechResponse::new(audio).with_model(model);
         if format == AudioFormat::Pcm {
             result = result.with_sample_rate(24000);
         }
@@ -216,7 +199,9 @@ impl SpeechProvider for OpenAiSpeechProvider {
                 "listing voices of a compatible server",
             ));
         }
-        Ok(self.presets().map(|p| VoiceInfo::new(p, p)).collect())
+        Ok(presets(&self.speech_model)
+            .map(|p| VoiceInfo::new(p, p, VoiceOrigin::Preset))
+            .collect())
     }
 
     /// Lists the models of `GET /models`. On the OpenAI API only speech models (`tts-1*`,
@@ -237,7 +222,10 @@ impl SpeechProvider for OpenAiSpeechProvider {
                     || entry.id.starts_with("tts-1")
                     || entry.id.starts_with("gpt-4o-mini-tts")
             })
-            .map(|entry| AudioModel::new(format!("openai::{}", entry.id), entry.id))
+            .map(|entry| {
+                let name = entry.id.clone();
+                known_capabilities(SpeechProviderKind::OpenAi, AudioModel::new(entry.id, name))
+            })
             .collect())
     }
 }
@@ -256,7 +244,8 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{AudioFormat, SpeechRequest, Voice};
+    use crate::SpeechGenerator;
+    use crate::provider::AudioFormat;
     use agentai_core::HttpResponse;
     use agentai_core::mock::{MockHttp, body_json, json_response};
     use serde_json::json;
@@ -285,8 +274,9 @@ mod tests {
     #[tokio::test]
     async fn generate_sends_only_what_is_set() {
         let http = MockHttp::new(vec![audio()]);
-        let r = official(&http)
-            .generate(SpeechRequest::new("hi").with_voice(Voice::id("alloy")))
+        let r = SpeechGenerator::from_provider(official(&http))
+            .generate("hi")
+            .with_voice("alloy")
             .await
             .unwrap();
         assert_eq!(
@@ -299,14 +289,16 @@ mod tests {
         );
         assert_eq!(r.audio.content_type, "audio/mpeg");
         assert_eq!(r.sample_rate, None);
+        assert_eq!(r.model.as_deref(), Some("gpt-4o-mini-tts"));
     }
 
     #[tokio::test]
     async fn format_and_pcm_rate() {
         let http = MockHttp::new(vec![audio()]);
-        let req = SpeechRequest::new("hi").with_voice(Voice::id("alloy"));
-        let r = official(&http)
-            .generate(req.with_format(AudioFormat::Pcm))
+        let r = SpeechGenerator::from_provider(official(&http))
+            .generate("hi")
+            .with_voice("alloy")
+            .with_format(AudioFormat::Pcm)
             .await
             .unwrap();
         assert_eq!(body_json(&http.request(0))["response_format"], json!("pcm"));
@@ -317,66 +309,44 @@ mod tests {
     async fn voice_body(
         provider: OpenAiSpeechProvider,
         http: &MockHttp,
-        request: SpeechRequest,
+        voice: &str,
     ) -> serde_json::Value {
-        provider.generate(request).await.unwrap();
+        SpeechGenerator::from_provider(provider)
+            .generate("hi")
+            .with_voice(voice)
+            .await
+            .unwrap();
         body_json(&http.request(0))
     }
 
     #[tokio::test]
     async fn custom_voice_id_is_an_object() {
         let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi").with_voice(Voice::id("voice_123")),
-        )
-        .await;
+        let body = voice_body(official(&http), &http, "voice_123").await;
         assert_eq!(body["voice"], json!({"id": "voice_123"}));
     }
 
     #[tokio::test]
     async fn only_voice_prefixed_ids_are_objects() {
         let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi").with_voice(Voice::id("custom-name")),
-        )
-        .await;
+        let body = voice_body(official(&http), &http, "custom-name").await;
         assert_eq!(body["voice"], json!("custom-name"));
     }
 
     #[tokio::test]
     async fn missing_voice_cases() {
         let http = MockHttp::new(vec![]);
-        let provider = official(&http);
-        let err = provider.generate(SpeechRequest::new("hi")).await;
+        let err = SpeechGenerator::from_provider(official(&http))
+            .generate("hi")
+            .await;
         assert!(matches!(err, Err(AudioError::MissingVoice)));
         assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
-    async fn default_voice_is_used_without_a_voice() {
-        let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            official(&http),
-            &http,
-            SpeechRequest::new("hi").with_default_voice(Voice::id("nova")),
-        )
-        .await;
-        assert_eq!(body["voice"], json!("nova"));
-    }
-
-    #[tokio::test]
     async fn compatible_servers_take_any_id() {
         let http = MockHttp::new(vec![audio()]);
-        let body = voice_body(
-            compatible(&http),
-            &http,
-            SpeechRequest::new("hi").with_voice(Voice::id("af_bella")),
-        )
-        .await;
+        let body = voice_body(compatible(&http), &http, "af_bella").await;
         assert_eq!(body["voice"], json!("af_bella"));
         assert_eq!(http.request(0).url, "http://local/v1/audio/speech");
     }
@@ -399,8 +369,8 @@ mod tests {
             json!({"data": [{"id": "gpt-4o"}, {"id": "tts-1"}, {"id": "gpt-4o-mini-tts"}]}),
         )]);
         let models = official(&http).list_models().await.unwrap();
-        let names: Vec<_> = models.iter().map(|m| m.model.as_str()).collect();
-        assert_eq!(names, ["openai::tts-1", "openai::gpt-4o-mini-tts"]);
+        let names: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(names, ["tts-1", "gpt-4o-mini-tts"]);
         assert_eq!(http.request(0).url, "https://api.openai.com/v1/models");
     }
 }

@@ -4,12 +4,19 @@
 //! with `POST /v1/voices/add` and lists voices and models. It designs voices from a description
 //! with `POST /v1/text-to-voice/design` and saves a chosen preview with `POST /v1/text-to-voice`.
 //!
+//! Voice design needs a design model, set with
+//! [`with_design_model`](ElevenLabsProvider::with_design_model), for example `eleven_ttv_v3`.
+//!
+//! Dialogues go to `POST /v1/text-to-dialogue` and need a dialogue model, set with
+//! [`with_dialogue_model`](ElevenLabsProvider::with_dialogue_model), for example `eleven_v3`.
+//!
 //! Fields without an equivalent are not sent: `instructions` is ignored.
 
 use super::{
-    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechRequest, SpeechResponse, Voice,
-    VoiceInfo, VoicePreview, VoiceSource, audio_media,
+    AudioError, AudioFormat, AudioModel, SpeechProvider, SpeechProviderKind, SpeechResponse,
+    VoiceId, VoiceInfo, VoiceOrigin, VoicePreview, VoiceSource, audio_media, known_capabilities,
 };
+use crate::request::{DesignVoiceRequest, DialogueRequest, SpeechRequest};
 use agentai_core::message::Media;
 use agentai_core::{HttpClient, HttpRequest, Multipart, ReqwestClient, percent_encode};
 use async_trait::async_trait;
@@ -41,7 +48,9 @@ pub const BASE_URL_ENV: &str = "ELEVENLABS_BASE_URL";
 /// ```
 #[derive(Clone)]
 pub struct ElevenLabsProvider {
-    model: String,
+    speech_model: String,
+    dialogue_model: Option<String>,
+    design_model: Option<String>,
     api_key: String,
     base_url: String,
     output_format: Option<String>,
@@ -51,22 +60,26 @@ pub struct ElevenLabsProvider {
 impl std::fmt::Debug for ElevenLabsProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ElevenLabsProvider")
-            .field("model", &self.model)
+            .field("speech_model", &self.speech_model)
+            .field("dialogue_model", &self.dialogue_model)
+            .field("design_model", &self.design_model)
             .field("base_url", &self.base_url)
             .finish_non_exhaustive()
     }
 }
 
 impl ElevenLabsProvider {
-    /// Creates a provider for `model` with the API key and base URL given in code, for example
-    /// [`DEFAULT_BASE_URL`].
+    /// Creates a provider for `speech_model` with the API key and base URL given in code, for
+    /// example [`DEFAULT_BASE_URL`].
     pub fn new(
-        model: impl Into<String>,
+        speech_model: impl Into<String>,
         api_key: impl Into<String>,
         base_url: impl Into<String>,
     ) -> Self {
         Self {
-            model: model.into(),
+            speech_model: speech_model.into(),
+            dialogue_model: None,
+            design_model: None,
             api_key: api_key.into(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             output_format: None,
@@ -74,19 +87,32 @@ impl ElevenLabsProvider {
         }
     }
 
-    /// Creates a provider for `model` with the API key from `ELEVENLABS_API_KEY` and the base
-    /// URL from `ELEVENLABS_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set.
-    pub fn from_env(model: impl Into<String>) -> Result<Self, AudioError> {
-        Self::from_lookup(model, |name| std::env::var(name).ok())
+    /// Creates a provider for `speech_model` with the API key from `ELEVENLABS_API_KEY` and the
+    /// base URL from `ELEVENLABS_BASE_URL`, or [`DEFAULT_BASE_URL`] when it is not set.
+    pub fn from_env(speech_model: impl Into<String>) -> Result<Self, AudioError> {
+        Self::from_lookup(speech_model, |name| std::env::var(name).ok())
     }
 
-    fn from_lookup(
-        model: impl Into<String>,
+    pub(crate) fn from_lookup(
+        speech_model: impl Into<String>,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, AudioError> {
         let api_key = lookup(API_KEY_ENV).ok_or(AudioError::MissingApiKey(API_KEY_ENV))?;
         let base_url = lookup(BASE_URL_ENV).unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-        Ok(Self::new(model, api_key, base_url))
+        Ok(Self::new(speech_model, api_key, base_url))
+    }
+
+    /// Sets the model of dialogues, for example `eleven_v3`.
+    pub fn with_dialogue_model(mut self, model: impl Into<String>) -> Self {
+        self.dialogue_model = Some(model.into());
+        self
+    }
+
+    /// Sets the model of voice design, for example `eleven_ttv_v3`. Without it voice design is
+    /// off.
+    pub fn with_design_model(mut self, model: impl Into<String>) -> Self {
+        self.design_model = Some(model.into());
+        self
     }
 
     /// Sets the `output_format` of the API, for example `pcm_16000`. It wins over the format of
@@ -110,10 +136,36 @@ impl ElevenLabsProvider {
         request.with_header("xi-api-key", self.api_key.as_str())
     }
 
-    /// The path segment of the voice: the request voice, else the default voice.
-    fn voice_id<'a>(&self, request: &'a SpeechRequest) -> Result<&'a str, AudioError> {
-        let voice = request.single_voice()?.ok_or(AudioError::MissingVoice)?;
-        let Voice::Id(id) = voice;
+    /// The `output_format` to send: the provider's own wins over the format of the request.
+    fn output_format_of(&self, format: Option<AudioFormat>) -> Result<Option<&str>, AudioError> {
+        match (&self.output_format, format) {
+            (Some(over), _) => Ok(Some(over.as_str())),
+            (None, Some(format)) => output_format_for(format).map(Some),
+            (None, None) => Ok(None),
+        }
+    }
+
+    async fn send_audio(
+        &self,
+        url: String,
+        body: &impl Serialize,
+        output_format: Option<&str>,
+        model: &str,
+    ) -> Result<SpeechResponse, AudioError> {
+        let http = self.authorize(HttpRequest::post(url).with_json(body)?);
+        let response = self.client.send(http).await?.error_for_status()?;
+        let content_type = output_format.map_or("audio/mpeg", content_type_of);
+        let audio = audio_media(&response, content_type)?;
+        let mut result = SpeechResponse::new(audio).with_model(model);
+        if let Some(rate) = output_format.and_then(pcm_sample_rate) {
+            result = result.with_sample_rate(rate);
+        }
+        Ok(result)
+    }
+
+    /// The path segment of the voice of a request.
+    fn voice_id<'a>(&self, request: &'a SpeechRequest<'_>) -> Result<&'a str, AudioError> {
+        let id = request.voice().ok_or(AudioError::MissingVoice)?;
         let safe = !id.is_empty()
             && id
                 .bytes()
@@ -169,45 +221,81 @@ struct SpeechBody<'a> {
 }
 
 #[derive(Serialize)]
+struct DialogueBody<'a> {
+    inputs: Vec<DialogueInput<'a>>,
+    model_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language_code: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct DialogueInput<'a> {
+    text: &'a str,
+    voice_id: &'a str,
+}
+
+#[derive(Serialize)]
 struct VoiceSettings {
     speed: f64,
 }
 
 #[async_trait]
 impl SpeechProvider for ElevenLabsProvider {
-    fn model(&self) -> Option<&str> {
-        Some(&self.model)
-    }
-
-    async fn generate(&self, request: SpeechRequest) -> Result<SpeechResponse, AudioError> {
+    async fn generate(&self, request: &SpeechRequest<'_>) -> Result<SpeechResponse, AudioError> {
         request.without_timestamps()?;
-        let voice = self.voice_id(&request)?;
-        let output_format = match (&self.output_format, request.format) {
-            (Some(over), _) => Some(over.as_str()),
-            (None, Some(format)) => Some(output_format_for(format)?),
-            (None, None) => None,
-        };
+        let model = request.model().unwrap_or(&self.speech_model);
+        let voice = self.voice_id(request)?;
+        let output_format = self.output_format_of(request.format())?;
         let mut url = format!("{}/v1/text-to-speech/{voice}", self.base_url);
         if let Some(output_format) = output_format {
             url.push_str("?output_format=");
             url.push_str(&percent_encode(output_format));
         }
         let body = SpeechBody {
-            text: &request.text,
-            model_id: &self.model,
-            language_code: request.language.as_deref(),
-            voice_settings: request.speed.map(|speed| VoiceSettings { speed }),
+            text: request.text(),
+            model_id: model,
+            language_code: request.language(),
+            voice_settings: request.speed().map(|speed| VoiceSettings { speed }),
         };
-        let http = self.authorize(HttpRequest::post(url).with_json(&body)?);
-        let response = self.client.send(http).await?.error_for_status()?;
-        let content_type = output_format.map_or("audio/mpeg", content_type_of);
-        let mut audio = audio_media(&response, content_type)?;
-        audio.name = request.name;
-        let mut result = SpeechResponse::new(audio);
-        if let Some(rate) = output_format.and_then(pcm_sample_rate) {
-            result = result.with_sample_rate(rate);
+        self.send_audio(url, &body, output_format, model).await
+    }
+
+    fn supports_dialogue(&self) -> bool {
+        self.dialogue_model.is_some()
+    }
+
+    /// Speaks the turns with `POST /v1/text-to-dialogue`, one input per turn with the voice
+    /// ID of its speaker. Timestamps are not supported.
+    async fn generate_dialogue(
+        &self,
+        request: &DialogueRequest<'_>,
+    ) -> Result<SpeechResponse, AudioError> {
+        let default_model = self
+            .dialogue_model
+            .as_deref()
+            .ok_or(AudioError::MissingModel("dialogue"))?;
+        request.without_timestamps()?;
+        let model = request.model().unwrap_or(default_model);
+        let output_format = self.output_format_of(request.format())?;
+        let mut url = format!("{}/v1/text-to-dialogue", self.base_url);
+        if let Some(output_format) = output_format {
+            url.push_str("?output_format=");
+            url.push_str(&percent_encode(output_format));
         }
-        Ok(result)
+        let inputs = request
+            .turns()
+            .iter()
+            .map(|(speaker, text)| DialogueInput {
+                text,
+                voice_id: &request.voices()[*speaker],
+            })
+            .collect();
+        let body = DialogueBody {
+            inputs,
+            model_id: model,
+            language_code: request.language(),
+        };
+        self.send_audio(url, &body, output_format, model).await
     }
 
     fn supports_voice_cloning(&self) -> bool {
@@ -215,7 +303,7 @@ impl SpeechProvider for ElevenLabsProvider {
     }
 
     fn supports_voice_design(&self) -> bool {
-        true
+        self.design_model.is_some()
     }
 
     /// Designs voices with `POST /v1/text-to-voice/design`. The API picks the number of
@@ -223,12 +311,17 @@ impl SpeechProvider for ElevenLabsProvider {
     /// preview by passing its `sample_id` to `create_voice`.
     async fn design_voice(
         &self,
-        description: &str,
-        text: Option<&str>,
-        _count: usize,
+        request: &DesignVoiceRequest<'_>,
     ) -> Result<Vec<VoicePreview>, AudioError> {
+        let model = self
+            .design_model
+            .as_deref()
+            .ok_or(AudioError::MissingModel("voice design"))?;
+        let model = request.model().unwrap_or(model);
+        let text = request.text();
         let body = DesignBody {
-            voice_description: description,
+            voice_description: request.description(),
+            model_id: model,
             text,
             auto_generate_text: text.is_none().then_some(true),
         };
@@ -269,7 +362,7 @@ impl SpeechProvider for ElevenLabsProvider {
         name: &str,
         source: VoiceSource,
         description: Option<&str>,
-    ) -> Result<String, AudioError> {
+    ) -> Result<VoiceId, AudioError> {
         let samples = match source {
             VoiceSource::Samples { samples, .. } => samples,
             VoiceSource::SampleId(generated_voice_id) => {
@@ -337,12 +430,16 @@ impl SpeechProvider for ElevenLabsProvider {
                 .json()
                 .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
             voices.extend(page.voices.into_iter().map(|voice| {
-                let info = VoiceInfo::new(voice.voice_id, voice.name)
-                    .with_cloned(voice.category.as_deref() == Some("cloned"));
-                match voice.description {
-                    Some(description) => info.with_description(description),
-                    None => info,
-                }
+                let origin = match voice.category.as_deref() {
+                    Some("premade") => VoiceOrigin::Preset,
+                    _ => VoiceOrigin::Account,
+                };
+                let mut info = VoiceInfo::new(voice.voice_id, voice.name, origin);
+                info.description = voice.description;
+                info.preview = voice
+                    .preview_url
+                    .map(|url| Media::from_url("audio/mpeg", url));
+                info
             }));
             match page.next_page_token {
                 Some(next) if page.has_more && token.as_ref() != Some(&next) => token = Some(next),
@@ -365,11 +462,10 @@ impl SpeechProvider for ElevenLabsProvider {
             .into_iter()
             .filter(|model| model.can_do_text_to_speech)
             .map(|entry| {
-                let mut model =
-                    AudioModel::new(format!("elevenlabs::{}", entry.model_id), entry.model_id);
-                model.name = entry.name;
+                let name = entry.name.unwrap_or_else(|| entry.model_id.clone());
+                let mut model = AudioModel::new(entry.model_id, name);
                 model.description = entry.description;
-                model
+                known_capabilities(SpeechProviderKind::ElevenLabs, model)
             })
             .collect())
     }
@@ -378,6 +474,7 @@ impl SpeechProvider for ElevenLabsProvider {
 #[derive(Serialize)]
 struct DesignBody<'a> {
     voice_description: &'a str,
+    model_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -426,6 +523,7 @@ struct VoiceEntry {
     name: String,
     category: Option<String>,
     description: Option<String>,
+    preview_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -440,6 +538,8 @@ struct ModelEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SpeechGenerator;
+    use crate::request::DialogueTurn;
     use agentai_core::HttpResponse;
     use agentai_core::message::Media;
     use agentai_core::mock::{MockHttp, body_json, json_response};
@@ -450,20 +550,91 @@ mod tests {
             .with_client(Arc::new(http.clone()))
     }
 
+    fn designer(http: &MockHttp) -> ElevenLabsProvider {
+        provider(http).with_design_model("eleven_ttv_v3")
+    }
+
     fn audio() -> HttpResponse {
         HttpResponse::new(200, b"audio".to_vec())
+    }
+
+    fn dialogue_provider(http: &MockHttp) -> ElevenLabsProvider {
+        provider(http).with_dialogue_model("eleven_v3")
+    }
+
+    #[tokio::test]
+    async fn a_dialogue_posts_inputs_in_turn_order() {
+        let http = MockHttp::new(vec![audio()]);
+        let r = SpeechGenerator::from_provider(dialogue_provider(&http))
+            .generate_dialogue([
+                DialogueTurn::new("a", "Hi"),
+                DialogueTurn::new("b", "Hello"),
+                DialogueTurn::new("a", "Bye"),
+            ])
+            .with_format(AudioFormat::Pcm)
+            .with_language("pl")
+            .await
+            .unwrap();
+        let req = http.request(0);
+        assert_eq!(
+            req.url,
+            "https://api.test/v1/text-to-dialogue?output_format=pcm_24000"
+        );
+        assert_eq!(req.header("xi-api-key"), Some("key"));
+        assert_eq!(
+            body_json(&req),
+            json!({
+                "inputs": [{"text": "Hi", "voice_id": "a"}, {"text": "Hello", "voice_id": "b"},
+                           {"text": "Bye", "voice_id": "a"}],
+                "model_id": "eleven_v3", "language_code": "pl"
+            })
+        );
+        assert_eq!(r.sample_rate, Some(24000));
+        assert_eq!(r.model.as_deref(), Some("eleven_v3"));
+    }
+
+    #[tokio::test]
+    async fn the_provider_output_format_wins_for_dialogues() {
+        let http = MockHttp::new(vec![audio()]);
+        SpeechGenerator::from_provider(dialogue_provider(&http).with_output_format("mp3_22050_32"))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .with_format(AudioFormat::Wav)
+            .await
+            .unwrap();
+        assert!(http.request(0).url.ends_with("?output_format=mp3_22050_32"));
+    }
+
+    #[tokio::test]
+    async fn a_dialogue_without_a_dialogue_model_or_with_timestamps_sends_nothing() {
+        let http = MockHttp::new(vec![]);
+        let err = SpeechGenerator::from_provider(provider(&http))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::MissingModel("dialogue")));
+        let err = SpeechGenerator::from_provider(provider(&http))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .with_model("eleven_v3")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::MissingModel("dialogue")));
+        let err = SpeechGenerator::from_provider(dialogue_provider(&http))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .with_timestamps(true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Unsupported(_)));
+        assert_eq!(http.request_count(), 0);
     }
 
     #[tokio::test]
     async fn generate_posts_to_the_voice_path() {
         let http = MockHttp::new(vec![audio()]);
-        let r = provider(&http)
-            .generate(
-                SpeechRequest::new("hi")
-                    .with_voice(Voice::id("abc123"))
-                    .with_language("pl")
-                    .with_speed(1.1),
-            )
+        let r = SpeechGenerator::from_provider(provider(&http))
+            .generate("hi")
+            .with_voice("abc123")
+            .with_language("pl")
+            .with_speed(1.1)
             .await
             .unwrap();
         let req = http.request(0);
@@ -477,6 +648,7 @@ mod tests {
             })
         );
         assert_eq!(r.audio.content_type, "audio/mpeg");
+        assert_eq!(r.model.as_deref(), Some("eleven_v4"));
     }
 
     #[tokio::test]
@@ -489,12 +661,10 @@ mod tests {
         ];
         for (format, query, content_type, rate) in cases {
             let http = MockHttp::new(vec![audio()]);
-            let r = provider(&http)
-                .generate(
-                    SpeechRequest::new("hi")
-                        .with_voice(Voice::id("v"))
-                        .with_format(format),
-                )
+            let r = SpeechGenerator::from_provider(provider(&http))
+                .generate("hi")
+                .with_voice("v")
+                .with_format(format)
                 .await
                 .unwrap();
             assert!(
@@ -507,12 +677,10 @@ mod tests {
         }
         for format in [AudioFormat::Flac, AudioFormat::Aac] {
             let http = MockHttp::new(vec![]);
-            let err = provider(&http)
-                .generate(
-                    SpeechRequest::new("hi")
-                        .with_voice(Voice::id("v"))
-                        .with_format(format),
-                )
+            let err = SpeechGenerator::from_provider(provider(&http))
+                .generate("hi")
+                .with_voice("v")
+                .with_format(format)
                 .await
                 .unwrap_err();
             assert!(matches!(err, AudioError::Unsupported(_)));
@@ -523,13 +691,10 @@ mod tests {
     #[tokio::test]
     async fn the_output_format_override_wins_and_sets_the_type() {
         let http = MockHttp::new(vec![audio()]);
-        let r = provider(&http)
-            .with_output_format("pcm_16000")
-            .generate(
-                SpeechRequest::new("hi")
-                    .with_voice(Voice::id("v"))
-                    .with_format(AudioFormat::Mp3),
-            )
+        let r = SpeechGenerator::from_provider(provider(&http).with_output_format("pcm_16000"))
+            .generate("hi")
+            .with_voice("v")
+            .with_format(AudioFormat::Mp3)
             .await
             .unwrap();
         assert!(http.request(0).url.ends_with("?output_format=pcm_16000"));
@@ -540,11 +705,9 @@ mod tests {
     #[tokio::test]
     async fn unsafe_voice_ids_are_rejected_before_sending() {
         let http = MockHttp::new(vec![]);
+        let generator = SpeechGenerator::from_provider(provider(&http));
         for id in ["../../v1/voices/x", "a/b", "a b", "..", ""] {
-            let err = provider(&http)
-                .generate(SpeechRequest::new("hi").with_voice(Voice::id(id)))
-                .await
-                .unwrap_err();
+            let err = generator.generate("hi").with_voice(id).await.unwrap_err();
             assert!(matches!(err, AudioError::InvalidRequest(_)), "{id}");
         }
         assert_eq!(http.request_count(), 0);
@@ -553,8 +716,8 @@ mod tests {
     #[tokio::test]
     async fn a_missing_voice_is_an_error() {
         let http = MockHttp::new(vec![]);
-        let err = provider(&http)
-            .generate(SpeechRequest::new("hi"))
+        let err = SpeechGenerator::from_provider(provider(&http))
+            .generate("hi")
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::MissingVoice));
@@ -630,7 +793,8 @@ mod tests {
             json_response(
                 200,
                 json!({
-                    "voices": [{"voice_id": "v1", "name": "A", "category": "cloned", "description": "d"}],
+                    "voices": [{"voice_id": "v1", "name": "A", "category": "cloned", "description": "d",
+                                "preview_url": "https://cdn.test/v1.mp3"}],
                     "has_more": true, "next_page_token": "a+b"
                 }),
             ),
@@ -654,10 +818,10 @@ mod tests {
         assert_eq!(
             voices,
             [
-                VoiceInfo::new("v1", "A")
+                VoiceInfo::new("v1", "A", VoiceOrigin::Account)
                     .with_description("d")
-                    .with_cloned(true),
-                VoiceInfo::new("v2", "B"),
+                    .with_preview(Media::from_url("audio/mpeg", "https://cdn.test/v1.mp3")),
+                VoiceInfo::new("v2", "B", VoiceOrigin::Preset),
             ]
         );
     }
@@ -668,13 +832,21 @@ mod tests {
             200,
             json!([
                 {"model_id": "eleven_v4", "name": "V4", "can_do_text_to_speech": true},
+                {"model_id": "eleven_v3", "name": "Server v3", "can_do_text_to_speech": true},
+                {"model_id": "eleven_x", "can_do_text_to_speech": true},
                 {"model_id": "scribe", "can_do_text_to_speech": false}
             ]),
         )]);
         let models = provider(&http).list_models().await.unwrap();
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].model, "elevenlabs::eleven_v4");
+        assert_eq!(models.len(), 3);
         assert_eq!(models[0].id, "eleven_v4");
+        assert_eq!(models[0].name, "V4");
+        assert!(models[0].dialogue);
+        assert_eq!(models[1].id, "eleven_v3");
+        assert_eq!(models[1].name, "Server v3");
+        assert!(models[1].dialogue);
+        assert_eq!(models[2].id, "eleven_x");
+        assert!(models[2].speech && !models[2].dialogue);
         assert_eq!(http.request(0).url, "https://api.test/v1/models");
     }
 
@@ -704,8 +876,10 @@ mod tests {
                 "media_type": "audio/mpeg", "duration_secs": 2.0, "language": "en"}],
                 "text": "Hello there"}),
         )]);
-        let previews = provider(&http)
-            .design_voice("warm low voice", Some("Hello there"), 3)
+        let previews = SpeechGenerator::from_provider(designer(&http))
+            .design_voice("warm low voice")
+            .with_text("Hello there")
+            .with_count(3)
             .await
             .unwrap();
         let req = http.request(0);
@@ -713,7 +887,8 @@ mod tests {
         assert_eq!(req.header("xi-api-key"), Some("key"));
         assert_eq!(
             body_json(&req),
-            json!({"voice_description": "warm low voice", "text": "Hello there"})
+            json!({"voice_description": "warm low voice", "model_id": "eleven_ttv_v3",
+                   "text": "Hello there"})
         );
         assert_eq!(
             previews,
@@ -726,10 +901,14 @@ mod tests {
     #[tokio::test]
     async fn design_voice_without_text_auto_generates_it() {
         let http = MockHttp::new(vec![json_response(200, json!({"previews": []}))]);
-        provider(&http).design_voice("warm", None, 1).await.unwrap();
+        SpeechGenerator::from_provider(designer(&http))
+            .design_voice("warm")
+            .await
+            .unwrap();
         assert_eq!(
             body_json(&http.request(0)),
-            json!({"voice_description": "warm", "auto_generate_text": true})
+            json!({"voice_description": "warm", "model_id": "eleven_ttv_v3",
+                   "auto_generate_text": true})
         );
     }
 

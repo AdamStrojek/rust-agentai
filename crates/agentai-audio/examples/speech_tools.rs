@@ -1,23 +1,28 @@
 //! An agent that speaks texts with `generate_speech`, with the audio kept in `audio/`.
 //!
 //! ```bash
-//! OPENAI_API_KEY=<your key> AGENTAI_SPEECH_VOICE=alloy cargo run -p agentai-audio --example speech_tools
+//! OPENAI_API_KEY=<your key> AGENTAI_SPEECH_VOICE=alloy \
+//!     cargo run -p agentai-audio --example speech_tools
 //! # A local oMLX server (OMLX_ENDPOINT, OMLX_API_KEY)
-//! AGENTAI_SPEECH_MODEL=omlx::mlx-community/VoxCPM2-8bit \
+//! AGENTAI_SPEECH_PROVIDER=omlx AGENTAI_SPEECH_MODEL=mlx-community/VoxCPM2-8bit \
 //!     cargo run -p agentai-audio --example speech_tools
 //! ```
 //!
-//! `AGENTAI_SPEECH_VOICE` is the default voice ID, used when the model gives no `voice`. OpenAI and
-//! ElevenLabs need one (without it `generate_speech` fails); oMLX does not.
+//! - `AGENTAI_MODEL`: the agent's model (default `claude-haiku-5-5`). It does not need to hear
+//!   audio, because `generate_speech` answers with metadata (ID, type, size) only.
+//! - `AGENTAI_SPEECH_PROVIDER`: `openai` (default), `elevenlabs`, `fishaudio` or `omlx`.
+//! - `AGENTAI_SPEECH_MODEL`: the speech model (default `gpt-4o-mini-tts`; set it with any other
+//!   provider).
+//! - `AGENTAI_SPEECH_VOICE`: a voice ID the prompt asks the model to use. OpenAI and ElevenLabs
+//!   need a voice: without one in the prompt the model may leave `voice` out, and
+//!   `generate_speech` fails with an error the model reads.
 //!
-//! The agent's model comes from `AGENTAI_MODEL` (default `claude-haiku-5-5`); it does not need to
-//! hear audio, because `generate_speech` answers with metadata (ID, type, size) only. The voice
-//! tools never clone voices: `create_voice` stays in your code.
+//! The voice tools never clone voices: `create_voice` stays in your code.
 
 use agentai::tool::ToolBoxSet;
 use agentai::{Agent, Media, MediaSource};
 use agentai_audio::storage::{MediaRead, MediaSave, StorageError};
-use agentai_audio::{SpeechGenerator, SpeechToolBox, Voice, base64, mime};
+use agentai_audio::{SpeechGenerator, SpeechToolBox, base64, mime, speech_provider};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -63,18 +68,22 @@ impl MediaRead for DirStorage {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let model = std::env::var("AGENTAI_MODEL").unwrap_or_else(|_| "claude-haiku-5-5".to_string());
-    let speech_model = std::env::var("AGENTAI_SPEECH_MODEL")
-        .unwrap_or_else(|_| "openai::gpt-4o-mini-tts".to_string());
+    let speech_provider_name =
+        std::env::var("AGENTAI_SPEECH_PROVIDER").unwrap_or_else(|_| "openai".to_string());
+    let speech_model =
+        std::env::var("AGENTAI_SPEECH_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".to_string());
     std::fs::create_dir_all("audio")?;
     let storage = Arc::new(DirStorage {
         dir: PathBuf::from("audio"),
         count: AtomicUsize::new(0),
     });
 
-    let mut generator = SpeechGenerator::new(&speech_model)?;
-    if let Ok(voice) = std::env::var("AGENTAI_SPEECH_VOICE") {
-        generator = generator.with_default_voice(Voice::id(voice));
-    }
+    let generator =
+        SpeechGenerator::new(speech_provider(speech_provider_name, speech_model).build()?);
+    let voice = match std::env::var("AGENTAI_SPEECH_VOICE") {
+        Ok(voice) => format!(" with the voice {voice}"),
+        Err(_) => String::new(),
+    };
     let mut tools = ToolBoxSet::new();
     tools.add_tool(SpeechToolBox::new(generator, storage));
     let agent = Agent::new(
@@ -84,10 +93,10 @@ async fn main() -> anyhow::Result<()> {
     .with_toolbox(tools);
 
     let result = agent
-        .run::<String>(
-            "Say 'Welcome aboard, the show starts in five minutes' in a calm voice and name the file welcome. \
-             Then tell me the ID of the audio file.",
-        )
+        .run::<String>(format!(
+            "Say 'Welcome aboard, the show starts in five minutes' in a calm voice{voice} and name the file welcome. \
+             Then tell me the ID of the audio file."
+        ))
         .await?;
     println!("{}", result.answer);
     Ok(())
