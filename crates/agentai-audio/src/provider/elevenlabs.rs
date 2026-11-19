@@ -275,6 +275,9 @@ impl SpeechProvider for ElevenLabsProvider {
             .as_deref()
             .ok_or(AudioError::MissingModel("dialogue"))?;
         request.without_timestamps()?;
+        if request.speed().is_some() {
+            return Err(AudioError::Unsupported("speed in ElevenLabs dialogues"));
+        }
         let model = request.model().unwrap_or(default_model);
         let output_format = self.output_format_of(request.format())?;
         let mut url = format!("{}/v1/text-to-dialogue", self.base_url);
@@ -605,7 +608,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_dialogue_without_a_dialogue_model_or_with_timestamps_sends_nothing() {
+    async fn a_dialogue_without_a_dialogue_model_or_with_timestamps_or_speed_sends_nothing() {
         let http = MockHttp::new(vec![]);
         let err = SpeechGenerator::from_provider(provider(&http))
             .generate_dialogue([DialogueTurn::new("a", "Hi")])
@@ -621,6 +624,12 @@ mod tests {
         let err = SpeechGenerator::from_provider(dialogue_provider(&http))
             .generate_dialogue([DialogueTurn::new("a", "Hi")])
             .with_timestamps(true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::Unsupported(_)));
+        let err = SpeechGenerator::from_provider(dialogue_provider(&http))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .with_speed(1.5)
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::Unsupported(_)));
