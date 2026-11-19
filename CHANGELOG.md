@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.2...agentai-v0.7.3) - 2026-11-19
+
+### New features
+- *(audio)* set the speaking speed of a dialogue ([#100](https://github.com/AdamStrojek/rust-agentai/pull/100)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.7.2](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.1...agentai-v0.7.2) - 2026-11-19
 
 ### Breaking changes
