@@ -281,7 +281,6 @@ impl<'a> DialogueRequest<'a> {
     }
 
     /// Fails for a request with timestamps, for providers that cannot give them.
-    #[expect(dead_code, reason = "no provider speaks dialogues yet")]
     pub(crate) fn without_timestamps(&self) -> Result<(), AudioError> {
         without_timestamps(self.timestamps)
     }
