@@ -60,6 +60,9 @@ This library is under heavy development. The interface may change at any time wi
   knows with what each can do (speech, dialogue, voice design), for example for a model picker.
 - **Where a voice comes from**: `VoiceInfo::origin` is `Preset`, `Account` or `Store`, so a voice picker
   can show the account voices and the `VoiceStore` voices of Fish Audio in separate sections.
+- **Voice previews**: `VoiceInfo::preview` is a recording to play: the ElevenLabs `preview_url`, the
+  first sample of a Fish Audio voice model (when its server gives a full URL) or the sample of a
+  `VoiceStore` voice. The `list_voices` tool never sends it to the model.
 
 **Breaking changes** (all in `agentai-audio`; released as a patch while the audio interface is reworked):
 `SpeechGenerator::new` takes a provider from `speech_provider(..).build()?`, `generate_with` and

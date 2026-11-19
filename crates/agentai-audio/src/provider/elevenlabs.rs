@@ -434,11 +434,12 @@ impl SpeechProvider for ElevenLabsProvider {
                     Some("premade") => VoiceOrigin::Preset,
                     _ => VoiceOrigin::Account,
                 };
-                let info = VoiceInfo::new(voice.voice_id, voice.name, origin);
-                match voice.description {
-                    Some(description) => info.with_description(description),
-                    None => info,
-                }
+                let mut info = VoiceInfo::new(voice.voice_id, voice.name, origin);
+                info.description = voice.description;
+                info.preview = voice
+                    .preview_url
+                    .map(|url| Media::from_url("audio/mpeg", url));
+                info
             }));
             match page.next_page_token {
                 Some(next) if page.has_more && token.as_ref() != Some(&next) => token = Some(next),
@@ -522,6 +523,7 @@ struct VoiceEntry {
     name: String,
     category: Option<String>,
     description: Option<String>,
+    preview_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -791,7 +793,8 @@ mod tests {
             json_response(
                 200,
                 json!({
-                    "voices": [{"voice_id": "v1", "name": "A", "category": "cloned", "description": "d"}],
+                    "voices": [{"voice_id": "v1", "name": "A", "category": "cloned", "description": "d",
+                                "preview_url": "https://cdn.test/v1.mp3"}],
                     "has_more": true, "next_page_token": "a+b"
                 }),
             ),
@@ -815,7 +818,9 @@ mod tests {
         assert_eq!(
             voices,
             [
-                VoiceInfo::new("v1", "A", VoiceOrigin::Account).with_description("d"),
+                VoiceInfo::new("v1", "A", VoiceOrigin::Account)
+                    .with_description("d")
+                    .with_preview(Media::from_url("audio/mpeg", "https://cdn.test/v1.mp3")),
                 VoiceInfo::new("v2", "B", VoiceOrigin::Preset),
             ]
         );

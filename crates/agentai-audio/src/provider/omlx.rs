@@ -16,8 +16,8 @@
 //! accept comes back as [`AudioError::Api`].
 
 use super::{
-    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoiceOrigin,
-    VoicePreview, VoiceSource, audio_media,
+    AudioError, AudioFormat, SpeechProvider, SpeechResponse, VoiceId, VoiceInfo, VoicePreview,
+    VoiceSource, audio_media,
 };
 use crate::request::{DesignVoiceRequest, SpeechRequest};
 use crate::voice_store::{StoredVoice, VoiceStore};
@@ -325,11 +325,7 @@ impl SpeechProvider for OmlxProvider {
             .list()
             .await?
             .into_iter()
-            .map(|(id, voice)| {
-                let mut info = VoiceInfo::new(id, voice.name, VoiceOrigin::Store);
-                info.description = voice.description;
-                info
-            })
+            .map(|(id, voice)| voice.into_info(id))
             .collect())
     }
 }
@@ -337,6 +333,7 @@ impl SpeechProvider for OmlxProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::VoiceOrigin;
     use crate::provider::{AudioError, SpeechProvider, VoiceInfo};
     use crate::{MemoryVoiceStore, SpeechGenerator, VoiceStore};
     use agentai_core::HttpResponse;
@@ -556,7 +553,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             p.list_voices().await.unwrap(),
-            vec![VoiceInfo::new("voice-1", "Adam", VoiceOrigin::Store).with_description("calm")]
+            vec![
+                VoiceInfo::new("voice-1", "Adam", VoiceOrigin::Store)
+                    .with_description("calm")
+                    .with_preview(sample())
+            ]
         );
     }
 

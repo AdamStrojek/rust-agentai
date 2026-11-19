@@ -478,11 +478,10 @@ impl SpeechProvider for FishAudioProvider {
                 .map_err(|e| AudioError::InvalidResponse(e.to_string()))?;
             let empty = page.items.is_empty();
             voices.extend(page.items.into_iter().map(|model| {
-                let info = VoiceInfo::new(model.id, model.title, VoiceOrigin::Account);
-                match model.description.filter(|d| !d.is_empty()) {
-                    Some(description) => info.with_description(description),
-                    None => info,
-                }
+                let mut info = VoiceInfo::new(model.id, model.title, VoiceOrigin::Account);
+                info.description = model.description.filter(|d| !d.is_empty());
+                info.preview = model_preview(model.samples);
+                info
             }));
             let done = empty
                 || page.has_more == Some(false)
@@ -492,11 +491,13 @@ impl SpeechProvider for FishAudioProvider {
             }
         }
         if let Some(store) = &self.store {
-            voices.extend(store.list().await?.into_iter().map(|(id, voice)| {
-                let mut info = VoiceInfo::new(id, voice.name, VoiceOrigin::Store);
-                info.description = voice.description;
-                info
-            }));
+            voices.extend(
+                store
+                    .list()
+                    .await?
+                    .into_iter()
+                    .map(|(id, voice)| voice.into_info(id)),
+            );
         }
         Ok(voices)
     }
@@ -614,6 +615,28 @@ struct ModelEntry {
     #[serde(default)]
     title: String,
     description: Option<String>,
+    #[serde(default)]
+    samples: Vec<ModelSample>,
+}
+
+#[derive(Deserialize)]
+struct ModelSample {
+    audio: String,
+}
+
+/// The first sample of a voice model that can be played: a full URL. Self-hosted servers may
+/// give a path that is not served.
+fn model_preview(samples: Vec<ModelSample>) -> Option<Media> {
+    samples
+        .into_iter()
+        .map(|sample| sample.audio)
+        .find(|audio| audio.starts_with("http://") || audio.starts_with("https://"))
+        .map(|url| {
+            Media::from_url(
+                agentai_core::mime::from_path(&url).unwrap_or("audio/mpeg"),
+                url,
+            )
+        })
 }
 
 #[cfg(test)]
@@ -923,11 +946,15 @@ mod tests {
             json_response(
                 200,
                 json!({"total": 2, "has_more": true,
-                       "items": [{"_id": "m1", "title": "A", "description": ""}]}),
+                       "items": [{"_id": "m1", "title": "A", "description": "",
+                                  "samples": [{"title": "s", "text": "t", "task_id": "x",
+                                               "audio": "https://cdn.test/m1.wav"}]}]}),
             ),
             json_response(
                 200,
-                json!({"total": 2, "items": [{"_id": "m2", "title": "B", "description": "d"}]}),
+                json!({"total": 2, "items": [{"_id": "m2", "title": "B", "description": "d",
+                                              "samples": [{"title": "s", "text": "t", "task_id": "y",
+                                                           "audio": "samples/0.wav"}]}]}),
             ),
         ]);
         let voices = provider(&http)
@@ -943,9 +970,12 @@ mod tests {
         assert_eq!(
             voices,
             [
-                VoiceInfo::new("m1", "A", VoiceOrigin::Account),
+                VoiceInfo::new("m1", "A", VoiceOrigin::Account)
+                    .with_preview(Media::from_url("audio/wav", "https://cdn.test/m1.wav")),
+                // A path a self-hosted server does not serve is no preview
                 VoiceInfo::new("m2", "B", VoiceOrigin::Account).with_description("d"),
-                VoiceInfo::new("voice-1", "Ala", VoiceOrigin::Store),
+                VoiceInfo::new("voice-1", "Ala", VoiceOrigin::Store)
+                    .with_preview(Media::from_bytes("audio/wav", b"WAV")),
             ]
         );
     }

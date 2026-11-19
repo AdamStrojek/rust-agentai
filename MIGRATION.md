@@ -167,7 +167,7 @@ for model in SpeechProviderKind::ElevenLabs.known_models() {
 `Account` (a voice of your account on the provider's server) or `Store` (a voice of the
 `VoiceStore`). Fish Audio lists both its account voices and its store voices, so `origin` tells
 them apart. `VoiceInfo::new` takes the origin, and the `list_voices` tool reports it as `"origin"`
-instead of `"cloned"`.
+instead of `"cloned"`. The new `preview` holds a recording to play, when there is one.
 
 ```rust,ignore
 // 0.7.1

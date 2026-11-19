@@ -227,6 +227,10 @@ pub struct VoiceInfo {
     pub description: Option<String>,
     /// Where the voice comes from.
     pub origin: VoiceOrigin,
+    /// A recording of the voice to play, when the provider has one. It is never sent to a model
+    /// by the `list_voices` tool.
+    #[serde(skip)]
+    pub preview: Option<Media>,
 }
 
 /// Where a [`VoiceInfo`] comes from.
@@ -250,7 +254,14 @@ impl VoiceInfo {
             name: name.into(),
             description: None,
             origin,
+            preview: None,
         }
+    }
+
+    /// Sets the recording of the voice to play.
+    pub fn with_preview(mut self, preview: Media) -> Self {
+        self.preview = Some(preview);
+        self
     }
 
     /// Sets the description.

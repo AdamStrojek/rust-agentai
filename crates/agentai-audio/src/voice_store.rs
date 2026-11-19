@@ -1,6 +1,6 @@
 //! Storage for cloned voices, for providers that keep the sample themselves.
 
-use crate::provider::VoiceId;
+use crate::provider::{VoiceId, VoiceInfo, VoiceOrigin};
 use agentai_core::message::Media;
 use agentai_core::storage::StorageError;
 use async_trait::async_trait;
@@ -41,6 +41,15 @@ impl StoredVoice {
     pub fn with_transcript(mut self, transcript: impl Into<String>) -> Self {
         self.transcript = Some(transcript.into());
         self
+    }
+}
+
+impl StoredVoice {
+    /// The voice as [`VoiceInfo`], with its sample as the preview.
+    pub(crate) fn into_info(self, id: VoiceId) -> VoiceInfo {
+        let mut info = VoiceInfo::new(id, self.name, VoiceOrigin::Store).with_preview(self.sample);
+        info.description = self.description;
+        info
     }
 }
 
