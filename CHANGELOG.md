@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.1...agentai-v0.7.2) - 2026-11-19
+
+### New features
+- *(audio)* dialogues, per-engine models and a provider builder; Fish Audio sends either voice IDs or samples ([#98](https://github.com/AdamStrojek/rust-agentai/pull/98)) (by @AdamStrojek)
+
+### Contributors
+
+* @AdamStrojek
+
 ## [0.7.1](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.0...agentai-v0.7.1) - 2026-11-18
 
 ### Breaking changes
