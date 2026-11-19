@@ -285,13 +285,11 @@ impl SpeechProvider for ElevenLabsProvider {
         let inputs = request
             .turns()
             .iter()
-            .map(|(speaker, text)| {
-                let voice_id = request.voices().get(*speaker).ok_or_else(|| {
-                    AudioError::InvalidRequest(format!("no voice for speaker {speaker}"))
-                })?;
-                Ok(DialogueInput { text, voice_id })
+            .map(|(speaker, text)| DialogueInput {
+                text,
+                voice_id: &request.voices()[*speaker],
             })
-            .collect::<Result<Vec<_>, AudioError>>()?;
+            .collect();
         let body = DialogueBody {
             inputs,
             model_id: model,
@@ -607,6 +605,12 @@ mod tests {
         let http = MockHttp::new(vec![]);
         let err = SpeechGenerator::from_provider(provider(&http))
             .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AudioError::MissingModel("dialogue")));
+        let err = SpeechGenerator::from_provider(provider(&http))
+            .generate_dialogue([DialogueTurn::new("a", "Hi")])
+            .with_model("eleven_v3")
             .await
             .unwrap_err();
         assert!(matches!(err, AudioError::MissingModel("dialogue")));
