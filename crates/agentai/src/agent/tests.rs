@@ -1,6 +1,6 @@
 use super::*;
 use crate::listener::{EventListener, ListenerError, Printer, RunEvent};
-use crate::message::{Message, ToolCall};
+use crate::message::{Message, Part, ToolCall};
 use crate::tool::{Tool, ToolOutput, ToolResult, ToolReturn};
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -68,11 +68,12 @@ impl MockLlm {
                         .unwrap()
                         .pop_front()
                         .expect("mock LLM has no more responses");
-                    let content_type = if payload.starts_with("data:") {
-                        "text/event-stream"
-                    } else {
-                        "application/json"
-                    };
+                    let content_type =
+                        if payload.starts_with("data:") || payload.starts_with("event:") {
+                            "text/event-stream"
+                        } else {
+                            "application/json"
+                        };
                     let response = format!(
                         "HTTP/1.1 {status} Mock\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
                         payload.len()
@@ -94,6 +95,12 @@ impl MockLlm {
         Agent::from_client(openai_client(&self.base_url), "m", "system")
     }
 
+    /// Agent that speaks the Anthropic Messages API to the mock.
+    fn anthropic_agent(&self) -> Agent {
+        let client = client_for(genai::adapter::AdapterKind::Anthropic, &self.base_url);
+        Agent::from_client(client, "m", "system")
+    }
+
     fn requests(&self) -> Vec<String> {
         self.requests.lock().unwrap().clone()
     }
@@ -110,13 +117,17 @@ impl MockLlm {
 
 /// Client that sends every model name to `base_url` with the OpenAI Chat Completions API.
 fn openai_client(base_url: &str) -> Client {
-    use genai::adapter::AdapterKind;
+    client_for(genai::adapter::AdapterKind::OpenAI, base_url)
+}
+
+/// Client that sends every model name to `base_url` with the API of `kind`.
+fn client_for(kind: genai::adapter::AdapterKind, base_url: &str) -> Client {
     use genai::resolver::{AuthData, Endpoint};
     crate::tls::install_crypto_provider();
     Client::builder()
-        .with_adapter_kind(AdapterKind::OpenAI)
+        .with_adapter_kind(kind)
         .append_provider_config(
-            AdapterKind::OpenAI,
+            kind,
             (
                 Endpoint::from_owned(base_url.to_string()),
                 AuthData::from_single("test-key"),
@@ -726,6 +737,110 @@ async fn stream_sends_deltas_tool_events_and_the_result() {
     assert_eq!(result.new_messages.len(), 4);
     assert_eq!(result.usage.total_tokens, 4);
     assert_eq!(request_json(&llm, 0)["stream"], json!(true));
+}
+
+/// Anthropic SSE reply: one signed thinking block, then the text answer, no tool calls.
+fn anthropic_streamed_thinking_reply(thinking: &str, signature: &str, text: &str) -> (u16, String) {
+    let events = [
+        (
+            "message_start",
+            json!({ "type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant", "model": "m", "content": [],
+                "usage": { "input_tokens": 1, "output_tokens": 1 }
+            }}),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0,
+                "content_block": { "type": "thinking", "thinking": "", "signature": "" } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "thinking_delta", "thinking": thinking } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "signature_delta", "signature": signature } }),
+        ),
+        (
+            "content_block_stop",
+            json!({ "type": "content_block_stop", "index": 0 }),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 1,
+                "content_block": { "type": "text", "text": "" } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 1,
+                "delta": { "type": "text_delta", "text": text } }),
+        ),
+        (
+            "content_block_stop",
+            json!({ "type": "content_block_stop", "index": 1 }),
+        ),
+        (
+            "message_delta",
+            json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" },
+                "usage": { "output_tokens": 2 } }),
+        ),
+        ("message_stop", json!({ "type": "message_stop" })),
+    ];
+    let mut body = String::new();
+    for (event, data) in events {
+        body.push_str(&format!("event: {event}\ndata: {data}\n\n"));
+    }
+    (200, body)
+}
+
+#[tokio::test]
+async fn streamed_final_answer_keeps_its_signed_thinking() {
+    let llm = MockLlm::start(vec![
+        anthropic_streamed_thinking_reply("Let me think.", "sig-1", "Hello"),
+        anthropic_streamed_thinking_reply("Again.", "sig-2", "Bye"),
+    ])
+    .await;
+    let agent = llm.anthropic_agent();
+
+    let first = agent
+        .run_stream::<String>("question")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    assert_eq!(first.answer, "Hello");
+    assert_eq!(
+        first.new_messages.last().unwrap().parts,
+        vec![
+            Part::ReasoningSignature("sig-1".into()),
+            Part::Reasoning("Let me think.".into()),
+            Part::Text("Hello".into()),
+        ]
+    );
+
+    // The next run sends the final answer back with its signed thinking block
+    let mut history = vec![Message::user("question")];
+    history.extend(first.new_messages.iter().skip(1).cloned());
+    agent
+        .run_stream::<String>("next")
+        .with_history(&history)
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    let request = request_json(&llm, 1);
+    assert_eq!(
+        request["messages"][1]["content"],
+        json!([
+            { "type": "thinking", "thinking": "Let me think.", "signature": "sig-1" },
+            { "type": "text", "text": "Hello" }
+        ])
+    );
 }
 
 #[tokio::test]

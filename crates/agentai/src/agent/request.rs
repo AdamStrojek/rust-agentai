@@ -108,15 +108,18 @@ pub struct AgentResult<D> {
     /// The final answer, parsed into `D`.
     pub answer: D,
     /// The messages added in this run, in order: your prompt, the model's tool calls, the tool
-    /// results and the final answer. The history you passed and the system prompt are not
-    /// included. Append them to your history to continue the conversation:
+    /// results and the final answer. Assistant messages keep the reasoning the model returned,
+    /// signed thinking blocks included, so the final answer can be sent back as it is. The
+    /// history you passed and the system prompt are not included. Append them to your history
+    /// to continue the conversation:
     /// `history.extend(result.new_messages)`.
     pub new_messages: Vec<Message>,
     /// Tokens used by all model calls of the run together.
     pub usage: Usage,
     /// Why the model stopped writing the final answer.
     pub stop_reason: Option<StopReason>,
-    /// Reasoning the model returned with the final answer, if the provider sends it.
+    /// Reasoning the model returned with the final answer, if the provider sends it. The last
+    /// message of `new_messages` already holds it: do not add it to the history again.
     pub reasoning_content: Option<String>,
     /// Number of model calls made in the run.
     pub iterations: usize,
