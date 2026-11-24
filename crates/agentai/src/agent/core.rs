@@ -9,7 +9,7 @@ use crate::tool::{DeferredTask, DeferredTaskHandle, ToolBox, ToolOutput, ToolRet
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt, pin_mut};
 use genai::Client;
-use genai::chat::{ChatRequest, ChatStreamEvent, JsonSpec, StreamEnd};
+use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent, JsonSpec, MessageContent, StreamEnd};
 use log::{debug, trace};
 use schemars::{JsonSchema, schema_for};
 use serde::de::DeserializeOwned;
@@ -36,9 +36,10 @@ pub(super) struct ResolvedRun {
 /// One model call, reduced to what the loop needs.
 struct Step {
     tool_calls: Vec<ToolCall>,
-    /// Assistant message to store when the model asked for tools. Keeps text, reasoning and
-    /// provider continuation data next to the tool calls.
-    tool_use_message: Message,
+    /// The assistant message to store, with text, reasoning (signed thinking blocks included),
+    /// provider continuation data and tool calls in the order genai gives them.
+    message: Message,
+    /// Text parts of the answer, empty when the model asked for tools.
     texts: Vec<String>,
     usage: Usage,
     stop_reason: Option<StopReason>,
@@ -172,7 +173,7 @@ where
             // Some models return text (e.g. "Let me check...") together with tool calls; the
             // tool calls win.
             if !step.tool_calls.is_empty() {
-                new_messages.push(step.tool_use_message);
+                new_messages.push(step.message);
                 let mut fatal: Option<AgentError> = None;
                 for tool_call in step.tool_calls {
                     if fatal.is_some() {
@@ -219,7 +220,7 @@ where
             // Structured output may be split across several text parts
             let raw = step.texts.join("");
             debug!("Agent Answer: {raw}");
-            new_messages.push(Message::assistant(raw.clone()));
+            new_messages.push(step.message);
             let answer = parse_answer::<D>(raw, is_answer_string)?;
             yield AgentEvent::Finished(AgentResult {
                 answer,
@@ -317,18 +318,11 @@ async fn exec_step(
     let usage = Usage::from_genai(&resp.usage);
     let stop_reason = resp.stop_reason.clone().map(StopReason::from_genai);
     let reasoning_content = resp.reasoning_content.clone();
-    let (tool_use_message, texts) = if tool_calls.is_empty() {
-        (
-            Message::new(Role::Assistant, Vec::new()),
-            resp.content.into_texts(),
-        )
-    } else {
-        let message = resp.into_assistant_message_for_tool_use();
-        (tool_use_message(message, &tool_calls), Vec::new())
-    };
+    let (message, texts) =
+        assistant_message(Some(resp.content), reasoning_content.clone(), &tool_calls);
     Ok(Step {
         tool_calls,
-        tool_use_message,
+        message,
         texts,
         usage,
         stop_reason,
@@ -336,16 +330,31 @@ async fn exec_step(
     })
 }
 
-/// The assistant message that holds the tool calls. genai builds it with the text, reasoning and
-/// provider data of the answer; if it does not, the tool calls alone keep the conversation valid.
-fn tool_use_message(message: Option<genai::chat::ChatMessage>, tool_calls: &[ToolCall]) -> Message {
-    match message {
-        Some(message) => Message::from_genai(message),
-        None => Message::new(
-            Role::Assistant,
-            tool_calls.iter().cloned().map(Part::ToolCall).collect(),
-        ),
+/// The assistant message of one model answer and, for an answer without tool calls, its text
+/// parts. The message keeps every part genai captured (signed thinking blocks, provider data,
+/// text, tool calls) in its order, as `into_assistant_message_for_tool_use` does for tool calls,
+/// so that a final answer can be sent back with its thinking. Without captured content, the tool
+/// calls alone keep the conversation valid.
+fn assistant_message(
+    content: Option<MessageContent>,
+    reasoning_content: Option<String>,
+    tool_calls: &[ToolCall],
+) -> (Message, Vec<String>) {
+    let Some(content) = content else {
+        let parts = tool_calls.iter().cloned().map(Part::ToolCall).collect();
+        return (Message::new(Role::Assistant, parts), Vec::new());
+    };
+    let texts = if tool_calls.is_empty() {
+        content.texts().into_iter().map(str::to_string).collect()
+    } else {
+        Vec::new()
+    };
+    let contains_reasoning = content.contains_reasoning_content();
+    let mut message = ChatMessage::assistant(content);
+    if !contains_reasoning {
+        message = message.with_reasoning_content(reasoning_content);
     }
+    (Message::from_genai(message), texts)
 }
 
 /// Builds a step from the end of a streamed answer.
@@ -367,18 +376,11 @@ fn step_from_stream_end(end: StreamEnd) -> Step {
         .unwrap_or_default();
     let stop_reason = end.captured_stop_reason.clone().map(StopReason::from_genai);
     let reasoning_content = end.captured_reasoning_content.clone();
-    let (tool_use_message, texts) = if tool_calls.is_empty() {
-        (
-            Message::new(Role::Assistant, Vec::new()),
-            end.into_texts().unwrap_or_default(),
-        )
-    } else {
-        let message = end.into_assistant_message_for_tool_use();
-        (tool_use_message(message, &tool_calls), Vec::new())
-    };
+    let (message, texts) =
+        assistant_message(end.captured_content, reasoning_content.clone(), &tool_calls);
     Step {
         tool_calls,
-        tool_use_message,
+        message,
         texts,
         usage,
         stop_reason,
