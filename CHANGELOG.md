@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.5](https://github.com/AdamStrojek/rust-agentai/compare/agentai-v0.7.4...agentai-v0.7.5) - 2026-11-24
 
 ### Fixes
-- *(agent)* keep the final answer's signed thinking in new_messages ([#105](https://github.com/AdamStrojek/rust-agentai/pull/105)) (by @AdamStrojek)
+- *(agent)* the final answer in `AgentResult::new_messages` keeps its thinking blocks and their signatures before the text, in `run` and `run_stream`, so the next run sends them back; before, it held only the text. Do not add `reasoning_content` to that message yourself any more: it is there already. On OpenAI-compatible providers it is an unsigned `Part::Reasoning`, as in tool-call steps ([#105](https://github.com/AdamStrojek/rust-agentai/pull/105)) (by @AdamStrojek)
 
 ### Contributors
 

@@ -38,6 +38,15 @@ This library is under heavy development. The interface may change at any time wi
 
 ## What's New
 
+#### 0.7.5 - The final answer keeps its thinking
+
+- **Thinking survives the final answer**: on models with thinking (Anthropic adaptive or extended
+  thinking), the last message of `AgentResult::new_messages` now holds the thinking blocks with their
+  signatures before the text, in `run` and `run_stream` alike. The next run sends them back, so the model
+  keeps the thinking of its last turn. Before, that message held only the text. If you added
+  `result.reasoning_content` to it yourself, stop: it is there already, and a copy without a signature
+  cannot be sent back to Anthropic.
+
 #### 0.7.4 - Voice languages
 
 - **Design a voice in a language**: in `agentai-audio`, `design_voice(description).with_language("pl")`
